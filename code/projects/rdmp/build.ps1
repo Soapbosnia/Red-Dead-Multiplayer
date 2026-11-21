@@ -43,7 +43,13 @@ if (-not $cmake) { Fail 'cmake not found (Visual Studio component "C++ CMake too
 # --- Framework SDK cache -------------------------------------------------------------------------------------------
 # FW_SDK_CACHE_DIR holds the Framework SDK and its vcpkg checkout (downloaded there on first configure if missing).
 if (-not $env:FW_SDK_CACHE_DIR) { $env:FW_SDK_CACHE_DIR = [Environment]::GetEnvironmentVariable('FW_SDK_CACHE_DIR', 'User') }
-if (-not $env:FW_SDK_CACHE_DIR) { $env:FW_SDK_CACHE_DIR = [IO.Path]::GetFullPath((Join-Path $root '..\..\Tools\MafiaHub')) }
+# Default: Tools\MafiaHub next to the folder that holds this repository (Development\Repositories\<repo> ->
+# Development\Tools\MafiaHub).
+if (-not $env:FW_SDK_CACHE_DIR) {
+    $repoTop = (& git -C $root rev-parse --show-toplevel 2>$null)
+    if (-not $repoTop) { $repoTop = $root }
+    $env:FW_SDK_CACHE_DIR = [IO.Path]::GetFullPath((Join-Path $repoTop '..\..\Tools\MafiaHub'))
+}
 Say "Framework SDK cache: $env:FW_SDK_CACHE_DIR"
 
 # --- configure + build ---------------------------------------------------------------------------------------------

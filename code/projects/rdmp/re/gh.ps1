@@ -1,11 +1,12 @@
 # Ghidra headless helper: runs one script from re\ghidra_scripts against RDR.exe in the shared Ghidra project.
 #   re\gh.ps1 DecompileAt.java 0x14010DC10
 #   re\gh.ps1 DecompileAt.java "0x14010DC10 0x140103BA0"
-# Tools are looked up in RDMP_TOOLS (default: ..\..\Tools beside this repository, i.e. D:\Development\Tools).
+# Tools are looked up in RDMP_TOOLS (default: Tools next to the folder holding this repository, e.g. D:\Development\Tools).
 # The full log goes to re\out\<script>.log; only the script's own output is printed.
 param([Parameter(Mandatory = $true)][string]$Script, [string]$Addrs = '')
 $repo  = Split-Path $PSScriptRoot -Parent
-$tools = if ($env:RDMP_TOOLS) { $env:RDMP_TOOLS } else { [IO.Path]::GetFullPath((Join-Path $repo '..\..\Tools')) }
+$repoTop = (& git -C $repo rev-parse --show-toplevel 2>$null); if (-not $repoTop) { $repoTop = $repo }
+$tools = if ($env:RDMP_TOOLS) { $env:RDMP_TOOLS } else { [IO.Path]::GetFullPath((Join-Path $repoTop '..\..\Tools')) }
 $ghidra = Get-ChildItem $tools -Directory -Filter 'ghidra_*_PUBLIC' | Sort-Object Name | Select-Object -Last 1
 if (-not $ghidra) { throw "No ghidra_*_PUBLIC folder in $tools" }
 $jdk = Get-ChildItem $tools -Directory -Filter 'jdk-*' | Sort-Object Name | Select-Object -Last 1

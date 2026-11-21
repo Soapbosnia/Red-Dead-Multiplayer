@@ -25,7 +25,7 @@ resources written in JavaScript (server *and* client side), and an MTA-style scr
 
 Needs Visual Studio 2022+ (or Build Tools) with *Desktop development with C++* and *C++ CMake tools*.
 The Framework SDK and its vcpkg checkout live in `FW_SDK_CACHE_DIR` (set by `tools/setup_tools.bat`;
-default `..\..\Tools\MafiaHub`) and are downloaded there on the first configure if missing.
+default `Tools\MafiaHub` next to the folder holding this repository) and are downloaded there on the first configure if missing.
 
 ```
 build.bat            configure + build everything into build\bin   (log: build\build.log)

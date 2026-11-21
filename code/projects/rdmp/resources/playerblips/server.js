@@ -2,8 +2,8 @@
 // the player themselves does not (their own arrow already marks them). The blips belong to this resource, so
 // stopping it removes them all.
 
-// true while testing alone: the player also sees their own blip. Set false for real servers.
-const SHOW_OWN_BLIP = true;
+// true: the player also sees their own blip (handy when testing alone).
+const SHOW_OWN_BLIP = false;
 
 const blips = new Map(); // player -> blip
 const key = (player) => String(player);

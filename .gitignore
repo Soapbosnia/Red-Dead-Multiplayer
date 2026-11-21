@@ -48,7 +48,7 @@ CTestTestfile.cmake
 _deps
 cmake-build*
 
-code/projects
+code/projects/*
 
 vendors/cef/src
 
@@ -85,3 +85,6 @@ vcpkg_installed/
 
 # Per-machine clangd config (see AGENTS.md, Code Intelligence)
 .clangd
+
+# Red Dead Multiplayer lives in this fork (other projects stay out of tree)
+!code/projects/rdmp
