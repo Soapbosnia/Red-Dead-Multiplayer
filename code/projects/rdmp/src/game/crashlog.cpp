@@ -14,12 +14,6 @@ namespace {
 std::atomic<int> g_logged{0};
 constexpr int kMaxLogged = 12;
 
-bool InGame(DWORD64 addr) {
-    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(GameBase());
-    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(GameBase() + dos->e_lfanew);
-    return addr >= GameBase() && addr < GameBase() + nt->OptionalHeader.SizeOfImage;
-}
-
 LONG CALLBACK CrashHandler(EXCEPTION_POINTERS* ep) {
     const DWORD code = ep->ExceptionRecord->ExceptionCode;
     if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
@@ -50,7 +44,15 @@ LONG CALLBACK CrashHandler(EXCEPTION_POINTERS* ep) {
 
     CONTEXT ctx = *c;
     for (int frame = 0; frame < 20 && ctx.Rip; ++frame) {
-        Log("  #%d %p%s", frame, reinterpret_cast<void*>(ctx.Rip), InGame(ctx.Rip) ? " (RDR.exe)" : "");
+        char frameMod[MAX_PATH] = "?";
+        HMODULE fm = nullptr;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCSTR>(ctx.Rip), &fm)) {
+            GetModuleFileNameA(fm, frameMod, MAX_PATH);
+        }
+        const char* fmBase = strrchr(frameMod, '\\');
+        Log("  #%d %p (%s+0x%llx)", frame, reinterpret_cast<void*>(ctx.Rip), fmBase ? fmBase + 1 : frameMod,
+            static_cast<unsigned long long>(ctx.Rip - reinterpret_cast<DWORD64>(fm)));
         DWORD64 imageBase = 0;
         PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
         if (!fn) {

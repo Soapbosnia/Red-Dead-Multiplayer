@@ -4,6 +4,7 @@
 // normally "$/content/main" (story/front-end), or "$/content/sp_idle" when an internal mode flag is set.
 // We replace it so the game starts the script named in rdmp.ini instead.
 #include "boot.h"
+#include "autopilot.h"
 
 #include <intrin.h>
 
@@ -48,6 +49,7 @@ void InstallBootPatches(HMODULE self) {
     const std::wstring ini = IniPath(self);
     LoadSandboxConfig(ini.c_str());
     StartNetClient(ini.c_str());
+    StartAutopilot(ini.c_str());
     g_watchOnLoad = GetPrivateProfileIntW(L"debug", L"watch_player_handle", 0, ini.c_str()) != 0;
     InstallNativeHook(GetPrivateProfileIntW(L"debug", L"log_natives", 0, ini.c_str()) != 0);
     g_traceAfterPlayerCreate = GetPrivateProfileIntW(L"debug", L"trace_after_player", 0, ini.c_str()) != 0;

@@ -24,6 +24,7 @@
 #include "blips.h"
 #include "host.h"
 #include "locomotion.h"
+#include "puppet_control.h"
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
@@ -120,15 +121,8 @@ struct Puppet {
     uint32_t goh = 0;
     bool hidden = false;
     int corrections = 0;
-    bool walkIn = false;          // remote standing: puppet walking into the exact spot (0.3 m -> 0.12 m)
-    double headingOffSince = 0;   // remote standing: since when the puppet faces > 20 deg away (0 = not)
-    double standingSince = 0;     // since when the remote stands still (0 = moving)
-    Vec3 lastSet{};               // where the last nudge put the puppet
-    double lastSetMs = 0;         // when (0 = no nudge last frame)
-    double stuckSince = 0;        // remote moving, gap > 0.3 m and not shrinking: since when (0 = not)
-    float stuckErr = 0;           // the gap then
+    PuppetDrive drive;
 };
-bool g_nudge = true;  // rdmp.ini [net] puppet_nudge: pull puppets onto the network position every frame
 // rdmp.ini [net] lead_ms: velocity prediction (ms) that cancels the delay of the network position. -1 = auto (default):
 // interp_ms + the estimated sender->us delay (both pings / 2 + one server tick, see LeadMsFor).
 int g_leadMs = -1;
@@ -321,73 +315,15 @@ void EncodeDesire(const uint8_t* desire, MoveDesire& out) {
     }
 }
 
-void DecodeDesire(const MoveDesire& in, uint8_t* desire) {
-    std::memset(desire, 0, kDesireSize);
-    uint32_t* w = reinterpret_cast<uint32_t*>(desire);
-    for (int i = 0; i < in.count && i < kMaxDesireEntries; ++i)
-        if (in.idx[i] < kDesireWords) w[in.idx[i]] = in.val[i];
-}
-
-// Gait bits = low byte of desire word 0x3f (0xc22800xx): 0 standing, 1 walk, 4 sprint (captured 2026-11-20).
-uint32_t DesireGait(const MoveDesire& m) {
-    for (int i = 0; i < m.count; ++i)
-        if (m.idx[i] == 0x3f) return m.val[i] & 0xff;
-    return 0;
-}
 bool DesireMoving(const MoveDesire& m) { return (DesireGait(m) & 0x0f) != 0; }
 
 // Sync trace ([debug] net_trace=1): CSV per game copy (rdmp_trace[_N].csv) with a shared high-resolution clock, so the
-// traces of two copies on one PC can be compared (tools/sync_report.ps1):
+// traces of two copies on one PC can be compared (tools/sync_report.py):
 //   L,t_ms,x,y,z,heading,speed,moving                          (this copy's player, every frame)
-//   R,t_ms,id,tx,ty,tz,theading,px,py,pz,pheading,err,moving,tp (each remote: network target, puppet, error, teleported)
+//   R,t_ms,id,tx,ty,tz,theading,px,py,pz,pheading,err,moving,tp,pulled,transit,offset,lead (each remote: network
+//     target, puppet before this frame's correction, gap to the predicted present, teleported, soft pull applied)
 FILE* g_trace = nullptr;
 double TraceMs() { return NowMs(); }
-
-constexpr float kPi = 3.14159265f;
-constexpr float kDeg = 0.01745329f;
-float WrapPi(float a) {
-    while (a > kPi) a -= 2.0f * kPi;
-    while (a < -kPi) a += 2.0f * kPi;
-    return a;
-}
-void PutF(uint8_t* desire, int word, float v) { std::memcpy(desire + word * 4, &v, 4); }
-float GetF(const uint8_t* desire, int word) {
-    float v;
-    std::memcpy(&v, desire + word * 4, 4);
-    return v;
-}
-void PutU(uint8_t* desire, int word, uint32_t v) { std::memcpy(desire + word * 4, &v, 4); }
-uint32_t GetU(const uint8_t* desire, int word) {
-    uint32_t v;
-    std::memcpy(&v, desire + word * 4, 4);
-    return v;
-}
-
-// Points the puppet's movement at world direction (ax, az) with stick magnitude `mag`. The move vector (words 0x14 = right,
-// 0x16 = -forward) is relative to the actor's own facing; the locomotion turns toward it, driven by word 0x34 = remaining
-// turn (desired - current heading, rad, + = left) and word 0x38 = desired world heading + pi.
-void SteerDesire(uint8_t* desire, float curHeadingDeg, float ax, float az, float mag) {
-    const float len = std::sqrt(ax * ax + az * az);
-    if (len < 1e-3f) return;
-    const float hp = curHeadingDeg * kDeg;
-    const float fwd = (ax * -std::sin(hp) + az * -std::cos(hp)) / len;   // dot with puppet forward
-    const float right = (ax * std::cos(hp) + az * -std::sin(hp)) / len;  // dot with puppet right
-    PutF(desire, 0x14, right * mag);
-    PutU(desire, 0x15, 0x80000000u);
-    PutF(desire, 0x16, -fwd * mag);
-    const float hd = std::atan2(-ax, -az);
-    float want = hd + kPi;
-    if (want >= 2.0f * kPi) want -= 2.0f * kPi;
-    PutF(desire, 0x34, WrapPi(hd - hp));
-    PutF(desire, 0x38, want);
-}
-
-// Sets the gait bits (low byte of word 0x3f) keeping the rest of the word (0xc2280000).
-void SetGait(uint8_t* desire, uint32_t gait) {
-    uint32_t w = GetU(desire, 0x3f);
-    if (!w) w = 0xc2280000u;
-    PutU(desire, 0x3f, (w & ~0xffu) | gait);
-}
 
 void NetFrame(float /*gameTime*/) {
     // Connect as soon as the world is up, even with no player yet: in script mode the player is created
@@ -559,139 +495,19 @@ void NetFrame(float /*gameTime*/) {
             Log("net: player %u \"%s\" streamed in (%.0f m)", v.id, v.name.c_str(), dist);
         }
         p.hidden = false;
-        // Locomotion: the remote player's own movement desire drives the puppet (engine walk/run animations and
-        // movement); teleport only to correct drift (per-frame teleports would reset the locomotion).
-        const uintptr_t actor = PreparePuppetLocomotion(p.goh);
-        uint8_t desire[kDesireSize];
-        DecodeDesire(v.move, desire);
-        Vec3 cur{};
-        float curHeading = 0.0f;
-        const bool havePose = GetPuppetPose(p.goh, cur, curHeading);
-        const float tSpeed = std::sqrt(v.vel.x * v.vel.x + v.vel.z * v.vel.z);
-        const float remoteMag = std::sqrt(GetF(desire, 0x14) * GetF(desire, 0x14) + GetF(desire, 0x16) * GetF(desire, 0x16));
-        // Moving = the remote really moves (interpolated velocity). Neither the walk bit (a sprinting player has only the
-        // sprint bit and looked like standing -> snapped every few frames) nor the gait bits (a player walking into a wall
-        // keeps them while standing -> the puppet orbited the spot) are reliable for this.
-        const bool moving = tSpeed > 0.3f;
-        float err = 1e9f;
-        bool teleport = !actor || !havePose;
-        const float hp = curHeading * kDeg;
-        auto ahead = [hp](float ax, float az) { return ax * -std::sin(hp) + az * -std::cos(hp); };  // along the puppet's facing
-        auto stand = [&desire] {
-            PutF(desire, 0x14, 0.0f);
-            PutU(desire, 0x15, 0u);
-            PutF(desire, 0x16, 0.0f);
-            SetGait(desire, 0u);
-        };
-        if (havePose) {
-            const float ex = v.pos.x - cur.x, ez = v.pos.z - cur.z;
-            err = std::sqrt(ex * ex + ez * ez);
-            if (moving) {
-                p.walkIn = false;
-                p.headingOffSince = 0;
-                p.standingSince = 0;
-                // Pure pursuit on the remote's actual path: aim at where the remote will be 0.35 s after the interpolated
-                // point, so curves are followed instead of cut, with the remote's own gait (walk / sprint animation).
-                const float aimX = v.pos.x + v.vel.x * 0.35f - cur.x, aimZ = v.pos.z + v.vel.z * 0.35f - cur.z;
-                if (ahead(aimX, aimZ) < 0.0f && err < 1.0f) {
-                    stand();  // the aim point is behind us (remote slowing down): wait instead of turning around
-                } else {
-                    float mag = remoteMag > 0.05f ? remoteMag : std::clamp(tSpeed / 1.5f, 0.3f, 1.0f);  // decelerating: no stick
-                    const float along = (ex * v.vel.x + ez * v.vel.z) / tSpeed;  // + = puppet behind the remote
-                    if (along < -0.25f) mag *= 0.55f;                             // ahead: ease off
-                    if ((DesireGait(v.move) & 0x0f) == 0) SetGait(desire, tSpeed > 3.5f ? 4u : 1u);
-                    SteerDesire(desire, curHeading, aimX, aimZ, mag);
-                }
-                teleport = err > 1.5f;
-                // Blocked: the gap is large and doesn't shrink while the remote walks on. Puppets are NPCs, and NPC-only
-                // blockers (e.g. at x -2202.4 near the Armadillo spawn) stop them where the player walks through; the
-                // per-frame pull can't push through physics (normally it keeps the gap < 0.2 m), so snap past after
-                // 0.15 s instead of trailing up to 1.5 m.
-                if (err > 0.3f) {
-                    if (!p.stuckSince || err < p.stuckErr - 0.02f) {
-                        p.stuckSince = nowMs;
-                        p.stuckErr = err;
-                    } else if (nowMs - p.stuckSince > 150.0) {
-                        teleport = true;
-                    }
-                } else {
-                    p.stuckSince = 0;
-                }
-            } else {
-                // Remote standing: walk into the spot if it's ahead and 0.3-1 m away; smaller leftovers are snapped once the
-                // puppet has stood for 0.4 s (the walk can't make cm-precise moves: it overshoots and orbits the spot).
-                p.stuckSince = 0;
-                if (!p.standingSince) p.standingSince = nowMs;
-                const bool settled = nowMs - p.standingSince > 400.0;
-                const bool spotAhead = ahead(ex, ez) > err * 0.5f;  // within ~60 deg of the puppet's facing
-                if (err > 0.3f && spotAhead) p.walkIn = true;
-                if (err < 0.12f || !spotAhead) p.walkIn = false;
-                if (err > 1.0f || (settled && !p.walkIn && err > 0.1f)) {
-                    teleport = true;
-                } else if (p.walkIn) {
-                    SetGait(desire, 1u);
-                    SteerDesire(desire, curHeading, ex, ez, std::clamp(err * 1.5f, 0.25f, 0.7f));
-                } else {
-                    PutF(desire, 0x14, 0.0f);
-                    PutU(desire, 0x15, 0u);
-                    PutF(desire, 0x16, 0.0f);
-                    SetGait(desire, 0u);
-                    const float turn = WrapPi((v.heading - curHeading) * kDeg);
-                    if (std::fabs(turn) > 2.0f * kDeg) {
-                        float want = v.heading * kDeg + kPi;
-                        while (want < 0.0f) want += 2.0f * kPi;
-                        while (want >= 2.0f * kPi) want -= 2.0f * kPi;
-                        PutF(desire, 0x34, turn);
-                        PutF(desire, 0x38, want);
-                    }
-                    // still facing away after 1.5 s (the in-place turn didn't take): snap the heading
-                    if (std::fabs(turn) > 20.0f * kDeg) {
-                        if (!p.headingOffSince) p.headingOffSince = nowMs;
-                        else if (nowMs - p.headingOffSince > 1500.0) teleport = true;
-                    } else {
-                        p.headingOffSince = 0;
-                    }
-                }
-            }
-        }
-        if (actor) SetPuppetDesire(actor, desire);
-        // How far the puppet moved by itself since the last nudge (m/s): ~walk speed = its locomotion survives the nudges.
-        float selfSpeed = -1.0f;
-        if (havePose && p.lastSetMs > 0 && nowMs > p.lastSetMs + 1.0) {
-            const float sx = cur.x - p.lastSet.x, sz = cur.z - p.lastSet.z;
-            selfSpeed = std::sqrt(sx * sx + sz * sz) * 1000.0f / static_cast<float>(nowMs - p.lastSetMs);
-        }
-        p.lastSetMs = 0;
-        if (teleport) {
-            SetPuppetTransform(p.goh, v.pos, v.heading);
-            p.walkIn = false;
-            p.headingOffSince = 0;
-            p.stuckSince = 0;
-            if (err < 1e8f && ++p.corrections <= 20) Log("net: player %u drift %.2f m (%s) -> teleport", v.id, err, moving ? "moving" : "idle");
-        } else if (g_nudge && havePose) {
-            // Pull the puppet onto the network position (time constant ~0.1 s) without the warp reset, so the locomotion
-            // keeps animating while the position follows the remote exactly. Height and facing stay the puppet's own
-            // (ground physics / locomotion steering).
-            static double lastFrameMs = 0;
-            const float dt = std::clamp(static_cast<float>(nowMs - lastFrameMs) / 1000.0f, 0.001f, 0.1f);
-            const float k = 1.0f - std::exp(-dt / 0.1f);
-            // aim ahead along the remote's velocity: 0.1 s cancels the lag of this first-order pull at constant speed, plus
-            // the prediction that cancels the network position's delay ([net] lead_ms, auto by default)
-            const float lead = 0.1f + v.leadMs / 1000.0f;
-            const float gx = v.pos.x + v.vel.x * lead, gz = v.pos.z + v.vel.z * lead;
-            const Vec3 np{cur.x + (gx - cur.x) * k, cur.y, cur.z + (gz - cur.z) * k};
-            // facing: ease toward the remote's real heading (the locomotion alone lags it in curves)
-            const float nh = curHeading + WrapPi((v.heading - curHeading) * kDeg) / kDeg * k;
-            if (NudgePuppet(p.goh, np, nh)) {
-                p.lastSet = np;
-                p.lastSetMs = nowMs;
-            }
-            if (i == nViews - 1) lastFrameMs = nowMs;
-        }
+        PuppetTarget target;
+        target.pos = v.pos;
+        target.vel = v.vel;
+        target.heading = v.heading;
+        target.leadMs = v.leadMs;
+        target.move = v.move;
+        const PuppetDriveResult d = DrivePuppet(p.goh, p.drive, target, nowMs);
+        if (d.teleported && d.err >= 0.0f && ++p.corrections <= 20)
+            Log("net: player %u drift %.2f m (%s) -> teleport", v.id, d.err, d.moving ? "moving" : "idle");
         if (g_trace)
-            fprintf(g_trace, "R,%.2f,%u,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f,%.3f,%.2f,%.3f,%d,%d,%.3f,%.2f,%.2f,%.1f\n", traceT, v.id, v.pos.x, v.pos.y,
-                    v.pos.z, v.heading, cur.x, cur.y, cur.z, curHeading, err < 1e8f ? err : -1.0f, moving ? 1 : 0, teleport ? 1 : 0,
-                    selfSpeed, v.transit, v.offset, v.leadMs);
+            fprintf(g_trace, "R,%.2f,%u,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f,%.3f,%.2f,%.3f,%d,%d,%d,%.2f,%.2f,%.1f\n", traceT, v.id, v.pos.x,
+                    v.pos.y, v.pos.z, v.heading, d.cur.x, d.cur.y, d.cur.z, d.curHeading, d.err, d.moving ? 1 : 0,
+                    d.teleported ? 1 : 0, d.corrected ? 1 : 0, v.transit, v.offset, v.leadMs);
     }
     if (g_trace) fflush(g_trace);  // test runs end by killing the game
 }
@@ -718,7 +534,7 @@ void StartNetClient(const wchar_t* ini) {
     g_streamIn = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_in", 150, ini));
     g_streamOut = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_out", 200, ini));
     if (g_streamOut < g_streamIn) g_streamOut = g_streamIn;
-    g_nudge = GetPrivateProfileIntW(L"net", L"puppet_nudge", 1, ini) != 0;
+    LoadPuppetControlConfig(ini);
     GetPrivateProfileStringW(L"net", L"lead_ms", L"auto", w, 64, ini);
     g_leadMs = (_wcsicmp(w, L"auto") == 0 || !*w) ? -1 : _wtoi(w);
     // Everything lives next to rdmp.ini / rdmp.dll (the build's bin folder): the client DLL and framework runtime,

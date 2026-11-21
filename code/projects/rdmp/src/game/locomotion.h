@@ -15,6 +15,13 @@ void SetLocoPlayerActor(uintptr_t actor);
 // Latest desire produced by the local player's input (false until captured). seq increments per capture.
 bool GetPlayerDesire(uint8_t* out, uint32_t* seq);
 
+// Debug: the local player's locomotion uses `desire` instead of its input (nullptr = back to the input).
+void SetPlayerDesireOverride(const uint8_t* desire);
+
+// The local player's mount (0 = on foot): its desire (what the rider's input asks of the horse) is captured too.
+void SetLocoMountActor(uintptr_t actor);
+bool GetMountDesire(uint8_t* out, uint32_t* seq);
+
 // From now on, every locomotion update of `actor` uses `desire` instead of what its own brain produced.
 void SetPuppetDesire(uintptr_t actor, const uint8_t* desire);
 void ClearPuppetDesire(uintptr_t actor);

@@ -35,6 +35,15 @@ std::mutex g_mutex;
 uint8_t g_playerDesire[kDesireSize];
 bool g_havePlayerDesire = false;
 uint32_t g_playerDesireSeq = 0;
+// Debug autopilot: replaces the local player's own desire (tools: replaying a recorded route).
+uint8_t g_playerOverride[kDesireSize];
+bool g_havePlayerOverride = false;
+
+// The local player's mount: its desire is what the rider's input asks of the horse.
+std::atomic<uintptr_t> g_mountActor{0};
+uint8_t g_mountDesire[kDesireSize];
+bool g_haveMountDesire = false;
+uint32_t g_mountDesireSeq = 0;
 
 struct Override {
     uintptr_t actor = 0;
@@ -47,9 +56,22 @@ void LocoHook(uintptr_t loco, uint8_t* desire, uint64_t a3, uint64_t a4, uint64_
     if (actor && desire) {
         if (actor == g_playerActor.load(std::memory_order_relaxed)) {
             std::lock_guard lock(g_mutex);
+            if (g_havePlayerOverride) std::memcpy(desire, g_playerOverride, kDesireSize);
             std::memcpy(g_playerDesire, desire, kDesireSize);
             g_havePlayerDesire = true;
             ++g_playerDesireSeq;
+        } else if (actor == g_mountActor.load(std::memory_order_relaxed)) {
+            std::lock_guard lock(g_mutex);
+            for (const Override& o : g_overrides) {  // a script-driven mount (tests) still reports what it was given
+                if (o.actor == actor) {
+                    std::memcpy(desire, o.desire, kDesireSize);
+                    g_applied.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+            }
+            std::memcpy(g_mountDesire, desire, kDesireSize);
+            g_haveMountDesire = true;
+            ++g_mountDesireSeq;
         } else {
             std::lock_guard lock(g_mutex);
             for (const Override& o : g_overrides) {
@@ -94,6 +116,26 @@ bool GetPlayerDesire(uint8_t* out, uint32_t* seq) {
     if (!g_havePlayerDesire) return false;
     std::memcpy(out, g_playerDesire, kDesireSize);
     if (seq) *seq = g_playerDesireSeq;
+    return true;
+}
+
+void SetPlayerDesireOverride(const uint8_t* desire) {
+    std::lock_guard lock(g_mutex);
+    g_havePlayerOverride = desire != nullptr;
+    if (desire) std::memcpy(g_playerOverride, desire, kDesireSize);
+}
+
+void SetLocoMountActor(uintptr_t actor) {
+    if (g_mountActor.exchange(actor) == actor) return;
+    std::lock_guard lock(g_mutex);
+    g_haveMountDesire = false;
+}
+
+bool GetMountDesire(uint8_t* out, uint32_t* seq) {
+    std::lock_guard lock(g_mutex);
+    if (!g_haveMountDesire) return false;
+    std::memcpy(out, g_mountDesire, kDesireSize);
+    if (seq) *seq = g_mountDesireSeq;
     return true;
 }
 
