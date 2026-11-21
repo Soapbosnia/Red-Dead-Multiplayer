@@ -44,7 +44,8 @@ favourites and recent servers are kept in `servers.json`, settings in `rdmp.ini`
 ## Run
 
 `run.bat` (or `build\bin\RDMP.exe`). The first time it asks for `RDR.exe` and remembers it in `build\bin\rdmp.ini`
-(`[game] exe`). With `[net] server=127.0.0.1` and `start_local_server=1` it also starts `RDMPServer.exe`.
+(`[game] exe`). The game opens the main menu. For development, `RDMP.exe --server --connect 127.0.0.1` also starts
+`RDMPServer.exe` and joins it at once (`tools/run_two.ps1` does that for two copies).
 Logs: `build\bin\rdmp.log` (game side) and `build\bin\logs\` (Framework).
 
 Several copies on one PC: `RDMP.exe --instance 2 --name Bob`.

@@ -46,9 +46,10 @@ agrees.
   vswhere -> vcvars64 -> CMake + Ninja Release in `build\`, log `build\build.log`, output `build\bin`.
 * Targets: `rdmp` (game DLL), `RDMP` (launcher), `rdmp_client` (Framework client DLL), `RDMPServer`, `rdmp_bot`,
   `rdmp_data` (copies `resources\` and `ui\` to `build\bin` every build; `config\rdmp.ini` only if missing).
-* `run.bat` -> `build\bin\RDMP.exe`: starts `RDMPServer.exe` (`[net] start_local_server=1`), starts the game and
-  injects `rdmp.dll`. The game opens on the main menu; join the local server from its Local tab.
-  `[net] autoconnect=1` connects straight to `[net] server` instead.
+* `run.bat` -> `build\bin\RDMP.exe`: starts the game and injects `rdmp.dll`; the game opens on the main menu.
+  Development: `RDMP.exe --server --connect 127.0.0.1:27015` also starts `RDMPServer.exe` and joins it at once
+  (`[net] start_local_server` / `autoconnect` do the same from the ini); `tools\run_two.ps1` starts the server and
+  two copies joined to it.
 * Second player: `build\bin\rdmp_bot.exe bot Bob 127.0.0.1 27015 [x y z radius seconds]`.
 * Logs: `build\bin\rdmp.log` (game + client, everything), `build\bin\logs\` (Framework files, cef.log).
 * Server console: `players`, `tp`, `help`, and the Framework's `start|stop|restart|refresh <resource>`, `status`.
@@ -97,10 +98,8 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
    after a death (follow the DirectInput keyboard state into the game, or diff render / game state objects before and
    after the key). No workaround (no injected input).
 2. LAN discovery for the Local tab (today: this PC, ports 27015-27020). Masterlist announcing needs a server token.
-3. **Before release: no auto-join, no local server.** For testing, RDMP.exe boots straight into the world and joins
-   a server it starts itself: buildindmp.ini has `[net] autoconnect=1` and `start_local_server=1` (the owner wants
-   this while testing). A release must open the main menu and start nothing: configdmp.ini already ships
-   `autoconnect=0`, but still `start_local_server=1` -> set 0 (and check the launcher starts no server then).
+3. Done: the game boots to the main menu and starts no server; auto-join / local server only with `--connect` /
+   `--server` (or the ini keys) for development.
 
 ## Next (chosen: horses first)
 1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:

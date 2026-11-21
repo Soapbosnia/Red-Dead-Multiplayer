@@ -495,6 +495,16 @@ void StartNetClient(const wchar_t* ini) {
     WideCharToMultiByte(CP_UTF8, 0, w, -1, g_name, sizeof(g_name), nullptr, nullptr);
     g_name[kNameLen - 1] = '\0';
     g_autoConnect = GetPrivateProfileIntW(L"net", L"autoconnect", 0, ini) != 0;
+    // RDMP.exe --connect host[:port] (development, links): straight to that server instead of the main menu.
+    if (GetEnvironmentVariableW(L"RDMP_CONNECT", w, 64) > 0 && w[0]) {
+        wchar_t* colon = wcsrchr(w, L':');
+        if (colon) {
+            g_port = static_cast<uint16_t>(_wtoi(colon + 1));
+            *colon = 0;
+        }
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, g_host, sizeof(g_host), nullptr, nullptr);
+        g_autoConnect = true;
+    }
     g_interpMs = GetPrivateProfileIntW(L"net", L"interp_ms", 30, ini);
     g_streamIn = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_in", 150, ini));
     g_streamOut = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_out", 200, ini));

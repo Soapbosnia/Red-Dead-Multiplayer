@@ -1,7 +1,9 @@
 // RDMP launcher: starts RDR.exe suspended, injects rdmp.dll, then resumes the game.
 //
-// Usage: RDMP.exe [--game <path to RDR.exe>] [--dll <path>] [--wait] [--instance N] [--name X]
-//                  [-- <args passed to RDR.exe>]
+// Usage: RDMP.exe [--game <path to RDR.exe>] [--dll <path>] [--wait] [--instance N] [--name X] [--connect host[:port]]
+//                  [--server] [-- <args passed to RDR.exe>]
+// Without options the game opens the main menu. --connect joins that server at once (development); --server also
+// starts the local RDMPServer.exe first (or rdmp.ini [net] start_local_server=1).
 //   --instance N  run an extra copy of the game on this PC (N >= 2: own rdmp_N.log, name + N, spawn spot)
 //   --name X      multiplayer nickname (overrides rdmp.ini [net] name)
 // rdmp.dll and rdmp.ini are taken from the launcher's folder. RDR.exe: --game, else rdmp.ini [game] exe, else the
@@ -87,12 +89,14 @@ static bool ProcessRunning(const wchar_t* exeName) {
     return found;
 }
 
-// rdmp.ini [net] start_local_server=1 with server=127.0.0.1: start RDMPServer.exe (next to the launcher) in its own
+static bool g_startServer = false;  // --server
+
+// --server or rdmp.ini [net] start_local_server=1, with server=127.0.0.1: start RDMPServer.exe (next to the launcher) in its own
 // console window unless one is already running. It keeps running after the game.
 static void StartLocalServer(const fs::path& ini) {
     wchar_t v[MAX_PATH];
     if (!GetPrivateProfileIntW(L"net", L"enabled", 1, ini.c_str())) return;
-    if (!GetPrivateProfileIntW(L"net", L"start_local_server", 1, ini.c_str())) return;
+    if (!g_startServer && !GetPrivateProfileIntW(L"net", L"start_local_server", 0, ini.c_str())) return;
     GetPrivateProfileStringW(L"net", L"server", L"127.0.0.1", v, MAX_PATH, ini.c_str());
     if (wcscmp(v, L"127.0.0.1") != 0 && _wcsicmp(v, L"localhost") != 0) return;
     if (ProcessRunning(L"RDMPServer.exe")) {
@@ -169,6 +173,8 @@ int wmain(int argc, wchar_t** argv) {
         // Several copies of the game on one PC: the game inherits these (own log, name, spawn spot).
         else if (a == L"--instance" && i + 1 < argc) SetEnvironmentVariableW(L"RDMP_INSTANCE", argv[++i]);
         else if (a == L"--name" && i + 1 < argc) SetEnvironmentVariableW(L"RDMP_NAME", argv[++i]);
+        else if (a == L"--connect" && i + 1 < argc) SetEnvironmentVariableW(L"RDMP_CONNECT", argv[++i]);
+        else if (a == L"--server") g_startServer = true;
         else if (a == L"--") { for (++i; i < argc; ++i) passthrough.push_back(argv[i]); }
         else passthrough.push_back(a);
     }
