@@ -4,6 +4,8 @@
 
 // true: the player also sees their own blip (handy when testing alone).
 const SHOW_OWN_BLIP = false;
+// Blip size (MTA scale: 2 = the game's own icon size, 1 = half of it).
+const BLIP_SIZE = 1;
 
 const blips = new Map(); // player -> blip
 const key = (player) => String(player);
@@ -22,7 +24,7 @@ function addBlip(player) {
     if (blips.has(key(player))) return;
     const [r, g, b] = randomColor();
     // createBlipAttachedTo(element, icon, size, r, g, b, a, ordering, visibleDistance)
-    const blip = createBlipAttachedTo(player, BlipIcon.BLIP_MP_COLOR_1, 2, r, g, b, 255, 1, 16383);
+    const blip = createBlipAttachedTo(player, BlipIcon.BLIP_MP_COLOR_1, BLIP_SIZE, r, g, b, 255, 1, 16383);
     if (!blip) return;
     if (!SHOW_OWN_BLIP) setElementVisibleTo(blip, player, false);
     blips.set(key(player), blip);
