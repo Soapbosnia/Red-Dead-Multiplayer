@@ -61,7 +61,7 @@ def pct(values, p):
 
 def report(name, rows, truth, t0, t_from, t_to):
     herr_m, herr_s, verr, terr, glide, tps = [], [], [], [], [], 0
-    along, side = [], []
+    along, side, heading = [], [], []
     worst = []
     prev = None
     for r in rows:
@@ -86,6 +86,9 @@ def report(name, rows, truth, t0, t_from, t_to):
                     dx, dz = x - r["px"], z - r["pz"]
                     along.append((dx * mx + dz * mz) / ml)
                     side.append(abs((dx * mz - dz * mx) / ml))
+            hd = abs((r["ph"] - h + 180.0) % 360.0 - 180.0)
+            if he < 3.0:
+                heading.append(hd)
         verr.append(abs(ve))
         terr.append(te)
         if r["tp"]:
@@ -102,6 +105,8 @@ def report(name, rows, truth, t0, t_from, t_to):
         print(f"  moving   horiz err  mean {statistics.mean(herr_m):.3f}  p50 {pct(herr_m, .5):.3f}  p95 {pct(herr_m, .95):.3f}  max {max(herr_m):.3f} m")
     if along:
         print(f"  moving   along (+ behind) mean {statistics.mean(along):+.3f}  sideways mean {statistics.mean(side):.3f}  p95 {pct(side, .95):.3f} m")
+    if heading:
+        print(f"  moving   heading err mean {statistics.mean(heading):.1f}  p95 {pct(heading, .95):.1f} deg")
     if herr_s:
         print(f"  standing horiz err  mean {statistics.mean(herr_s):.3f}  p50 {pct(herr_s, .5):.3f}  p95 {pct(herr_s, .95):.3f}  max {max(herr_s):.3f} m")
     # the same, against the truth shifted by the best-fitting delay (the puppet shows the remote that much late)

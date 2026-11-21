@@ -24,8 +24,18 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
 
 * **Threading.** The Framework client is updated from the game's frame callback, so client scripts and the
   replication callbacks run on the game's main thread and may call game natives directly.
-* **Players.** The owner writes its pose/locomotion every frame; the server forces poses and queues actions
+* **Players.** The owner writes its pose and movement input every frame; the server forces poses and queues actions
   (acknowledged by sequence number) for spawn, fade, camera, control and health.
+* **Remote-player sync** (MTA-style: input + position in one packet). Each transform update (unreliable, every tick)
+  carries position, heading, speed and the movement input (`MoveInput`: stick, desired heading, gait), timed by the
+  sender's game-frame clock. The receiver interpolates `interp_ms` behind the newest sample and drives one puppet per
+  remote player (src/game/puppet_control.cpp): the puppet gets the remote's input as its locomotion desire, steered by
+  the remote's desired heading plus a capped bend toward its path, so the engine's own walk / run / sprint, turn and
+  stop animations move it at the remote's speed. Moving the puppet directly cancels the animation's own motion (the
+  feet slide), so it is only pulled softly when the gap passes 0.6 m (scaled with speed) or the remote is on another
+  level, drifted in slowly once standing (> 0.3 m), and teleported beyond 4 m. Measured with two copies
+  (tools/sync_report.py): the puppet shows the remote ~0.1 s late, ~0.2-0.3 m mean error, ~5% of moving frames
+  pulled. Not synced yet: jumps, vaults and climbs (no input for them in the desire; needs RE).
 * **Blips.** A server-side `Blip` entity (icon, colour, scale, distance, priority, flags, attachment), streamed per
   viewer with `ReplicationManager` viewer filters (`visibleTo`, `setElementVisibleTo`). `rdmp.dll` reconciles the
   replicated set with the game's blip pool every frame.

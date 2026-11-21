@@ -146,14 +146,10 @@ namespace {
                     me->position = {g_local.x, g_local.y, g_local.z};
                     me->heading  = g_local.heading;
                     me->speed    = g_local.speed;
-                    me->gait     = static_cast<uint8_t>(g_local.flags & 0x3); // gait travels in the low bits
-                    const int count = g_local.move.count > RDMP::Shared::Player::kMaxDesire ? RDMP::Shared::Player::kMaxDesire
-                                                                                             : g_local.move.count;
-                    me->desireCount = static_cast<uint8_t>(count);
-                    for (int i = 0; i < count; ++i) {
-                        me->desireIdx[i] = g_local.move.idx[i];
-                        me->desireVal[i] = g_local.move.val[i];
-                    }
+                    me->moveRight   = g_local.input.right;
+                    me->moveBack    = g_local.input.back;
+                    me->moveHeading = g_local.input.heading;
+                    me->gait        = g_local.input.gait;
                 }
             }
 
@@ -213,14 +209,13 @@ namespace {
             remote.s.z       = player->position.z;
             remote.s.heading = player->heading;
             remote.s.speed   = player->speed;
-            remote.s.flags   = player->gait;
             remote.health    = static_cast<float>(player->localHealth);
-            const int count  = player->desireCount > net::kMaxDesireEntries ? net::kMaxDesireEntries : player->desireCount;
-            remote.s.move.count = static_cast<uint8_t>(count);
-            for (int i = 0; i < count; ++i) {
-                remote.s.move.idx[i] = static_cast<uint8_t>(player->desireIdx[i]);
-                remote.s.move.val[i] = player->desireVal[i];
-            }
+            // The quantized stick has no exact zero: snap the released stick back to 0.
+            auto stick = [](float v) { return std::fabs(v) < 0.01f ? 0.0f : v; };
+            remote.s.input.right   = stick(player->moveRight);
+            remote.s.input.back    = stick(player->moveBack);
+            remote.s.input.heading = player->moveHeading;
+            remote.s.input.gait    = player->gait;
         });
         return n;
     }

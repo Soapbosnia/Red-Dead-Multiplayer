@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased: remote-player sync rework
+* **Puppets move with their own animation.** Measured with two game copies: pulling the puppet onto the network
+  position every frame cancelled the walk animation's own motion (the feet slid ~80% of the time). The new controller
+  (src/game/puppet_control.cpp) replays the remote's movement input (stick pressed / released, magnitude, gait,
+  desired heading) so the puppet starts, turns, runs and stops with the engine's animations; it is pulled softly only
+  for large gaps (0.6 m moving, scaled with speed; 0.3 m standing, drifted in slowly after the stop animation) and
+  teleported beyond 4 m. Fixed a puppet that could freeze facing the wrong way while the remote walked on, weaving on
+  straight lines, and the stutter-step on stops.
+* **Netcode (client and server must match):** the movement input travels in the unreliable per-tick transform with
+  the position (stick 8+8 bits, desired heading 12 bits, gait 8 bits) instead of the reliable sparse desire array, so
+  a lost packet can no longer hold the input back behind the position. fw_api v7. rdmp_bot sends a walking input.
+* Sync test tools: `[debug] autopilot` replays a recorded route on one copy, `tools/run_two.ps1`,
+  `tools/sync_report.py` (error vs truth, best-fit delay, sideways / along, heading, pulled frames).
+* Crash log names the module of every stack frame.
+
 ## 0.6.0: main menu and server browser (2026-11-21)
 * The project lives in the Framework fork (github.com/Soapbosnia/Red-Dead-Multiplayer, `code/projects/rdmp`).
 * **Main menu** (HTML in the Framework's CEF web UI, `ui/`): server browser with Internet (MafiaHub masterlist),

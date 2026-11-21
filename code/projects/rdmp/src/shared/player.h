@@ -4,8 +4,8 @@
  *
  * Wire contract, three ways:
  *   construction -> nickname / model (sent once, reliable)
- *   transform    -> position, heading, speed (unreliable, every tick, owner-authored)
- *   fields       -> gait, flags, health (reliable deltas; health and flags are server fields)
+ *   transform    -> position, heading, speed, movement input (unreliable, every tick, owner-authored)
+ *   fields       -> flags, health, ... (reliable deltas; health and flags are server fields)
  *
  * Server actions (script natives) use actSeq/actKind/actA..D (server fields, delivered to the owner by a
  * forced state) and actAck (owner field): the owner echoes the last actSeq it queued, and the server sends
@@ -30,19 +30,14 @@ namespace RDMP::Shared {
         static constexpr int kPosBits          = 22; // ~2.4 mm over the 20000 unit span
         static constexpr int kHeadingBits      = 16;
         static constexpr int kSpeedBits        = 8;
+        static constexpr int kStickBits        = 8;
+        static constexpr int kMoveHeadingBits  = 12;
 
         enum Flags : uint8_t {
             kAlive = 1u << 0,
             kAiming = 1u << 1,
             kOnHorse = 1u << 2,
             kInCover = 1u << 3,
-        };
-
-        enum Gait : uint8_t {
-            kIdle = 0,
-            kWalk = 1,
-            kRun  = 2,
-            kSprint = 3,
         };
 
         // --- construction (spawn metadata) ---------------------------------
@@ -55,9 +50,13 @@ namespace RDMP::Shared {
         // Entity script handle (getPosition/setPosition) drives the same state we replicate.
         float heading = 0.0f; // degrees, -180..180 (rotation is the yaw about Y)
         float speed   = 0.0f; // m/s, 0..60
+        // Movement input (shared/types.h MoveInput): the puppet replays it, so it must arrive with its position.
+        float moveRight   = 0.0f; // -1..1
+        float moveBack    = 0.0f; // -1..1
+        float moveHeading = 0.0f; // 0..2pi
+        uint8_t gait      = 0;    // locomotion gait byte
 
         // --- reliable delta fields -----------------------------------------
-        uint8_t gait   = kIdle;
         uint8_t flags  = kAlive; // server field
         uint8_t health = 100;    // server field
         uint8_t armour = 0;
@@ -76,13 +75,6 @@ namespace RDMP::Shared {
         std::string nametagText;      // empty = the nickname
         uint32_t nametagColor  = 0;   // 0xAARRGGBB, 0 = default (white)
         uint8_t nametagShowing = 1;
-
-        // Sparse locomotion desire: indices into the engine's 0x44-word desire block and
-        // their values. Drives the puppet's walk/run without touching its position.
-        static constexpr int kMaxDesire = 20;
-        uint8_t desireCount             = 0;
-        uint16_t desireIdx[kMaxDesire]  = {};
-        uint32_t desireVal[kMaxDesire]  = {}; // raw desire words (bit patterns; a float field rounded them)
 
         // Owner -> server: the last actSeq this client has queued for the game (see the header comment).
         uint8_t actAck = 0;
@@ -107,10 +99,13 @@ namespace RDMP::Shared {
             fields.FloatBits(position.z, kWorldMin, kWorldMax, kPosBits);
             fields.FloatBits(heading, -180.0f, 180.0f, kHeadingBits);
             fields.FloatBits(speed, 0.0f, 60.0f, kSpeedBits);
+            fields.FloatBits(moveRight, -1.0f, 1.0f, kStickBits);
+            fields.FloatBits(moveBack, -1.0f, 1.0f, kStickBits);
+            fields.FloatBits(moveHeading, 0.0f, 6.2831853f, kMoveHeadingBits);
+            fields.BitsRange<uint8_t>(gait, 0, 255);
         }
 
         void SerializeFields(FieldSerializer &fields) override {
-            fields.Field(gait);
             fields.ServerField(flags);
             fields.ServerField(health);
             fields.ServerField(armour);
@@ -124,11 +119,6 @@ namespace RDMP::Shared {
             fields.ServerField(nametagText);
             fields.ServerField(nametagColor);
             fields.ServerField(nametagShowing);
-            fields.Field(desireCount);
-            for (int i = 0; i < kMaxDesire; ++i) {
-                fields.Field(desireIdx[i]);
-                fields.Field(desireVal[i]);
-            }
             fields.Field(actAck);
             fields.Field(localHealth);
         }

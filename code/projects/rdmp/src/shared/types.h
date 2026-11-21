@@ -9,16 +9,20 @@ constexpr uint16_t kDefaultPort = 27015;
 constexpr int kMaxPlayers = 64;
 constexpr int kNameLen = 32;
 
-// Locomotion desire (game/locomotion.cpp: FUN_140ba6a80's per-frame movement request, 0x110 bytes = 0x44 u32),
-// sent sparse: the non-zero u32 words. Known words: [0x14..0x16] local move vector (forward = -1), [0x34] turn,
-// [0x35] -1, [0x38] desired world heading in radians (= heading_deg * pi/180 + pi), [0x3a] -1,
-// [0x3f] 0xc2280000 | gait, [0x40] 0x1000.
+// Locomotion desire (game/locomotion.cpp: FUN_140ba6a80's per-frame movement request, 0x110 bytes = 0x44 u32).
+// Known words: [0x14..0x16] local move vector (forward = -1), [0x34] turn, [0x35] -1, [0x38] desired world heading
+// in radians (= heading_deg * pi/180 + pi), [0x3a] -1, [0x3f] 0xc2280000 | gait, [0x40] 0x1000. These are all the
+// words a player on foot produces (captured walking, running, sprinting, turning).
 constexpr int kDesireWords = 0x44;
-constexpr int kMaxDesireEntries = 20;
-struct MoveDesire {
-    uint8_t count = 0;
-    uint8_t idx[kMaxDesireEntries] = {};
-    uint32_t val[kMaxDesireEntries] = {};
+
+// A player's movement input: the part of the desire a puppet needs (the rest is constant or recomputed). Travels
+// with the position in every transform update, so input and position of one sample always belong together (MTA's
+// pure sync does the same with its key states).
+struct MoveInput {
+    float right = 0;    // [0x14] stick, local right (-1..1)
+    float back = 0;     // [0x16] stick, local backward (-1..1; walking forward = -1)
+    float heading = 0;  // [0x38] desired world heading + pi (rad, 0..2pi); only meaningful while the stick is pressed
+    uint8_t gait = 0;   // low byte of [0x3f]: 0 standing, 1 walk, 4 sprint
 };
 
 // Player state. Position in game world units (Y up), heading in degrees (the engine's teleport convention).
@@ -28,8 +32,7 @@ struct PlayerState {
     float x = 0, y = 0, z = 0;
     float heading = 0;
     float speed = 0;      // horizontal m/s
-    uint32_t flags = 0;   // low bits: gait
-    MoveDesire move;
+    MoveInput input;
 };
 
 }  // namespace rdmp::net

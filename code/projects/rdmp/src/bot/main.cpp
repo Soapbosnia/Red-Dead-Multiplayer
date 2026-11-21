@@ -63,9 +63,17 @@ int main(int argc, char **argv) {
         if (auto *me = client.Owned()) {
             // Walk a circle at 1.4 m/s; the server replicates it to everyone in range.
             me->position = {cx + std::cos(t) * radius, cy, cz + std::sin(t) * radius};
-            me->heading = std::fmod(t * 57.29578f, 360.0f);
-            me->speed   = 1.4f;
-            me->gait    = 1; // walk
+            // Movement input like a player walking along the circle (shared/types.h MoveInput): stick forward, desired
+            // heading = the direction of travel (engine convention: heading = atan2(-dx, -dz), the desire word holds
+            // heading + pi), walk gait. Puppets replay this input.
+            const float dx = -std::sin(t), dz = std::cos(t);
+            const float hd = std::atan2(-dx, -dz);
+            me->heading     = hd * 57.29578f;
+            me->speed       = 1.4f;
+            me->moveRight   = 0.0f;
+            me->moveBack    = -1.0f;
+            me->moveHeading = hd + 3.14159265f;
+            me->gait        = 1; // walk
             me->actAck  = me->actSeq; // a bot applies nothing, but must ack so the server's action queue moves on
         }
 

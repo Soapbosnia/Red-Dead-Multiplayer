@@ -18,17 +18,19 @@
 namespace rdmp {
 namespace {
 
-using net::MoveDesire;
+using net::MoveInput;
 
 constexpr float kPi = 3.14159265f;
 constexpr float kDeg = 0.01745329f;
 
 bool g_corrections = true;
 float g_correctMoving = 0.6f;   // gap (m) that starts a soft pull while the remote moves
-float g_correctStanding = 0.12f; // ... and once the puppet has stood still for a moment
+float g_correctStanding = 0.3f;  // ... and once the puppet has stood still for a while (smaller gaps stay)
 constexpr float kCorrectDoneMoving = 0.25f;   // the pull ends below this gap (moving: the animation lags by the delay)
 constexpr float kCorrectDoneStanding = 0.04f;
-constexpr float kCorrectTau = 0.12f;   // pull time constant (s): ~90% of the gap in a quarter second
+constexpr float kCorrectTau = 0.12f;          // moving pull time constant (s): ~90% of the gap in a quarter second
+constexpr float kCorrectTauStanding = 0.6f;   // standing: a slow drift into place (no animation to fight, nothing snaps)
+constexpr double kSettleMs = 800.0;           // standing this long (the stop animation is over) before any correction
 constexpr float kTeleport = 4.0f;      // larger gaps are teleported
 constexpr float kLevel = 0.5f;         // a height difference above this = the remote is on another level (crate, step)
 
@@ -50,11 +52,21 @@ uint32_t GetU(const uint8_t* d, int word) {
     return v;
 }
 
-void Decode(const MoveDesire& in, uint8_t* desire) {
+// Rebuilds a desire from the remote's input: the words a player on foot produces (shared/types.h); [0x34] (turn) is
+// recomputed against the puppet's own facing by Steer / Face.
+void Decode(const MoveInput& in, uint8_t* desire) {
     std::memset(desire, 0, kDesireSize);
-    uint32_t* w = reinterpret_cast<uint32_t*>(desire);
-    for (int i = 0; i < in.count && i < net::kMaxDesireEntries; ++i)
-        if (in.idx[i] < net::kDesireWords) w[in.idx[i]] = in.val[i];
+    const bool stick = in.right != 0.0f || in.back != 0.0f;
+    PutU(desire, 0x35, 0xbf800000u);  // -1
+    PutU(desire, 0x3a, 0xbf800000u);
+    PutU(desire, 0x3f, 0xc2280000u | in.gait);
+    PutU(desire, 0x40, 0x1000u);
+    if (stick) {
+        PutF(desire, 0x14, in.right);
+        PutU(desire, 0x15, 0x80000000u);
+        PutF(desire, 0x16, in.back);
+        PutF(desire, 0x38, in.heading);
+    }
 }
 
 void SetGait(uint8_t* d, uint32_t gait) {
@@ -100,12 +112,6 @@ void Face(uint8_t* d, float curHeadingDeg, float headingDeg) {
 
 }  // namespace
 
-uint32_t DesireGait(const MoveDesire& m) {
-    for (int i = 0; i < m.count; ++i)
-        if (m.idx[i] == 0x3f) return m.val[i] & 0xff;
-    return 0;
-}
-
 void LoadPuppetControlConfig(const wchar_t* ini) {
     g_corrections = GetPrivateProfileIntW(L"net", L"puppet_nudge", 1, ini) != 0;
     wchar_t w[32];
@@ -135,7 +141,7 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
     r.dy = t.pos.y - r.cur.y;
     const float speed = std::sqrt(t.vel.x * t.vel.x + t.vel.z * t.vel.z);
     uint8_t desire[kDesireSize];
-    Decode(t.move, desire);
+    Decode(t.input, desire);
     // The remote's stick: the puppet copies it (pressed or released, and how far), so it starts, runs and stops with
     // the remote's own animations. Moving = the stick is pressed or the remote still moves (stopping, pushed).
     const float remoteMag = std::sqrt(GetF(desire, 0x14) * GetF(desire, 0x14) + GetF(desire, 0x16) * GetF(desire, 0x16));
@@ -161,32 +167,39 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
             const float hd = GetF(desire, 0x38) - kPi;
             Steer(desire, r.curHeading, -std::sin(hd), -std::cos(hd), mag);
         } else {
-            // Pure pursuit on the remote's path: aim 0.35 s ahead so curves are followed, not cut, with the remote's own
-            // stick magnitude and gait (its walk / run / sprint animation and speed).
-            const float aimX = now.x + t.vel.x * 0.35f - r.cur.x, aimZ = now.z + t.vel.z * 0.35f - r.cur.z;
+            // Direction: the remote's own desired heading (where its stick points, so turns replay with the same
+            // turning animation), bent toward its path by the sideways gap, at most ~20 deg: the gap is closed over a
+            // lookahead of max(1.5 m, 0.5 s) instead of by steering hard at a near point (that made the puppet weave).
+            const float hd = GetF(desire, 0x38) - kPi;
+            const float dx = -std::sin(hd), dz = -std::cos(hd);
+            const float look = std::max(1.5f, 0.5f * speed);
+            const float onDir = ex * dx + ez * dz;
+            float latX = ex - onDir * dx, latZ = ez - onDir * dz;
+            const float lat = std::sqrt(latX * latX + latZ * latZ), latMax = look * 0.36f;
+            if (lat > latMax) latX *= latMax / lat, latZ *= latMax / lat;
+            const float aimX = dx * look + latX, aimZ = dz * look + latZ;
             const float along = (ex * t.vel.x + ez * t.vel.z) / speed;  // + = the puppet is behind
             float m = mag;
             if (along < -0.2f) m *= std::clamp(1.0f + along, 0.4f, 0.8f);  // ahead: ease off
-            if (ahead(aimX, aimZ) < 0.0f && r.err < 1.0f) {
-                Stand(desire);  // the aim point is behind us: wait instead of turning around
-            } else {
-                if ((DesireGait(t.move) & 0x0f) == 0) SetGait(desire, speed > 3.5f ? 4u : 1u);
-                Steer(desire, r.curHeading, aimX, aimZ, m);
-            }
+            if ((t.input.gait & 0x0f) == 0) SetGait(desire, speed > 3.5f ? 4u : 1u);
+            Steer(desire, r.curHeading, aimX, aimZ, m);
         }
     } else {
-        // Remote standing: walk into the spot if it's ahead and 0.3-1 m away, else turn in place to its facing. What
-        // the walk can't do precisely is left to the soft pull once the puppet stands.
+        // Remote standing. The puppet plays its own stop first (the stick was released, like the remote's) and is
+        // left alone while it does. Then: a gap of 0.7-2 m ahead is walked, releasing the stick 0.4 m short so the
+        // walk ends with the normal stop animation; smaller gaps drift in slowly (see the pull below); and the puppet
+        // turns in place to the remote's facing. (A walk-in down to 15 cm ended in an abrupt stop: it looked snappy.)
         if (!st.standingSince) st.standingSince = nowMs;
+        const bool stopped = nowMs - st.standingSince > kSettleMs;
         const bool spotAhead = ahead(ex, ez) > r.err * 0.5f;
-        if (r.err > 0.3f && r.err < 1.0f && spotAhead) st.walkIn = true;
-        if (r.err < 0.15f || !spotAhead || r.err >= 1.0f) st.walkIn = false;
+        if (stopped && r.err > 0.7f && r.err < 2.0f && spotAhead) st.walkIn = true;
+        if (r.err < 0.4f || !spotAhead || r.err >= 2.0f) st.walkIn = false;
         if (st.walkIn) {
             SetGait(desire, 1u);
-            Steer(desire, r.curHeading, ex, ez, std::clamp(r.err * 1.5f, 0.25f, 0.7f));
+            Steer(desire, r.curHeading, ex, ez, std::clamp(r.err, 0.4f, 0.8f));
         } else {
             Stand(desire);
-            Face(desire, r.curHeading, t.heading);
+            if (stopped) Face(desire, r.curHeading, t.heading);
         }
     }
     SetPuppetDesire(actor, desire);
@@ -201,8 +214,8 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
     // Corrections. Teleport: a large gap, or a pull that does not close the gap (blocked by an NPC-only obstacle).
     bool teleport = r.err > kTeleport;
     if (st.correctingSince && nowMs - st.correctingSince > 600.0 && r.err > st.correctStartErr * 0.8f) teleport = true;
-    // Standing still: once the puppet has stood for 0.3 s, a facing that is still > 20 deg off after 1.5 s is snapped.
-    const bool settled = !r.moving && st.standingSince && nowMs - st.standingSince > 300.0 && !st.walkIn;
+    // Standing still: a facing still > 20 deg off after 1.5 s (the turn in place did not take) is eased in.
+    const bool settled = !r.moving && st.standingSince && nowMs - st.standingSince > kSettleMs && !st.walkIn;
     float turnErr = std::fabs(WrapPi((t.heading - r.curHeading) * kDeg));
     if (!r.moving && turnErr > 20.0f * kDeg) {
         if (!st.headingOffSince) st.headingOffSince = nowMs;
@@ -225,7 +238,7 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
     }
     const bool faceSnap = st.headingOffSince && nowMs - st.headingOffSince > 1500.0;
     if (st.correctingSince || faceSnap) {
-        const float k = 1.0f - std::exp(-dt / kCorrectTau);
+        const float k = 1.0f - std::exp(-dt / (r.moving ? kCorrectTau : kCorrectTauStanding));
         // Pull toward the present position plus this frame's motion along the remote's velocity (the pull replaces the
         // animation's own motion for the frame).
         const Vec3 np{r.cur.x + t.vel.x * dt + (now.x - r.cur.x) * k, followHeight ? r.cur.y + r.dy * k : r.cur.y,

@@ -264,7 +264,7 @@ float LerpAngleDeg(float a, float b, float t) {
 
 // Position at render time: linear interpolation between the two samples around it (clamped to the newest), plus the
 // remote's velocity (m/s, from the surrounding samples) for path-following.
-bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveDesire& move, Vec3& vel) {
+bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveInput& input, Vec3& vel) {
     if (samples.empty()) return false;
     size_t ia = 0, ib = samples.size() - 1;
     if (renderT <= samples[ia].t) {
@@ -285,7 +285,7 @@ bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, f
     const float t = b->t > a->t ? static_cast<float>((renderT - a->t) / (b->t - a->t)) : 1.0f;
     pos = Vec3{a->s.x + (b->s.x - a->s.x) * t, a->s.y + (b->s.y - a->s.y) * t, a->s.z + (b->s.z - a->s.z) * t};
     heading = LerpAngleDeg(a->s.heading, b->s.heading, t);
-    move = b->s.move;
+    input = b->s.input;
     // velocity over a ~100 ms window ending at b (single-sample spans are too jittery)
     size_t iv = ib;
     while (iv > 0 && samples[ib].t - samples[iv].t < 100.0) --iv;
@@ -303,19 +303,18 @@ bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, f
     return true;
 }
 
-// Sparse encoding of the 0x110-byte locomotion desire: the non-zero u32 words.
-void EncodeDesire(const uint8_t* desire, MoveDesire& out) {
-    out.count = 0;
-    const uint32_t* w = reinterpret_cast<const uint32_t*>(desire);
-    for (int i = 0; i < kDesireWords && out.count < kMaxDesireEntries; ++i) {
-        if (!w[i]) continue;
-        out.idx[out.count] = static_cast<uint8_t>(i);
-        out.val[out.count] = w[i];
-        ++out.count;
-    }
+// The movement input inside the local player's 0x110-byte locomotion desire (shared/types.h MoveInput).
+MoveInput InputFromDesire(const uint8_t* desire) {
+    MoveInput in;
+    std::memcpy(&in.right, desire + 0x14 * 4, 4);
+    std::memcpy(&in.back, desire + 0x16 * 4, 4);
+    std::memcpy(&in.heading, desire + 0x38 * 4, 4);
+    uint32_t gait = 0;
+    std::memcpy(&gait, desire + 0x3f * 4, 4);
+    in.gait = static_cast<uint8_t>(gait & 0xff);
+    if (!(in.heading >= 0.0f && in.heading <= 6.3f)) in.heading = 0.0f;  // not a heading (stick released / garbage)
+    return in;
 }
-
-bool DesireMoving(const MoveDesire& m) { return (DesireGait(m) & 0x0f) != 0; }
 
 // Sync trace ([debug] net_trace=1): CSV per game copy (rdmp_trace[_N].csv) with a shared high-resolution clock, so the
 // traces of two copies on one PC can be compared (tools/sync_report.py):
@@ -361,7 +360,7 @@ void NetFrame(float /*gameTime*/) {
         Vec3 pos;
         float heading;
         bool stale;
-        MoveDesire move;
+        MoveInput input;
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -379,12 +378,12 @@ void NetFrame(float /*gameTime*/) {
         g_local.timeMs = static_cast<uint32_t>(static_cast<uint64_t>(nowMs));
         if (!g_local.timeMs) g_local.timeMs = 1;  // 0 = "no clock"
         static uint8_t desire[kDesireSize];
-        if (GetPlayerDesire(desire, nullptr)) EncodeDesire(desire, g_local.move);
+        if (GetPlayerDesire(desire, nullptr)) g_local.input = InputFromDesire(desire);
         float health = 0.0f;
         if (GetLocalPlayerHealth(health)) g_localHealth = health;
         g_localValid = true;
         if (g_trace) {
-            fprintf(g_trace, "L,%.2f,%.3f,%.3f,%.3f,%.2f,%.3f,%d,", traceT, pos.x, pos.y, pos.z, heading, speed, DesireMoving(g_local.move) ? 1 : 0);
+            fprintf(g_trace, "L,%.2f,%.3f,%.3f,%.3f,%.2f,%.3f,%d,", traceT, pos.x, pos.y, pos.z, heading, speed, (g_local.input.gait & 0x0f) ? 1 : 0);
             const uint32_t* w = reinterpret_cast<const uint32_t*>(desire);  // raw desire: every non-zero word (idx:hex)
             for (int i = 0; i < kDesireWords; ++i)
                 if (w[i]) fprintf(g_trace, "%02x:%08x ", i, w[i]);
@@ -406,7 +405,7 @@ void NetFrame(float /*gameTime*/) {
             else r.offset += (target - r.offset) * 0.02;
             r.haveOffset = !r.transit.empty();
             View& v = views[nViews];
-            if (Interpolate(r.samples, renderT - r.offset, v.pos, v.heading, v.move, v.vel)) {
+            if (Interpolate(r.samples, renderT - r.offset, v.pos, v.heading, v.input, v.vel)) {
                 v.id = it->first;
                 v.name = r.name;
                 v.stale = stale;
@@ -500,7 +499,7 @@ void NetFrame(float /*gameTime*/) {
         target.vel = v.vel;
         target.heading = v.heading;
         target.leadMs = v.leadMs;
-        target.move = v.move;
+        target.input = v.input;
         const PuppetDriveResult d = DrivePuppet(p.goh, p.drive, target, nowMs);
         if (d.teleported && d.err >= 0.0f && ++p.corrections <= 20)
             Log("net: player %u drift %.2f m (%s) -> teleport", v.id, d.err, d.moving ? "moving" : "idle");

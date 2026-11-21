@@ -18,7 +18,7 @@ struct PuppetTarget {
     Vec3 vel;              // remote velocity (m/s, horizontal) around pos
     float heading = 0.0f;  // remote facing (deg)
     float leadMs = 0.0f;   // how old pos is (the puppet shows the remote this much late)
-    net::MoveDesire move;  // the remote's locomotion desire
+    net::MoveInput input;  // the remote's movement input
 };
 
 // Per-puppet controller state.
@@ -49,8 +49,5 @@ struct PuppetDriveResult {
 void LoadPuppetControlConfig(const wchar_t* ini);
 
 PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget& t, double nowMs);
-
-// Gait bits of a desire (low byte of word 0x3f): 0 standing, 1 walk, 4 sprint.
-uint32_t DesireGait(const net::MoveDesire& m);
 
 }  // namespace rdmp
