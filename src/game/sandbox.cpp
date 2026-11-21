@@ -465,11 +465,8 @@ void RespawnPlayer() {
         g_spawnPos.x, g_spawnPos.y, g_spawnPos.z, h, oldGoh);
     if (!h) return;
     g_playerGoh = h;
-    // End the engine's death effects; nothing else does without a story script. (Open issue: the view still holds on
-    // the dead body until the first key press, then cuts to the new player; END_CURRENT_CAMERA_SHOT_TRANSITION does
-    // not help.)
-    NativeCall clearFx;
-    clearFx.Call(NativeHash("CLEAR_DEATHFX"));
+    // Open issue (HANDOFF.md): after a death the screen keeps showing the old body until the game reads any keyboard
+    // input; not yet understood.
     SetupLocalPlayer("respawn");
     // debug (collision_probe=2): run the river walk once more to test a second death/respawn
     if (g_respawns < 2 && GetPrivateProfileIntW(L"debug", L"collision_probe", 0, g_iniPath) == 2) RunOnMainThread([] { WalkProbeTick(); });
@@ -1849,17 +1846,32 @@ void ScriptFadeCamera(bool fadeIn, float milliseconds) {
     });
 }
 
+// Player control is what scripts asked for (toggleAllControls) AND not locked by our UI (the chat input is open: the
+// game reads the keyboard itself, so typing would otherwise move / crouch the player).
+bool g_scriptControl = true;
+bool g_uiInputLock   = false;
+
+void ApplyPlayerControl(const char* why) {
+    if (g_scriptControl && !g_uiInputLock) {
+        EnablePlayerControl(why);
+    } else {
+        DisablePlayerControl(why);
+    }
+}
+
 void ScriptSetPlayerControl(bool enabled) {
     RunOnMainThread([enabled] {
-        if (enabled) {
-            EnablePlayerControl("script setControl");
-            g_limbo = false;
-        }
-        else {
-            DisablePlayerControl("script setControl");
-        }
+        g_scriptControl = enabled;
+        if (enabled) g_limbo = false;
+        ApplyPlayerControl("script setControl");
         Log("script: setPlayerControl(%d)", enabled ? 1 : 0);
     });
+}
+
+void SetUiInputLock(bool locked) {
+    if (g_uiInputLock == locked) return;
+    g_uiInputLock = locked;
+    ApplyPlayerControl(locked ? "ui lock" : "ui unlock");
 }
 
 void ScriptSetPlayerHealth(float health) {

@@ -70,6 +70,8 @@ void ScriptFadeCamera(bool fadeIn, float milliseconds);
 void ScriptSetCameraTarget();
 void ScriptSetPlayerControl(bool enabled);
 void ScriptSetPlayerHealth(float health);
+// Main thread: our UI (chat input) holds the keyboard; player control stays off until released.
+void SetUiInputLock(bool locked);
 
 // Sets the loader's "finish loading" request bit (the frame update acts on it once the world is ready).
 void RequestFinishLoading(const char* why);

@@ -214,6 +214,8 @@ void FwStep() {
         case fw::ActionKind::CameraTarget: ScriptSetCameraTarget(); break;
         case fw::ActionKind::Control: ScriptSetPlayerControl(action.a != 0.0f); break;
         case fw::ActionKind::Health: ScriptSetPlayerHealth(action.a); break;
+        case fw::ActionKind::Kill: GameHost()->kill_local(); break;
+        case fw::ActionKind::HudText: GameHost()->show_text(static_cast<int>(action.a), action.text, static_cast<int>(action.b)); break;
         default: break;
         }
     }
@@ -736,6 +738,15 @@ void StartNetClient(const wchar_t* ini) {
     AddFrameCallback(&NetFrame);  // starts the framework client once the world is ready
     Log("net: enabled (server %s:%u, name \"%s\", client %ls, interp %u ms, stream in %.0f / out %.0f m)", g_host, g_port,
         g_name, g_fwDir, g_interpMs, g_streamIn, g_streamOut);
+}
+
+bool RemotePuppetPosition(unsigned long long netId, float out[3]) {
+    const auto it = g_puppetsById.find(static_cast<uint16_t>(netId));
+    if (it == g_puppetsById.end() || !it->second.goh || it->second.hidden) return false;
+    Vec3 p{};
+    if (!GetPuppetPosition(it->second.goh, p)) return false;
+    out[0] = p.x, out[1] = p.y, out[2] = p.z;
+    return true;
 }
 
 }  // namespace rdmp

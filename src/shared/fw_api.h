@@ -13,7 +13,10 @@ namespace rdmp::fw {
 
 // v3: server actions via poll_action. v4: blips, get_local_id.
 // v5: driven from the game's main thread; Host table (client script natives call into the game); cache folder.
-constexpr uint32_t kApiVersion = 5;
+// v6: invoke_native returns kResultSlots slots (Vector3 results); actions carry text (kill, HUD text); Host:
+//     show_text (styles) instead of print_text, kill_local, get_camera.
+constexpr uint32_t kApiVersion = 6;
+constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
 
@@ -43,6 +46,14 @@ enum class ActionKind : int32_t {
     CameraTarget = 3,  // attach the gameplay camera to the local player
     Control      = 4,  // a = 1 enable / 0 disable player control
     Health       = 5,  // a = health value to write
+    Kill         = 6,  // kill the local player (the game's death, with its animation)
+    HudText      = 7,  // a = TextStyle, b = milliseconds, text
+};
+
+// Engine HUD text styles (Host::show_text).
+enum class TextStyle : int32_t {
+    Subtitle = 0,  // bottom-centre line (PRINT_OBJECTIVE_B); one at a time, a new one replaces it
+    Big      = 1,  // big centred title (PRINT_BIG)
 };
 
 struct Action {
@@ -51,6 +62,17 @@ struct Action {
     float b = 0.0f;
     float c = 0.0f;
     float d = 0.0f;
+    char text[256] = {};
+};
+
+// The active game camera (Host::get_camera): orientation rows and position in world space (Y up), and the
+// vertical field of view in degrees.
+struct Camera {
+    float right[3];
+    float up[3];
+    float back[3];  // the camera looks along -back
+    float pos[3];
+    float fovY;
 };
 
 // A script blip (server entity RDMP::Blip, shared/blip.h), as currently replicated to us.
@@ -81,7 +103,8 @@ struct Host {
     uint32_t version;  // = kApiVersion
     LogFn log;
     // Any game native by hash (joaat of the lowercase name; game/scriptnatives.h). `args` are 8-byte slots (ints,
-    // floats and bools in the low 4 bytes, pointers whole); the result's low 4 bytes are the native's return value.
+    // floats and bools in the low 4 bytes, pointers whole). `result` receives kResultSlots slots: the low 4 bytes of the
+    // first are the native's return value; a Vector3 return fills more.
     // False when the hash is not registered or the registry check failed.
     bool (*invoke_native)(uint32_t hash, const uint64_t* args, int argc, uint64_t* result);
     // The local player: false while there is none. pos = Y-up world position, heading in degrees.
@@ -92,8 +115,16 @@ struct Host {
     void (*camera_to_player)();
     void (*set_health)(float health);
     int (*game_has_focus)();
-    // A short line on screen (the game's subtitle text), `milliseconds` long.
-    void (*print_text)(const char* text, int milliseconds);
+    // Engine HUD text (TextStyle), `milliseconds` long.
+    void (*show_text)(int style, const char* text, int milliseconds);
+    // Kills the local player through the game (KILL_ACTOR: death animation, then the usual death flow).
+    void (*kill_local)();
+    // The active game camera; false while there is none.
+    bool (*get_camera)(Camera* out);
+    // Our UI holds the keyboard (chat input open): player control off until released (scripts' control kept apart).
+    void (*set_input_lock)(int locked);
+    // Where the game draws a remote player (their puppet), Y up; false while it has none.
+    bool (*get_remote_position)(uint64_t netId, float out[3]);
 };
 
 // Function table filled by rdmp_client_get_api (one export keeps the dll boundary small).

@@ -137,7 +137,18 @@ namespace RDMP {
             return replication ? Framework::Networking::Replication::ClientEntities(*replication).GetEntity<T>(networkId) : nullptr;
         }
 
+        // In game: the renderer and ImGui come up later, once the overlay has seen the game's swapchain
+        // (Overlay::Frame -> RenderInit). Until then this behaves like InitHeadless.
+        bool InitInGame(const std::string &cacheRoot) {
+            return InitWith(cacheRoot, true);
+        }
+
         bool InitHeadless(const std::string &cacheRoot = {}) {
+            return InitWith(cacheRoot, false);
+        }
+
+      private:
+        bool InitWith(const std::string &cacheRoot, bool renderer) {
             // The framework's chat box timestamps every received line with ImGui::GetTime() even when nothing
             // renders it; a headless client has no ImGui context, so the first chat line (the wasted script's
             // "was wasted" announcement) dereferenced null and killed the game. A bare context is all it needs.
@@ -148,10 +159,10 @@ namespace RDMP {
             opts.gameName             = "Red Dead Redemption";
             opts.gameVersion          = "1.0.42.49788435";
             opts.modSlug              = "rdmp"; // must match the server's slug (build token)
-            opts.modVersion           = "0.4.0";
+            opts.modVersion           = "0.5.0";
             opts.cacheRoot            = cacheRoot;
-            opts.useRenderer          = false; // headless: no window / D3D / CEF view
-            opts.useImGUI             = false;
+            opts.useRenderer          = renderer; // headless (bot): no D3D / ImGui at all
+            opts.useImGUI             = renderer;
             opts.usePresence          = false; // no Discord
             opts.initRendererManually = true;
             opts.verifyBuildToken     = true; // must match the server: same game/mod identity, same salt
@@ -161,6 +172,8 @@ namespace RDMP {
             }
             return true;
         }
+
+      public:
 
         Framework::Networking::Replication::ReplicationManager *Replication() const {
             auto *client = Networking();

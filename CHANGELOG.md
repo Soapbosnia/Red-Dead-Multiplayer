@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.0: overlay, chat, nametags, structured API (2026-11-21)
+* **In-game overlay:** the Framework renderer + ImGui drawn into the game's own D3D12 frames (src/client/overlay.cpp:
+  Present / ExecuteCommandLists hooks, renderer brought up on the main thread once the swapchain is stable, the D3D12
+  backend's Begin / End around the ImGui pass). Swapchain and queue are borrowed, never AddRef'd (the game checks that).
+* **Chat box** (the Framework's): T opens it, Enter sends; server `playerChat` event (return false to veto) then a
+  broadcast with the player's name; `/command` lines become the `playerCommand` event. While typing the game gets no
+  keyboard (DirectInput hooks) and player control is held off.
+* **Nametags** above remote players (the Framework's nametag widget: name, health bar, distance fade), drawn at the
+  puppet the game shows; MTA-style setPlayerNametagText / Color / Showing.
+* **Script API restructured** into shared / server / client modules (src/shared/script_api.h, src/server/api_*.cpp,
+  src/client/api_*.cpp); docs/SCRIPTING.md lists every function by side. New: `dxDrawText / Rectangle / Line / Circle`,
+  `dxGetTextWidth`, `dxGetFontHeight`, `guiGetScreenSize`, `getScreenFromWorldPosition`, `getCameraPosition`,
+  `showCursor`, `getCursorPosition`, `clientClick`, `killPed`, `showGameText`, `outputChatBox` on both sides, `tocolor`,
+  `toggleAllControls` (replaces setElementControl), chat and nametag functions.
+* Server split: main.cpp (instance), state.cpp, api_players / elements / blips / hud.cpp.
+* fw_api v6: Vector3-sized native results, text in actions (kill, HUD text), Host show_text / kill_local /
+  get_camera / set_input_lock / get_remote_position. Native calls get a 64-byte result buffer (a Vector3 return used
+  to overflow it).
+* Natives whose registration is skipped in retail can be called through a small handler table (SET_BLIP_PRIORITY).
+* Resources: spawner and wasted simplified (no tokens, no setCameraTarget), devtools gained /commands, new scoreboard.
+* rdmp_bot fixed: it joined and was dropped (its download cache path was in the user profile).
+* Known issue: after a death the screen keeps showing the old body until the game reads a key press (HANDOFF.md).
+
 ## 0.4.1: first build, tested in game (2026-11-21)
 * Builds clean (`build.bat` -> BUILD OK): fixed the `rdmp_data` copy step (quoted `-D` arguments under VERBATIM) and a
   declaration-order error in the server; `build.ps1` puts the VS Installer folder on PATH so vcvars finds vswhere.

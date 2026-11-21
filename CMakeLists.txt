@@ -44,16 +44,29 @@ target_compile_options(RDMP PRIVATE /EHsc /utf-8)
 target_link_libraries(RDMP PRIVATE comdlg32 shell32 user32)
 
 # --- Framework side -------------------------------------------------------------------------------------------------
+find_package(minhook CONFIG REQUIRED)
 add_library(rdmp_client SHARED
     "${RDMP_SRC}/client/client.cpp"
-    "${RDMP_SRC}/client/client_natives.cpp")
-target_link_libraries(rdmp_client PRIVATE Framework::Client)
+    "${RDMP_SRC}/client/api_core.cpp"
+    "${RDMP_SRC}/client/api_players.cpp"
+    "${RDMP_SRC}/client/api_hud.cpp"
+    "${RDMP_SRC}/client/api_input.cpp"
+    "${RDMP_SRC}/client/api_natives.cpp"
+    "${RDMP_SRC}/client/hud.cpp"
+    "${RDMP_SRC}/client/overlay.cpp")
+target_link_libraries(rdmp_client PRIVATE Framework::Client minhook::minhook d3d12 dxgi dinput8 dxguid)
 target_include_directories(rdmp_client PRIVATE "${RDMP_SRC}")
 target_compile_definitions(rdmp_client PRIVATE NOMINMAX _USE_MATH_DEFINES)
 target_link_options(rdmp_client PRIVATE /MANIFEST:NO /DEBUG /OPT:REF /OPT:ICF)
 fw_stage_runtime(rdmp_client CLIENT)
 
-add_executable(RDMPServer "${RDMP_SRC}/server/main.cpp")
+add_executable(RDMPServer
+    "${RDMP_SRC}/server/main.cpp"
+    "${RDMP_SRC}/server/state.cpp"
+    "${RDMP_SRC}/server/api_players.cpp"
+    "${RDMP_SRC}/server/api_elements.cpp"
+    "${RDMP_SRC}/server/api_blips.cpp"
+    "${RDMP_SRC}/server/api_hud.cpp")
 target_link_libraries(RDMPServer PRIVATE Framework::Server)
 target_include_directories(RDMPServer PRIVATE "${RDMP_SRC}")
 target_compile_definitions(RDMPServer PRIVATE NOMINMAX _USE_MATH_DEFINES)

@@ -40,6 +40,24 @@ bool InImageText(uintptr_t p) {
 
 std::atomic<int> g_checked{0};  // 0 = not yet, 1 = ok, -1 = bad
 
+// Natives whose registration never runs in the retail game (their registrar calls are skipped), so they are missing
+// from the runtime table although their handlers are intact. Build 0x673783F3 addresses (re/natives_0x673783F3.csv);
+// only used when the table lookup fails.
+struct Unregistered {
+    uint32_t hash;
+    uintptr_t handler;
+};
+constexpr Unregistered kUnregistered[] = {
+    {0xCE87DA6F, 0x140653F10},  // SET_BLIP_PRIORITY(blip, priority)
+};
+
+uintptr_t ResolveUnregistered(uint32_t hash) {
+    for (const auto& u : kUnregistered) {
+        if (u.hash == hash) return InImageText(GameAddr(u.handler)) ? GameAddr(u.handler) : 0;
+    }
+    return 0;
+}
+
 }  // namespace
 
 uintptr_t ResolveNative(uint32_t hash) {
@@ -58,10 +76,10 @@ uintptr_t ResolveNative(uint32_t hash) {
             const uintptr_t fn = static_cast<uintptr_t>(table[idx].handler);
             return InImageText(fn) ? fn : 0;
         }
-        if (key == 0) return 0;  // never-used slot ends the chain (1 = tombstone: keep probing)
+        if (key == 0) return ResolveUnregistered(hash);  // never-used slot ends the chain (1 = tombstone: keep probing)
         idx = static_cast<uint32_t>((static_cast<uint64_t>(idx) + step) % cap);
     }
-    return 0;
+    return ResolveUnregistered(hash);
 }
 
 bool CheckNativeRegistry() {
@@ -88,10 +106,10 @@ bool NativeCall::Call(uint32_t hash) {
         return false;
     }
     NativeContext ctx;
-    ctx.result = &result_;
+    ctx.result = result_;
     ctx.argc = static_cast<uint32_t>(argc_);
     ctx.args = args_;
-    result_ = 0;
+    std::memset(result_, 0, sizeof(result_));
     reinterpret_cast<void (*)(NativeContext*)>(fn)(&ctx);
     // Vector fix-up, as the VM does after a native returns: copy each recorded vector back to the caller's.
     for (int i = 0; i < ctx.vecCount && i < 4; ++i) {

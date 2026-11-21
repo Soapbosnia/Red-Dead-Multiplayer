@@ -15,7 +15,7 @@ resources written in JavaScript (server *and* client side), and an MTA-style scr
 | `src/launcher/` | `RDMP.exe`: starts the local server (optional) and RDR.exe, loads `rdmp.dll` |
 | `src/bot/` | `rdmp_bot.exe`: headless fake player for testing a server |
 | `src/shared/` | entities (player, blip), blip icon table, the `rdmp.dll` ↔ `rdmp_client.dll` C API (`fw_api.h`) |
-| `resources/` | scripts: `spawner`, `wasted`, `playerblips`, `devtools` |
+| `resources/` | scripts: `spawner`, `wasted`, `playerblips`, `scoreboard`, `devtools` |
 | `config/rdmp.ini` | default settings (copied to `build/bin` on the first build) |
 | `re/` | reverse-engineering notes, the native table, Ghidra scripts and helpers |
 | `tools/` | one-off setup scripts |

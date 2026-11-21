@@ -99,16 +99,18 @@ class NativeCall {
     // Calls the native on the current thread (must be the game's main thread). False if the hash does not resolve.
     bool Call(uint32_t hash);
 
-    uint64_t ResultRaw() const { return result_; }
-    int32_t ResultInt() const { return static_cast<int32_t>(static_cast<uint32_t>(result_)); }
-    uint32_t ResultUint() const { return static_cast<uint32_t>(result_); }
-    bool ResultBool() const { return (result_ & 0xff) != 0; }
+    uint64_t ResultRaw() const { return result_[0]; }
+    const uint64_t* ResultSlots() const { return result_; }  // kResultSlots slots (a Vector3 result fills several)
+    int32_t ResultInt() const { return static_cast<int32_t>(static_cast<uint32_t>(result_[0])); }
+    uint32_t ResultUint() const { return static_cast<uint32_t>(result_[0]); }
+    bool ResultBool() const { return (result_[0] & 0xff) != 0; }
     float ResultFloat() const {
         float f = 0;
-        uint32_t bits = static_cast<uint32_t>(result_);
+        uint32_t bits = static_cast<uint32_t>(result_[0]);
         std::memcpy(&f, &bits, 4);
         return f;
     }
+    static constexpr int kResultSlots = 8;
 
   private:
     NativeCall& Raw(uint64_t v) {
@@ -118,7 +120,8 @@ class NativeCall {
     static constexpr int kMaxArgs = 32;
     uint64_t args_[kMaxArgs] = {};
     int argc_ = 0;
-    uint64_t result_ = 0;
+    // Natives that return a Vector3 write more than one slot: the buffer is big enough for any of them.
+    uint64_t result_[kResultSlots] = {};
 };
 
 }  // namespace rdmp

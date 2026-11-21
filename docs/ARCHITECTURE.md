@@ -16,6 +16,8 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
           FwClient        : Framework client instance (headless: no window of its own, ImGui context only for the
                             chat model), replication of Player and Blip entities
           client scripts  : run inside Update() on the game's main thread; natives call back through fw::Host
+          overlay         : D3D12 Present hook -> Framework renderer + ImGui (chat box, nametags, dx* drawing);
+                            DirectInput hooks keep typing out of the game
 ```
 
 * **Threading.** The Framework client is updated from the game's frame callback, so client scripts and the
@@ -25,6 +27,8 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
 * **Blips.** A server-side `Blip` entity (icon, colour, scale, distance, priority, flags, attachment), streamed per
   viewer with `ReplicationManager` viewer filters (`visibleTo`, `setElementVisibleTo`). `rdmp.dll` reconciles the
   replicated set with the game's blip pool every frame.
+* **Script API.** src/shared/script_api.h (helpers + shared functions), src/server/api_*.cpp, src/client/api_*.cpp;
+  docs/SCRIPTING.md lists each function with the side(s) it exists on.
 * **Resources.** The server records which resource created each element and destroys those elements when the
   resource stops.
 

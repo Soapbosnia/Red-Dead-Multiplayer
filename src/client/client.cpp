@@ -10,6 +10,8 @@
 
 #include "client/client_natives.h"
 #include "client/fw_client.h"
+#include "client/hud.h"
+#include "client/overlay.h"
 #include "shared/fw_api.h"
 
 #include <cmath>
@@ -78,14 +80,17 @@ namespace {
                 ClientNatives::Register(engine);
             };
             g_client->onChatLine = [](const std::string &text) {
-                if (g_host && g_host->print_text) {
-                    g_host->print_text(text.c_str(), 6000);
+                // The chat box shows it once the overlay is up; until then (or without it) the game's subtitle line.
+                if (!RDMP::Overlay::Ready() && g_host && g_host->show_text) {
+                    g_host->show_text(static_cast<int>(fw::TextStyle::Subtitle), text.c_str(), 6000);
                 }
             };
-            if (!g_client->InitHeadless(cacheFolder ? cacheFolder : "")) {
+            if (!g_client->InitInGame(cacheFolder ? cacheFolder : "")) {
                 g_client.reset();
                 return 0;
             }
+            RDMP::Hud::Attach(g_client.get(), host);
+            RDMP::Overlay::Install(g_client.get(), host);
             return 1;
         }
         catch (const std::exception &e) {
@@ -119,6 +124,7 @@ namespace {
                     action.b           = me->actB;
                     action.c           = me->actC;
                     action.d           = me->actD;
+                    strncpy_s(action.text, me->actText.c_str(), _TRUNCATE);
                     ++g_actionCount;
                 }
                 me->actAck = g_lastActSeq; // the server sends the next action once it sees this
@@ -149,8 +155,17 @@ namespace {
                 }
             }
 
-            ClientNatives::BeforeUpdate(); // key/render events for client scripts
-            g_client->Update();             // networking, replication, client scripts
+            ClientNatives::BeforeUpdate(); // key/click/render events for client scripts (they queue dx* drawing)
+            if (g_host->set_input_lock) { // typing in the chat must not move the player
+                static bool locked = false;
+                const bool typing  = RDMP::Hud::ChatInputActive();
+                if (typing != locked) {
+                    locked = typing;
+                    g_host->set_input_lock(typing ? 1 : 0);
+                }
+            }
+            RDMP::Overlay::Frame(&RDMP::Hud::Draw);    // renderer bring-up, then this frame's ImGui widgets
+            g_client->Update();             // networking, replication, client scripts, ImGui frame
         }
         catch (const std::exception &e) {
             Forwardf("fw: update threw: %s", e.what());

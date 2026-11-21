@@ -37,11 +37,10 @@ the Recycle Bin.
   asks once for RDR.exe (saved to `[game] exe`), starts the game suspended and injects `rdmp.dll`.
 * Logs: `build\bin\rdmp.log` (game DLL), `build\bin\logs\` (Framework client/server).
 
-**Status (2026-11-21, Claude Code session): BUILD OK and tested in game.** Works: boot + spawner fade-in at
-Armadillo, own blip in a random colour (BLIP_MP_COLOR_1 takes the tint), devtools F7/F8/F9, death ("was wasted" line,
-death animation) and respawn after 4 s without a crash, resource stop/restart removing its blips, rdmp_bot as a second
-player (puppet + blip). See CHANGELOG 0.4.1 for the fixes. Open: after a respawn the view stays on the dead body
-until the first key press.
+**Status (2026-11-21, 0.5.0): BUILD OK, tested in game.** Works: spawn at Armadillo, coloured blips, D3D12 overlay,
+chat box (T, broadcast, playerChat / playerCommand), nametags, scoreboard (dx drawing), devtools keys and /commands,
+death with animation (killPed) and respawn without a crash, resource stop/restart removing its elements, rdmp_bot.
+Open: the respawn freeze below.
 
 ## Architecture (short)
 * `rdmp.dll` (src/game): boot/sandbox (sp_idle root script, menus/legals skipped, player created, MTA-style limbo
@@ -86,8 +85,12 @@ until the first key press.
   F9 player list.
 
 ## To do
-1. Death camera: after the respawn the view holds on the dead body until the first input (CLEAR_DEATHFX and
-   END_CURRENT_CAMERA_SHOT_TRANSITION don't release it). Find what input resets in the camera manager.
-2. Delete the old trees above once the owner confirms; `git init` + first commit.
-3. Next features: more MTA API (vehicles/horses, peds, markers, text draw, timers, element data, commands),
-   client-side blip API, server browser/connect UI, a proper nametag/chat UI (only one on-screen line today).
+1. **Respawn freeze.** After a death + respawn the screen keeps showing the old body until the game reads any keyboard
+   input through DirectInput (even an unbound key such as F12 ends it). Measured: the game camera
+   (*(camMgr+0x28)) is already behind the new player, the camera manager's first 0x2000 bytes do not change when the
+   key ends it, game time keeps running, the game is not in pause state 4, and CLEAR_DEATHFX /
+   END_CURRENT_CAMERA_SHOT_TRANSITION / RESET_TIME_SINCE_LAST_INPUT do not end it. Next: find what consumes "any key"
+   after a death (follow the DirectInput keyboard state into the game, or diff the render / game state objects before and
+   after the key). No workaround (no injected input).
+2. Next features: see the proposals in the last session summary (vehicles/horses, peds, markers/colshapes, timers via
+   the Framework, client-side blips, server browser / connect screen, CEF web UI through the Framework's Web builtin).

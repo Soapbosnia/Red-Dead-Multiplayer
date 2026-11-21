@@ -70,6 +70,12 @@ namespace RDMP::Shared {
         float actB       = 0.0f;
         float actC       = 0.0f;
         float actD       = 0.0f;
+        std::string actText;         // the action's text, for actions that carry one (HUD text)
+
+        // Nametag (MTA setPlayerNametagText / Color / Showing), server fields every client reads.
+        std::string nametagText;      // empty = the nickname
+        uint32_t nametagColor  = 0;   // 0xAARRGGBB, 0 = default (white)
+        uint8_t nametagShowing = 1;
 
         // Sparse locomotion desire: indices into the engine's 0x44-word desire block and
         // their values. Drives the puppet's walk/run without touching its position.
@@ -114,6 +120,10 @@ namespace RDMP::Shared {
             fields.ServerField(actB);
             fields.ServerField(actC);
             fields.ServerField(actD);
+            fields.ServerField(actText);
+            fields.ServerField(nametagText);
+            fields.ServerField(nametagColor);
+            fields.ServerField(nametagShowing);
             fields.Field(desireCount);
             for (int i = 0; i < kMaxDesire; ++i) {
                 fields.Field(desireIdx[i]);
@@ -134,6 +144,10 @@ namespace RDMP::Shared {
             fields.Field(actB);
             fields.Field(actC);
             fields.Field(actD);
+            fields.Field(actText);
+            fields.Field(nametagText);
+            fields.Field(nametagColor);
+            fields.Field(nametagShowing);
         }
 
         void OnStateForced() override {
