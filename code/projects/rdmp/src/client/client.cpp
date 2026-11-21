@@ -203,6 +203,11 @@ namespace {
             remote             = fw::Remote {};
             remote.netId       = player->GetNetworkID();
             std::strncpy(remote.name, player->nickname.c_str(), sizeof(remote.name) - 1);
+            // One sample per transform update the Framework applied: its send time (moved onto our clock on receipt)
+            // numbers and times the sample, so rdmp.dll's interpolation buffer takes each new pose exactly once.
+            const auto sent  = static_cast<uint32_t>(player->GetLastTransformTime());
+            remote.s.seq     = sent;
+            remote.s.timeMs  = sent ? sent : 1;
             remote.s.x       = player->position.x;
             remote.s.y       = player->position.y;
             remote.s.z       = player->position.z;
