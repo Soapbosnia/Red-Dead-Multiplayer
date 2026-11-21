@@ -16,6 +16,7 @@
 #include <imgui.h>
 
 #include <graphics/backend/d3d12.h>
+#include <gui/manager.h>
 #include <graphics/renderer.h>
 #include <external/imgui/wrapper.h>
 
@@ -84,6 +85,9 @@ namespace RDMP::Overlay {
                         // The D3D12 backend leaves the frame to the host: Begin (back buffer, barrier, render target),
                         // the ImGui draw data recorded into its list, End (barrier back, submit on the game's queue).
                         backend->Begin();
+                        if (auto *web = g_client->GetWebManager()) {
+                            web->Render(); // web view textures (no-op until the menu started CEF)
+                        }
                         auto res = g_client->GetImGUI()->Render();
                         backend->End();
                         static bool first = true;
@@ -114,7 +118,9 @@ namespace RDMP::Overlay {
             if (!g_ready.load() || !g_client) {
                 return false;
             }
-            return g_client->GetChatBox().IsInputActive() || Framework::External::ImGUI::Wrapper::WantsTextInput();
+            auto *web = g_client->GetWebManager();
+            return g_client->GetChatBox().IsInputActive() || Framework::External::ImGUI::Wrapper::WantsTextInput() ||
+                   (web && web->IsAnyViewFocused());
         }
 
         HRESULT STDMETHODCALLTYPE DiGetDeviceStateHook(IDirectInputDevice8W *device, DWORD size, LPVOID data) {
@@ -168,8 +174,16 @@ namespace RDMP::Overlay {
             if (g_ready.load() && g_client && g_client->GetImGUI()) {
                 (void)g_client->GetImGUI()->ProcessEvent(hwnd, msg, wParam, lParam);
 
-                auto &chat        = g_client->GetChatBox();
-                const bool typing = chat.IsInputActive() || Framework::External::ImGUI::Wrapper::WantsTextInput();
+                auto &chat = g_client->GetChatBox();
+                if (auto *web = g_client->GetWebManager()) { // web views (the main menu) get the mouse and keys they want
+                    if (IsMouseMessage(msg)) {
+                        web->ProcessMouseEvent(hwnd, msg, wParam, lParam);
+                    }
+                    else if (IsKeyboardMessage(msg)) {
+                        web->ProcessKeyboardEvent(hwnd, msg, wParam, lParam);
+                    }
+                }
+                const bool typing = KeyboardBlocked();
                 // T opens the chat (the character that follows is swallowed so it is not typed).
                 static bool swallowChar = false;
                 if (msg == WM_KEYDOWN && !typing && chat.IsSessionActive() && wParam == 'T' && !(lParam & (1 << 30))) {
@@ -346,6 +360,9 @@ namespace RDMP::Overlay {
             if (draw) {
                 draw();
             }
+            if (auto *web = g_client->GetWebManager()) {
+                web->SubmitImGuiDraws(); // web views on top (the main menu covers the HUD)
+            }
         });
     }
 
@@ -363,6 +380,10 @@ namespace RDMP::Overlay {
         if (g_ready.load()) {
             Framework::External::ImGUI::Wrapper::ShowCursor(show);
         }
+    }
+
+    bool UiHasKeyboard() {
+        return KeyboardBlocked();
     }
 
     bool CursorShown() {

@@ -16,6 +16,8 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
           FwClient        : Framework client instance (headless: no window of its own, ImGui context only for the
                             chat model), replication of Player and Blip entities
           client scripts  : run inside Update() on the game's main thread; natives call back through fw::Host
+          frontend        : main menu (ui/ HTML in the Framework's CEF web UI): server browser + settings, shown
+                            while not on a server; server_query fetches GET /rdmp from servers and the masterlist
           overlay         : D3D12 Present hook -> Framework renderer + ImGui (chat box, nametags, dx* drawing);
                             DirectInput hooks keep typing out of the game
 ```

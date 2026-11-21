@@ -37,10 +37,11 @@ the Recycle Bin.
   asks once for RDR.exe (saved to `[game] exe`), starts the game suspended and injects `rdmp.dll`.
 * Logs: `build\bin\rdmp.log` (game DLL), `build\bin\logs\` (Framework client/server).
 
-**Status (2026-11-21, 0.5.0): BUILD OK, tested in game.** Works: spawn at Armadillo, coloured blips, D3D12 overlay,
-chat box (T, broadcast, playerChat / playerCommand), nametags, scoreboard (dx drawing), devtools keys and /commands,
-death with animation (killPed) and respawn without a crash, resource stop/restart removing its elements, rdmp_bot.
-Open: the respawn freeze below.
+**Status (2026-11-21, 0.6.0): BUILD OK, tested in game.** Repository: github.com/Soapbosnia/Red-Dead-Multiplayer
+(the Framework fork; this project is `code/projects/rdmp`, history kept). Works: main menu (server browser, settings,
+join / leave / rejoin), D3D12 overlay, chat, nametags, scoreboard, blips, death and respawn, resource restarts, bot.
+Open: the respawn freeze below. Native menus were not modified: see re/docs/FRONTEND_MAP.md for why (new pages need
+new Scaleform content in flash.rpf); the HTML menu replaces that plan, game settings stay native (pause menu).
 
 ## Architecture (short)
 * `rdmp.dll` (src/game): boot/sandbox (sp_idle root script, menus/legals skipped, player created, MTA-style limbo

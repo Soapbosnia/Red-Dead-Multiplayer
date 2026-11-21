@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Red Dead Multiplayer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="backdrop"></div>
+
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-top">RED DEAD</div>
+      <div class="brand-bottom">MULTIPLAYER</div>
+      <div class="brand-version" id="version"></div>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-page="servers">Servers</button>
+      <button class="nav-item" data-page="settings">Settings</button>
+      <button class="nav-item" id="quit">Quit</button>
+    </nav>
+    <div class="side-foot">Game options (video, audio, controls): <b>Esc</b> opens the game's own settings.</div>
+  </aside>
+
+  <main class="main">
+    <!-- Servers -->
+    <section class="page active" id="page-servers">
+      <header class="page-head">
+        <h1>Servers</h1>
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-list="internet">Internet</button>
+          <button class="tab" data-list="local">Local</button>
+          <button class="tab" data-list="favorites">Favorites</button>
+          <button class="tab" data-list="recent">Recent</button>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search servers" autocomplete="off">
+        <button class="btn" id="refresh">Refresh</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="servers">
+          <thead>
+            <tr><th class="c-fav"></th><th class="c-lock"></th><th>Name</th><th class="c-num">Players</th><th class="c-num">Ping</th><th class="c-addr">Address</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="empty" id="empty">Looking for servers&hellip;</div>
+      </div>
+
+      <footer class="connect-bar">
+        <label class="direct">
+          <span>Direct connect</span>
+          <input id="address" type="text" placeholder="host:port" spellcheck="false" autocomplete="off">
+        </label>
+        <button class="btn" id="favorite-toggle" disabled>Add to favorites</button>
+        <button class="btn btn-primary" id="connect">Connect</button>
+      </footer>
+    </section>
+
+    <!-- Settings -->
+    <section class="page" id="page-settings">
+      <header class="page-head"><h1>Settings</h1></header>
+      <div class="settings">
+        <h2>Multiplayer</h2>
+        <label class="row">
+          <span class="label">Nickname<small>Shown to other players</small></span>
+          <input id="nickname" type="text" maxlength="22" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="row">
+          <span class="label">Show nametags<small>Names and health above other players</small></span>
+          <input id="nametags" type="checkbox" class="toggle">
+        </label>
+        <label class="row">
+          <span class="label">Nametag distance<small id="distance-value"></small></span>
+          <input id="nametagDistance" type="range" min="10" max="200" step="5">
+        </label>
+        <label class="row">
+          <span class="label">Show chat<small>T opens the chat in game</small></span>
+          <input id="chat" type="checkbox" class="toggle">
+        </label>
+
+        <h2>Game</h2>
+        <p class="note">Video, audio, keyboard and gamepad options are the game's own: press <b>Esc</b> in game and open
+          Settings.</p>
+
+        <div class="settings-actions"><button class="btn btn-primary" id="save">Save</button></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="status" id="status"></div>
+
+  <div class="modal" id="password-modal" hidden>
+    <div class="modal-box">
+      <h2>Password</h2>
+      <p id="password-for"></p>
+      <input id="password" type="password" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn" id="password-cancel">Cancel</button>
+        <button class="btn btn-primary" id="password-ok">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

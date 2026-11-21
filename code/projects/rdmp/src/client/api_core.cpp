@@ -108,7 +108,7 @@ namespace ClientNatives {
         }
         // Keys, only while the player is driving the game (not typing in the chat box).
         static bool state[256] = {};
-        const bool live        = host->game_has_focus() != 0 && !RDMP::Hud::ChatInputActive();
+        const bool live        = host->game_has_focus() != 0 && !RDMP::Overlay::UiHasKeyboard();
         for (const auto &k : RDMP::ClientApi::Keys()) {
             const bool down = live && (GetAsyncKeyState(k.vk) & 0x8000) != 0;
             if (down == state[k.vk & 0xff]) {

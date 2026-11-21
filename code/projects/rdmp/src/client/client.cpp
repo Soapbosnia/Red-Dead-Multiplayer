@@ -10,6 +10,7 @@
 
 #include "client/client_natives.h"
 #include "client/fw_client.h"
+#include "client/frontend.h"
 #include "client/hud.h"
 #include "client/overlay.h"
 #include "shared/fw_api.h"
@@ -91,6 +92,7 @@ namespace {
             }
             RDMP::Hud::Attach(g_client.get(), host);
             RDMP::Overlay::Install(g_client.get(), host);
+            RDMP::Frontend::Attach(g_client.get(), host);
             return 1;
         }
         catch (const std::exception &e) {
@@ -158,12 +160,13 @@ namespace {
             ClientNatives::BeforeUpdate(); // key/click/render events for client scripts (they queue dx* drawing)
             if (g_host->set_input_lock) { // typing in the chat must not move the player
                 static bool locked = false;
-                const bool typing  = RDMP::Hud::ChatInputActive();
+                const bool typing  = RDMP::Overlay::UiHasKeyboard();
                 if (typing != locked) {
                     locked = typing;
                     g_host->set_input_lock(typing ? 1 : 0);
                 }
             }
+            RDMP::Frontend::Frame();                    // main menu (shown while not in a session)
             RDMP::Overlay::Frame(&RDMP::Hud::Draw);    // renderer bring-up, then this frame's ImGui widgets
             g_client->Update();             // networking, replication, client scripts, ImGui frame
         }

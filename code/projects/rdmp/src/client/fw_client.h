@@ -83,14 +83,14 @@ namespace RDMP {
             Log()->warn("disconnected from the server");
         }
 
-        bool Connect(const std::string &host, int32_t port, const std::string &nickname) {
+        bool Connect(const std::string &host, int32_t port, const std::string &nickname, const std::string &password = {}) {
             auto st     = GetCurrentState();
             st.host     = host;
             st.port     = port;
             st.nickname = nickname;
             SetCurrentState(st);
             Log()->info("connecting to {}:{} as '{}' ...", host, port, nickname);
-            return static_cast<bool>(ConnectToServer(host, port));
+            return static_cast<bool>(ConnectToServer(host, port, password));
         }
 
         // Our own avatar (the server hands ownership to the connection), nullptr until assigned.

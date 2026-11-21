@@ -39,6 +39,9 @@ namespace RDMP::Overlay {
     void ShowCursor(bool show);
     bool CursorShown();
 
+    // Our UI holds the keyboard: the chat input, an ImGui text field or a focused web view (the main menu).
+    bool UiHasKeyboard();
+
     // A mouse button event for scripts, queued on the window thread and drained on the main thread.
     struct Click {
         int button; // 0 left, 1 right, 2 middle

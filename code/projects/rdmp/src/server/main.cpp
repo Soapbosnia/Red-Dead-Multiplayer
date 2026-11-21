@@ -11,10 +11,15 @@
 #include <networking/replication/entity_registry.h>
 #include <scripting/engine_scope.h>
 #include <scripting/resource/resource_manager.h>
+#include <http/webserver.h>
+#include <httplib.h>
+#include <nlohmann/json.hpp>
 #include <utils/version.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <atomic>
+#include <fstream>
 #include <vector>
 
 namespace {
@@ -30,8 +35,38 @@ namespace {
             if (const char *v = std::getenv("RDMP_AUTO_RESPAWN")) {
                 _autoRespawn = std::atoi(v) != 0;
             }
-            Log()->info("RDMP server {} on Framework {} (game build 0x673783F3){}", GetOptions().modVersion, Framework::Utils::Version::rel,
-                        _autoRespawn ? ", built-in respawn on" : "");
+            LoadServerName();
+            if (auto *web = GetWebserver()) {
+                web->RegisterRequest("/rdmp", [this](const httplib::Request &, httplib::Response &res) {
+                    ServeInfo(res);
+                });
+            }
+            Log()->info("RDMP server \"{}\" {} on Framework {} (game build 0x673783F3){}", _name, GetOptions().modVersion,
+                        Framework::Utils::Version::rel, _autoRespawn ? ", built-in respawn on" : "");
+        }
+
+        // server.json "name" (the Framework ignores keys it does not know): what server browsers show.
+        void LoadServerName() {
+            std::ifstream file(GetOptions().modConfigFile);
+            if (!file) {
+                return;
+            }
+            const auto doc = nlohmann::json::parse(file, nullptr, false);
+            if (doc.is_object() && doc.contains("name") && doc["name"].is_string() && !doc["name"].get<std::string>().empty()) {
+                _name = doc["name"].get<std::string>();
+            }
+        }
+
+        // GET /rdmp on the game port: what a server browser lists (the Framework's GET / has no name or players).
+        void ServeInfo(httplib::Response &res) {
+            nlohmann::json info;
+            info["name"]       = _name;
+            info["version"]    = GetOptions().modVersion;
+            info["players"]    = _playerCount.load(); // this runs on the web server's thread: no world access here
+            info["maxPlayers"] = GetOptions().maxPlayers;
+            info["password"]   = !GetOptions().bindPassword.empty();
+            res.set_content(info.dump(), "application/json");
+            res.status = 200;
         }
 
         // Elements belong to the resource that created them and go when it stops (MTA behaviour).
@@ -46,6 +81,7 @@ namespace {
 
         void PostUpdate() override {
             auto &world = GetWorld();
+            _playerCount = static_cast<int>(world.IdsOf<Player>().size());
             FlushActions(world);
             UpdateAttachedBlips(world);
 
@@ -189,6 +225,8 @@ namespace {
 
       private:
         bool _autoRespawn = false; // RDMP_AUTO_RESPAWN=1: respawn at Armadillo 5 s after death (no resource needed)
+        std::string _name  = "Red Dead Multiplayer server";
+        std::atomic<int> _playerCount {0};
     };
 } // namespace
 

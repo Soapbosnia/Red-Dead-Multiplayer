@@ -72,6 +72,8 @@ void ScriptSetPlayerControl(bool enabled);
 void ScriptSetPlayerHealth(float health);
 // Main thread: our UI (chat input) holds the keyboard; player control stays off until released.
 void SetUiInputLock(bool locked);
+// The connection to the server ended: fade to black, no control (the main menu takes over).
+void ScriptLeaveSession();
 
 // Sets the loader's "finish loading" request bit (the frame update acts on it once the world is ready).
 void RequestFinishLoading(const char* why);

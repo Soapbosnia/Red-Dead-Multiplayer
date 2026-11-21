@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0: main menu and server browser (2026-11-21)
+* The project lives in the Framework fork (github.com/Soapbosnia/Red-Dead-Multiplayer, `code/projects/rdmp`).
+* **Main menu** (HTML in the Framework's CEF web UI, `ui/`): server browser with Internet (MafiaHub masterlist),
+  Local (this PC, ports 27015-27020), Favorites and Recent tabs, search, ping, password prompt, direct connect; a
+  Settings page (nickname, nametags, nametag distance, chat). Shown whenever the client is not on a server, back on a
+  disconnect with the reason. Game options stay in the game's own pause menu (Esc).
+* `[net] autoconnect` (default 0): the menu picks the server; 1 keeps the old connect-at-start development flow.
+* Server: `GET /rdmp` on the game port (name from server.json `"name"`, players, max players, password) for browsers.
+* Leaving a server fades to black and takes control away until the next server spawns the player.
+* playerblips: a player no longer sees their own blip.
+
 ## 0.5.0: overlay, chat, nametags, structured API (2026-11-21)
 * **In-game overlay:** the Framework renderer + ImGui drawn into the game's own D3D12 frames (src/client/overlay.cpp:
   Present / ExecuteCommandLists hooks, renderer brought up on the main thread once the swapchain is stable, the D3D12

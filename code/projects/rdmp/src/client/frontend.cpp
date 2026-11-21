@@ -1,0 +1,329 @@
+/*
+ * Main menu controller: see frontend.h.
+ */
+
+#include <utils/safe_win32.h>
+
+#include <gui/manager.h>
+#include <gui/view.h>
+#include <nlohmann/json.hpp>
+#include <utils/path.h>
+
+#include "client/frontend.h"
+#include "client/fw_client.h"
+#include "client/hud.h"
+#include "client/overlay.h"
+#include "client/server_query.h"
+#include "shared/fw_api.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <imgui.h>
+
+namespace RDMP::Frontend {
+    namespace {
+        using json = nlohmann::json;
+
+        FwClient *g_client           = nullptr;
+        const rdmp::fw::Host *g_host = nullptr;
+        bool g_failed                = false;
+        int g_viewId                 = 0;
+        bool g_pageReady             = false;
+        bool g_visible               = false;
+        float g_viewW = 0, g_viewH = 0;
+
+        std::filesystem::path g_binDir;
+        std::wstring g_ini;
+        json g_servers = {{"favorites", json::array()}, {"recent", json::array()}};
+
+        // What the menu is doing with the connection.
+        std::string g_pendingAddress; // "host:port" while connecting from the menu
+        bool g_wasConnected = false;
+
+        // ---- settings (rdmp.ini) ----
+        std::string IniString(const wchar_t *section, const wchar_t *key, const wchar_t *fallback) {
+            wchar_t w[256];
+            GetPrivateProfileStringW(section, key, fallback, w, 256, g_ini.c_str());
+            char utf8[512];
+            WideCharToMultiByte(CP_UTF8, 0, w, -1, utf8, sizeof(utf8), nullptr, nullptr);
+            return utf8;
+        }
+        int IniInt(const wchar_t *section, const wchar_t *key, int fallback) {
+            return static_cast<int>(GetPrivateProfileIntW(section, key, fallback, g_ini.c_str()));
+        }
+        void IniWrite(const wchar_t *section, const wchar_t *key, const std::string &value) {
+            wchar_t w[512];
+            MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, w, 512);
+            WritePrivateProfileStringW(section, key, w, g_ini.c_str());
+        }
+
+        json Settings() {
+            return {{"nickname", IniString(L"net", L"name", L"player")},
+                    {"nametags", IniInt(L"client", L"nametags", 1) != 0},
+                    {"nametagDistance", IniInt(L"client", L"nametag_distance", 60)},
+                    {"chat", IniInt(L"client", L"chat", 1) != 0}};
+        }
+
+        void ApplySettings() {
+            Hud::SetNametagsEnabled(IniInt(L"client", L"nametags", 1) != 0);
+            Hud::SetNametagDrawDistance(static_cast<float>(IniInt(L"client", L"nametag_distance", 60)));
+            Hud::SetChatVisible(IniInt(L"client", L"chat", 1) != 0);
+        }
+
+        std::string CleanNickname(std::string name) {
+            name.erase(std::remove_if(name.begin(), name.end(), [](unsigned char c) { return c < 0x20 || c == '"' || c == '\\'; }), name.end());
+            if (name.size() > 22) {
+                name.resize(22);
+            }
+            return name.empty() ? std::string("player") : name;
+        }
+
+        // ---- servers.json ----
+        std::filesystem::path ServersFile() {
+            return g_binDir / "servers.json";
+        }
+        void LoadServers() {
+            std::ifstream file(ServersFile());
+            if (!file) {
+                return;
+            }
+            const auto doc = json::parse(file, nullptr, false);
+            if (doc.is_object()) {
+                for (const char *list : {"favorites", "recent"}) {
+                    if (doc.contains(list) && doc[list].is_array()) {
+                        g_servers[list] = doc[list];
+                    }
+                }
+            }
+        }
+        void SaveServers() {
+            std::ofstream file(ServersFile(), std::ios::trunc);
+            file << g_servers.dump(2);
+        }
+        bool SameServer(const json &entry, const std::string &host, int port) {
+            return entry.value("host", std::string()) == host && entry.value("port", 0) == port;
+        }
+        void Remember(const char *list, const std::string &host, int port, const std::string &name, size_t keep) {
+            auto &arr = g_servers[list];
+            for (auto it = arr.begin(); it != arr.end();) {
+                it = SameServer(*it, host, port) ? arr.erase(it) : it + 1;
+            }
+            arr.insert(arr.begin(), json {{"host", host}, {"port", port}, {"name", name}});
+            while (arr.size() > keep) {
+                arr.erase(arr.end() - 1);
+            }
+            SaveServers();
+        }
+
+        std::vector<ServerQuery::Address> AddressesOf(const char *list) {
+            std::vector<ServerQuery::Address> out;
+            for (const auto &e : g_servers[list]) {
+                out.push_back({e.value("host", std::string("127.0.0.1")), static_cast<uint16_t>(e.value("port", 27015))});
+            }
+            return out;
+        }
+
+        // ---- page bridge ----
+        Framework::GUI::View *View() {
+            auto *web = g_client ? g_client->GetWebManager() : nullptr;
+            return web && g_viewId ? web->GetView(g_viewId) : nullptr;
+        }
+
+        void Send(const std::string &type, const json &data) {
+            auto *view = View();
+            if (!view || !g_pageReady) {
+                return;
+            }
+            const json message = {{"type", type}, {"data", data}};
+            view->EvaluateScript("window.rdmp && window.rdmp.receive(" + message.dump() + ");");
+        }
+
+        void Refresh(const std::string &list) {
+            if (list == "internet") {
+                ServerQuery::QueryMasterlist(IniString(L"browser", L"masterlist", L"https://masterlist.mafiahub.dev"),
+                                             IniString(L"browser", L"gamemode", L"rdmp"));
+            }
+            else if (list == "local") {
+                // This PC: the default port and the next few (several servers on one machine).
+                std::vector<ServerQuery::Address> local;
+                for (uint16_t port = 27015; port <= 27020; ++port) {
+                    local.push_back({"127.0.0.1", port});
+                }
+                ServerQuery::QueryAddresses("local", local);
+            }
+            else if (list == "favorites" || list == "recent") {
+                ServerQuery::QueryAddresses(list, AddressesOf(list.c_str()));
+            }
+        }
+
+        void Connect(const std::string &host, int port, const std::string &password) {
+            if (host.empty() || port <= 0 || port > 65535 || !g_client) {
+                Send("status", {{"state", "error"}, {"message", "Enter a server address (host:port)."}});
+                return;
+            }
+            const std::string nickname = CleanNickname(IniString(L"net", L"name", L"player"));
+            g_pendingAddress           = host + ":" + std::to_string(port);
+            Send("status", {{"state", "connecting"}, {"message", "Connecting to " + g_pendingAddress + " ..."}});
+            if (!g_client->Connect(host, port, nickname, password)) {
+                Send("status", {{"state", "error"}, {"message", "Could not start a connection to " + g_pendingAddress + "."}});
+                g_pendingAddress.clear();
+                return;
+            }
+            Remember("recent", host, port, "", 20);
+            Send("lists", g_servers);
+        }
+
+        void OnPageEvent(const std::string &name, const std::string &payload) {
+            const json data = json::parse(payload.empty() ? "{}" : payload, nullptr, false);
+            if (name == "ready") {
+                g_pageReady = true;
+                Send("settings", Settings());
+                Send("lists", g_servers);
+                Send("version", {{"version", g_client ? g_client->GetOptions().modVersion : ""}});
+            }
+            else if (name == "refresh" && data.is_object()) {
+                Refresh(data.value("list", std::string("local")));
+            }
+            else if (name == "connect" && data.is_object()) {
+                Connect(data.value("host", std::string()), data.value("port", 27015), data.value("password", std::string()));
+            }
+            else if (name == "favorite" && data.is_object()) {
+                const std::string host = data.value("host", std::string());
+                const int port         = data.value("port", 27015);
+                if (data.value("add", true)) {
+                    Remember("favorites", host, port, data.value("name", std::string()), 200);
+                }
+                else {
+                    auto &arr = g_servers["favorites"];
+                    for (auto it = arr.begin(); it != arr.end();) {
+                        it = SameServer(*it, host, port) ? arr.erase(it) : it + 1;
+                    }
+                    SaveServers();
+                }
+                Send("lists", g_servers);
+            }
+            else if (name == "settings" && data.is_object()) {
+                IniWrite(L"net", L"name", CleanNickname(data.value("nickname", std::string("player"))));
+                IniWrite(L"client", L"nametags", data.value("nametags", true) ? "1" : "0");
+                IniWrite(L"client", L"nametag_distance", std::to_string(std::clamp(data.value("nametagDistance", 60), 5, 500)));
+                IniWrite(L"client", L"chat", data.value("chat", true) ? "1" : "0");
+                ApplySettings();
+                Send("settings", Settings());
+                Send("status", {{"state", "info"}, {"message", "Settings saved."}});
+            }
+            else if (name == "quit") {
+                if (HWND window = GetForegroundWindow()) {
+                    PostMessageW(window, WM_CLOSE, 0, 0);
+                }
+            }
+        }
+
+        void BringUp() {
+            auto *web = g_client->GetWebManager();
+            if (!web || !g_client->GetRenderer()) {
+                return;
+            }
+            float w, h;
+            Overlay::ScreenSize(w, h);
+            if (w <= 0 || h <= 0) {
+                return; // the first widget pass has not run yet
+            }
+            if (auto res = web->Init(g_binDir.string(), {static_cast<int>(w), static_cast<int>(h)}, g_client->GetRenderer(), false); !res) {
+                g_failed = true;
+                Log()->error("menu: the web UI did not start: {}", res.GetError().message);
+                return;
+            }
+            web->RegisterResourceDirectory("rdmp", g_binDir / "ui");
+            g_viewId = web->CreateView(Framework::GUI::Manager::ResourceURL("rdmp", "index.html"), 0, 0);
+            auto *view = web->GetView(g_viewId);
+            if (!view) {
+                g_failed = true;
+                Log()->error("menu: could not create the menu view");
+                return;
+            }
+            view->SetZIndex(1000);
+            view->SetAlwaysComposite(true);
+            for (const char *event : {"ready", "refresh", "connect", "favorite", "settings", "quit"}) {
+                const std::string name = event;
+                view->AddEventListener("rdmp:" + name, [name](const std::string &payload) {
+                    OnPageEvent(name, payload);
+                });
+            }
+            g_viewW = w, g_viewH = h;
+            Log()->info("menu: web UI up ({}x{})", w, h);
+        }
+
+        void SetVisible(bool visible) {
+            auto *view = View();
+            if (!view || visible == g_visible) {
+                return;
+            }
+            g_visible = visible;
+            view->Display(visible);
+            view->Focus(visible);
+            Overlay::ShowCursor(visible);
+        }
+    } // namespace
+
+    void Attach(FwClient *client, const rdmp::fw::Host *host) {
+        g_client = client;
+        g_host   = host;
+        g_binDir = std::filesystem::path(Framework::Utils::GetModuleDirW());
+        g_ini    = (g_binDir / "rdmp.ini").wstring();
+        LoadServers();
+        ApplySettings();
+    }
+
+    void Frame() {
+        if (!g_client || g_failed || !Overlay::Ready()) {
+            return;
+        }
+        if (!g_viewId) {
+            BringUp();
+            return;
+        }
+        // Track the window size.
+        float w, h;
+        Overlay::ScreenSize(w, h);
+        if (w > 0 && h > 0 && (w != g_viewW || h != g_viewH)) {
+            g_viewW = w, g_viewH = h;
+            g_client->GetWebManager()->Resize(static_cast<int>(w), static_cast<int>(h));
+        }
+
+        // Shown while not in a session.
+        const bool connected = g_client->connected;
+        if (connected && !g_wasConnected) {
+            Send("status", {{"state", "connected"}, {"message", "Connected."}});
+            g_pendingAddress.clear();
+        }
+        if (!connected && g_wasConnected) {
+            Send("status", {{"state", "error"}, {"message", "Disconnected from the server."}});
+        }
+        if (!connected && !g_pendingAddress.empty() &&
+            g_client->GetConnectionPhase() == Framework::Integrations::Client::ConnectionPhase::Disconnected) {
+            Send("status", {{"state", "error"}, {"message", "Could not connect to " + g_pendingAddress + "."}});
+            g_pendingAddress.clear();
+        }
+        g_wasConnected = connected;
+        SetVisible(!connected);
+
+        for (const auto &info : ServerQuery::Poll()) {
+            Send("server", {{"list", info.list}, {"host", info.host}, {"port", info.port}, {"online", info.online}, {"name", info.name},
+                            {"version", info.version}, {"players", info.players}, {"maxPlayers", info.maxPlayers},
+                            {"password", info.password}, {"ping", info.pingMs}});
+        }
+        std::string list, message;
+        while (ServerQuery::PollError(list, message)) {
+            Send("listError", {{"list", list}, {"message", message}});
+        }
+    }
+
+    bool Visible() {
+        return g_visible;
+    }
+
+    void Shutdown() {
+        ServerQuery::Shutdown();
+    }
+} // namespace RDMP::Frontend

@@ -155,6 +155,9 @@ fw::Api g_api{};
 bool g_fwUp = false;
 fw::Conn g_conn = fw::Conn::Connecting;
 ULONGLONG g_nextStats = 0, g_nextRetry = 0;
+// rdmp.ini [net] autoconnect: 1 = connect to [net] server at start and keep retrying (development); 0 (default) = the
+// client's main menu (server browser) decides where to connect.
+bool g_autoConnect = false;
 uint32_t g_seq = 0, g_samples = 0, g_lastSentTime = 0;
 
 void FwLog(const char* line) { Log("%s", line); }
@@ -178,8 +181,12 @@ bool FwStart() {
         Log("net: framework client init failed");
         return false;
     }
-    Log("net: framework client up, connecting to %s:%u as \"%s\"", g_host, g_port, g_name);
-    g_api.connect(g_host, g_port, g_name);
+    if (g_autoConnect) {
+        Log("net: framework client up, connecting to %s:%u as \"%s\"", g_host, g_port, g_name);
+        g_api.connect(g_host, g_port, g_name);
+    } else {
+        Log("net: framework client up; the main menu picks the server");
+    }
     return true;
 }
 
@@ -200,9 +207,12 @@ void FwStep() {
     const fw::Conn conn = g_api.update();
     if (conn != g_conn) {
         Log("net: connection %s", conn == fw::Conn::Connected ? "established" : conn == fw::Conn::Connecting ? "connecting" : "closed");
+        if (g_conn == fw::Conn::Connected && conn != fw::Conn::Connected) {
+            ScriptLeaveSession();  // back to limbo behind the main menu
+        }
         g_conn = conn;
     }
-    if (conn == fw::Conn::Disconnected && now >= g_nextRetry) {  // server down / dropped: retry every 5 s
+    if (g_autoConnect && conn == fw::Conn::Disconnected && now >= g_nextRetry) {  // server down / dropped: retry every 5 s
         g_nextRetry = now + 5000;
         g_api.connect(g_host, g_port, g_name);
     }
@@ -703,6 +713,7 @@ void StartNetClient(const wchar_t* ini) {
     }
     WideCharToMultiByte(CP_UTF8, 0, w, -1, g_name, sizeof(g_name), nullptr, nullptr);
     g_name[kNameLen - 1] = '\0';
+    g_autoConnect = GetPrivateProfileIntW(L"net", L"autoconnect", 0, ini) != 0;
     g_interpMs = GetPrivateProfileIntW(L"net", L"interp_ms", 30, ini);
     g_streamIn = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_in", 150, ini));
     g_streamOut = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_out", 200, ini));

@@ -53,6 +53,8 @@ add_library(rdmp_client SHARED
     "${RDMP_SRC}/client/api_input.cpp"
     "${RDMP_SRC}/client/api_natives.cpp"
     "${RDMP_SRC}/client/hud.cpp"
+    "${RDMP_SRC}/client/frontend.cpp"
+    "${RDMP_SRC}/client/server_query.cpp"
     "${RDMP_SRC}/client/overlay.cpp")
 target_link_libraries(rdmp_client PRIVATE Framework::Client minhook::minhook d3d12 dxgi dinput8 dxguid)
 target_include_directories(rdmp_client PRIVATE "${RDMP_SRC}")
@@ -84,8 +86,10 @@ fw_stage_runtime(rdmp_bot CLIENT)
 # config/rdmp.ini is copied only when build/bin has none, so local edits to build/bin/rdmp.ini survive rebuilds.
 add_custom_target(rdmp_data ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/resources" "${CMAKE_BINARY_DIR}/bin/resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/ui" "${CMAKE_BINARY_DIR}/bin/ui"
     COMMAND ${CMAKE_COMMAND} "-DSRC=${CMAKE_CURRENT_LIST_DIR}/config/rdmp.ini" "-DDST=${CMAKE_BINARY_DIR}/bin/rdmp.ini"
             -P "${CMAKE_CURRENT_LIST_DIR}/cmake/CopyIfMissing.cmake"
     COMMENT "Staging resources and rdmp.ini"
     VERBATIM)
 add_dependencies(RDMPServer rdmp_data)
+add_dependencies(rdmp_client rdmp_data)

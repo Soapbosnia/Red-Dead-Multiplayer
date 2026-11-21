@@ -15,6 +15,7 @@ resources written in JavaScript (server *and* client side), and an MTA-style scr
 | `src/launcher/` | `RDMP.exe`: starts the local server (optional) and RDR.exe, loads `rdmp.dll` |
 | `src/bot/` | `rdmp_bot.exe`: headless fake player for testing a server |
 | `src/shared/` | entities (player, blip), blip icon table, the `rdmp.dll` ↔ `rdmp_client.dll` C API (`fw_api.h`) |
+| `ui/` | the main menu (HTML/CSS/JS): server browser and settings |
 | `resources/` | scripts: `spawner`, `wasted`, `playerblips`, `scoreboard`, `devtools` |
 | `config/rdmp.ini` | default settings (copied to `build/bin` on the first build) |
 | `re/` | reverse-engineering notes, the native table, Ghidra scripts and helpers |
@@ -32,6 +33,13 @@ build.bat            configure + build everything into build\bin   (log: build\b
 build.bat clean      from scratch
 build.bat RDMPServer one target
 ```
+
+## Main menu
+
+The game opens on the main menu: server browser (Internet / Local / Favorites / Recent, direct connect) and the
+Multiplayer settings (nickname, nametags, chat). It is plain HTML/CSS/JS in `ui/`, shown in the Framework's web UI;
+favourites and recent servers are kept in `servers.json`, settings in `rdmp.ini`. A server's browser name is
+`"name"` in its `server.json`.
 
 ## Run
 

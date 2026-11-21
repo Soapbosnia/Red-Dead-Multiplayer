@@ -1791,8 +1791,13 @@ bool IsWorldReady() {
     return g_worldReady;
 }
 
+// Player control is what scripts asked for (toggleAllControls / spawnPlayer) AND not locked by our UI (ApplyPlayerControl).
+bool g_scriptControl = true;
+bool g_uiInputLock   = false;
+
 void ScriptSpawnPlayer(const Vec3& pos, float heading) {
     RunOnMainThread([pos, heading] {
+        g_scriptControl = true;  // spawning gives control (MTA: spawnPlayer)
         // The player is created on the first spawnPlayer call: nothing in the mod spawns it at boot
         // (rdmp.ini [sandbox] spawn_player=0), so the script owns the spawn point and the respawn.
         if (!g_playerSpawned) {
@@ -1848,8 +1853,6 @@ void ScriptFadeCamera(bool fadeIn, float milliseconds) {
 
 // Player control is what scripts asked for (toggleAllControls) AND not locked by our UI (the chat input is open: the
 // game reads the keyboard itself, so typing would otherwise move / crouch the player).
-bool g_scriptControl = true;
-bool g_uiInputLock   = false;
 
 void ApplyPlayerControl(const char* why) {
     if (g_scriptControl && !g_uiInputLock) {
@@ -1873,6 +1876,18 @@ void SetUiInputLock(bool locked) {
     g_uiInputLock = locked;
     ApplyPlayerControl(locked ? "ui lock" : "ui unlock");
 }
+
+// The session ended (disconnected / kicked): black screen and no control until a script spawns the player again on the
+// next server, like a player who just joined.
+void ScriptLeaveSession() {
+    RunOnMainThread([] {
+        EngineFadeToBlack(0.5f, "left the server");
+        g_scriptControl = false;
+        g_limbo         = true; // the next server's spawnPlayer leaves limbo and gives control back
+        ApplyPlayerControl("left the server");
+    });
+}
+
 
 void ScriptSetPlayerHealth(float health) {
     // The engine never sees 0: writing 0 into the health component makes the game tear the actor down on the
