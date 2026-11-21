@@ -15,6 +15,10 @@ void SetLocoPlayerActor(uintptr_t actor);
 // Latest desire produced by the local player's input (false until captured). seq increments per capture.
 bool GetPlayerDesire(uint8_t* out, uint32_t* seq);
 
+// Debug: count an actor's locomotion updates and keep its desire word 0x16 (stick forward).
+void SetLocoWatchActor(uintptr_t actor);
+uint32_t LocoWatchCalls(uint32_t* desire16);
+
 // Debug: address of the local player's desire block (0 until its first locomotion update).
 uintptr_t PlayerDesireAddress();
 

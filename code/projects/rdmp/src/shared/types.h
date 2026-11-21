@@ -33,6 +33,10 @@ struct PlayerState {
     float heading = 0;
     float speed = 0;      // horizontal m/s
     MoveInput input;
+    // The player's controller state: the effective value of every on-foot input (game/puppet_player.h; sticks 0x7f =
+    // centre). Puppets in player mode are driven by the game's own player code from these.
+    static constexpr int kControlCount = 30;
+    uint8_t controls[kControlCount] = {};
 };
 
 }  // namespace rdmp::net

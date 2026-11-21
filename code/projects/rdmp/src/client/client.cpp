@@ -150,6 +150,7 @@ namespace {
                     me->moveBack    = g_local.input.back;
                     me->moveHeading = g_local.input.heading;
                     me->gait        = g_local.input.gait;
+                    std::memcpy(me->controls, g_local.controls, sizeof(me->controls));
                 }
             }
 
@@ -216,6 +217,7 @@ namespace {
             remote.s.input.back    = stick(player->moveBack);
             remote.s.input.heading = player->moveHeading;
             remote.s.input.gait    = player->gait;
+            std::memcpy(remote.s.controls, player->controls, sizeof(remote.s.controls));
         });
         return n;
     }

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "locomotion.h"
+#include "puppet_player.h"
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
@@ -27,7 +28,9 @@ namespace {
 struct Step {
     double t;  // ms from the first step
     uint8_t desire[kDesireSize];
+    PlayerControls controls;  // controller state, when the trace has it (then the replay drives the input instead)
 };
+bool g_controlsMode = false;
 
 std::vector<Step> g_route;
 Vec3 g_startPos{};  // where the recording started (each loop starts there)
@@ -77,6 +80,18 @@ bool LoadRoute(const wchar_t* path) {
             if (idx < kDesireSize / 4) w[idx] = val;
             words += used;
         }
+        if (const char* cs = strstr(line, ",C:")) {
+            cs += 3;
+            bool ok = true;
+            for (int i = 0; i < kInputCount && ok; ++i) {
+                unsigned v = 0;
+                ok = sscanf_s(cs + i * 2, "%2x", &v) == 1;
+                s.controls.value[i] = static_cast<uint8_t>(v);
+            }
+            if (const char* hs = strstr(cs, ",H:")) s.controls.heading = static_cast<float>(atof(hs + 3));
+            s.controls.valid = ok;
+            if (ok) g_controlsMode = true;
+        }
         g_route.push_back(s);
     }
     fclose(f);
@@ -113,12 +128,14 @@ void AutopilotFrame(float) {
     while (next + 1 < g_route.size() && g_route[next + 1].t <= t) ++next;
     if (t > g_route.back().t) {
         SetPlayerDesireOverride(nullptr);
+        SetLocalControlsOverride(nullptr);
         startAt = now + 3000.0;  // pause, then again from the start
         next = 0;
         Log("autopilot: route done, looping in 3 s");
         return;
     }
-    SetPlayerDesireOverride(g_route[next].desire);
+    if (g_controlsMode) SetLocalControlsOverride(&g_route[next].controls);
+    else SetPlayerDesireOverride(g_route[next].desire);
 }
 
 }  // namespace
@@ -140,7 +157,7 @@ void StartAutopilot(const wchar_t* ini) {
         return;
     }
     AddFrameCallback(&AutopilotFrame);
-    Log("autopilot: %zu steps from %ls", g_route.size(), path.c_str());
+    Log("autopilot: %zu steps from %ls (%s)", g_route.size(), path.c_str(), g_controlsMode ? "controller state" : "movement request");
 }
 
 }  // namespace rdmp

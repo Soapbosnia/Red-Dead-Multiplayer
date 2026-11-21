@@ -73,6 +73,8 @@ def report(name, rows, truth, t0, t_from, t_to):
             continue
         x, y, z, h, speed = tr
         he = math.hypot(r["px"] - x, r["pz"] - z)
+        if he > 3.0:  # a teleport (spawn, autopilot loop reset): not sync error
+            continue
         ve = r["py"] - y
         te = math.hypot(r["tx"] - x, r["tz"] - z)
         (herr_m if speed > 0.3 else herr_s).append(he)
@@ -120,7 +122,9 @@ def report(name, rows, truth, t0, t_from, t_to):
             tr = truth_at(truth, r["t"] - d)
             if tr is None or tr[4] <= 0.3:
                 continue
-            errs.append(math.hypot(r["px"] - tr[0], r["pz"] - tr[2]))
+            e = math.hypot(r["px"] - tr[0], r["pz"] - tr[2])
+            if e <= 3.0:
+                errs.append(e)
         if errs and (best is None or statistics.mean(errs) < best[1]):
             best = (d, statistics.mean(errs), pct(errs, .95))
     if best:

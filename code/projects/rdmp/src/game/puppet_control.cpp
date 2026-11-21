@@ -124,7 +124,7 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
     const float dt = st.lastMs > 0 ? std::clamp(static_cast<float>(nowMs - st.lastMs) / 1000.0f, 0.001f, 0.1f) : 1.0f / 60.0f;
     st.lastMs = nowMs;
 
-    const uintptr_t actor = PreparePuppetLocomotion(goh);
+    const uintptr_t actor = t.playerDriven ? ActorFromGohHandle(goh) : PreparePuppetLocomotion(goh);
     const bool havePose = GetPuppetPose(goh, r.cur, r.curHeading);
     if (!actor || !havePose) {
         SetPuppetTransform(goh, t.pos, t.heading);
@@ -202,7 +202,7 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
             if (stopped) Face(desire, r.curHeading, t.heading);
         }
     }
-    SetPuppetDesire(actor, desire);
+    if (!t.playerDriven) SetPuppetDesire(actor, desire);
 
     // On another level than the remote (it stepped onto a crate / ledge, or the puppet fell off one) for 0.2 s: the
     // puppet can't climb, so the pull includes height.
@@ -231,7 +231,10 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
     if (!g_corrections) return r;
 
     // moving: the gap allowed grows with speed (a sprinting puppet trails ~0.6 m after a start, invisible at 5 m/s)
-    const float start = r.moving ? std::max(g_correctMoving, 0.2f * speed) : (settled ? g_correctStanding : 1.0f);
+    // Player-driven puppets lag the remote by the network delay (~0.5 m walking) and every pull cancels the
+    // animation's own motion for the frame, so they get more room.
+    const float moveStart = t.playerDriven ? std::max(1.0f, 0.25f * speed) : std::max(g_correctMoving, 0.2f * speed);
+    const float start = r.moving ? moveStart : (settled ? g_correctStanding : 1.0f);
     if (!st.correctingSince && (r.err > start || followHeight)) {
         st.correctingSince = nowMs;
         st.correctStartErr = r.err;

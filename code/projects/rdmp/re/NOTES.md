@@ -615,3 +615,26 @@ Plan (RDR's SwitchContext): per puppet a player-info + control object of its own
 FUN_140bb4150, the global playerInfo pointer points at the puppet's, so the game's own player code drives the puppet
 from the remote's buttons, stick and camera heading. Open: playerInfo construction / size, the +0xb8 / +0xd8
 components on a puppet, which other threads read playerInfo during the swap.
+
+## Remote players on the player code: WORKING (2026-11-21)
+- Input records: the foot control's vfunc +0x58 = FUN_1403d9dd0: record = *(*(ctrl+0x20)) + id*16, 30 ids (0x00..0x1d):
+  [0] invert mask, [1] per-input timer, [2] value, [3] previous; analog = ([2] ^ [0]) - 127.5. PC keys: space 0x18,
+  shift 0x06, ctrl 0x10/0x1a, E 0x0f/0x1b, F 0x05/0x07, W/S stick 0x12, A/D stick 0x11 (0x7f centre).
+- Control object: input factory FUN_1403d9520(type, owner), type 6 = on foot, 0x1b90 bytes (ctor FUN_1403705d0).
+  Per frame (FUN_14034c830 -> FUN_14034f700): resets (+0x160, +0x18c, +0x104, +0x144, +0x100, +0x124, +0x120,
+  +0x1a0), input step FUN_1403461c0 -> FUN_140370cd0 -> FUN_1403726f0, then **vfunc +0x28 (FUN_140372e50)** which
+  computes the move vector +0x120/+0x124/+0x128 (gated by FUN_1403dc1a0(info+0x410)). The apply (vfunc +0x30 ->
+  FUN_140373f70 -> FUN_140373d40) writes the desire from it: words 0x14..0x16 = +0x120.., 0x38 = +0x104, 0x34 =
+  +0x108, gait byte = +0x10c.
+- Behaviour: every actor's behaviour holder (actor+0x40, vt 0x141D20BD0, set up by FUN_140b09bd0) runs its active
+  behaviour holder+0x388 each frame (FUN_140b0c920 -> FUN_140af8bd0 -> FUN_140af8b50). Its behaviour set holder+0x370
+  (0x2050 bytes, FUN_140b6b9b0) embeds **MarstonBehave** (vt 0x141D26BB8, update = FUN_140bb4150) at +0x1950. The
+  player's active behaviour is that MarstonBehave; NPC puppets had none. The player actor has no AI brain
+  (actor+0x28 = 0).
+- puppet_player.cpp: per puppet a copy of playerInfo (+0x118 own control copy, +0x5ec puppet handle, +0x5d4 2, own
+  +0x408/+0x410/+0x418/+0x420), the control copy's +0x20 -> own records, the +0xb8/+0xd8 player components
+  (FUN_140597660), holder+0x388 = its MarstonBehave; hooks FUN_140bb4150 and FUN_1403726f0 (15-byte PIC prologues).
+  Each frame: records from the network, resets + FUN_1403726f0 + remote heading into +0x104 + vfunc +0x28, all with
+  *(0x1422DAF30) pointing at the puppet's player-info; FUN_140bb4150 for the puppet runs in the same context.
+- Verified: the puppet walks / sprints / stops / climbs onto the station porch roof with the remote; two copies with
+  replayed key input: moving median 0.31 m, p95 0.89 m, 4.1% pulled, vertical mean 0.03 m.

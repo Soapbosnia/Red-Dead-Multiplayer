@@ -1159,7 +1159,60 @@ void JumpProbeFrame(float) {
             Log("jump probe: playerInfo %p, +0x118 input %p (stick %.3f %.3f, angle %.3f, gait %d), +0x138 %p", reinterpret_cast<void*>(info),
                 reinterpret_cast<void*>(in), *reinterpret_cast<float*>(in + 0xd0), *reinterpret_cast<float*>(in + 0xd4),
                 *reinterpret_cast<float*>(in + 0x104), *reinterpret_cast<int*>(in + 0x10c), reinterpret_cast<void*>(ReadPtr(info + 0x138)));
-            ArmWriteWatch(in + 0xd4, "playerInfo+0x118 input +0xd4 (stick)");
+            ArmWriteWatch(in + 0x124, "playerInfo+0x118 control +0x124 (move vector)");
+        }
+    }
+    // jump_probe=6: the on-foot control object's input records (vfunc +0x58(this, id) -> record), logged on change.
+    if (g_jumpProbe == 6) {
+        const uintptr_t info = ReadPtr(GameAddr(0x1422DAF30));
+        const uintptr_t ctrl = info ? ReadPtr(info + 0x118) : 0;
+        if (ctrl) {
+            using GetInput = uint8_t* (*)(uintptr_t self, int id);
+            const uintptr_t vt = ReadPtr(ctrl);
+            auto get = reinterpret_cast<GetInput>(ReadPtr(vt + 0x58));
+            static bool told = false;
+            if (!told) {
+                told = true;
+                Log("jump probe: foot control %p vtable %p, +0x58 = %p, count +0x60 = %d", reinterpret_cast<void*>(ctrl),
+                    reinterpret_cast<void*>(vt), reinterpret_cast<void*>(ReadPtr(vt + 0x58)), *reinterpret_cast<int*>(ctrl + 0x60));
+            }
+            static uint8_t last[96][16];
+            for (int id = 0; id < 96; ++id) {
+                const uint8_t* rec = get(ctrl, id);
+                if (!rec || !IsReadable(reinterpret_cast<uintptr_t>(rec), 16)) continue;
+                if (std::memcmp(last[id], rec, 16) != 0) {
+                    std::memcpy(last[id], rec, 16);
+                    Log("jump probe: input %02x @%p: %02x %02x %02x %02x %02x %02x %02x %02x | +8 %p", id, rec, rec[0], rec[1], rec[2], rec[3],
+                        rec[4], rec[5], rec[6], rec[7], reinterpret_cast<void*>(*reinterpret_cast<const uintptr_t*>(rec + 8)));
+                }
+            }
+        }
+    }
+    // jump_probe=7: the behaviour manager FUN_140b0c920(holder): per actor, the active behaviour (holder+0x388) and
+    // the MarstonBehave embedded at holder+0x1950 (vtable 0x141D26BB8).
+    static ULONGLONG at7 = 0;
+    if (g_jumpProbe == 7) {
+        if (!at7) at7 = GetTickCount64() + 15000;
+        if (!armed && GetTickCount64() > at7) {
+            armed = true;
+            ArmExecWatch(0x140B0C920, "FUN_140b0c920 behaviour manager");
+        } else if (armed && at7 != 1 && GetTickCount64() > at7 + 3000) {
+            at7 = 1;
+            for (int i = 0; i < 4; ++i) {
+                const uintptr_t h = WatchExecRcx(i);
+                if (!h) continue;
+                const uintptr_t ent = ReadPtr(h + 0x10);
+                const uintptr_t act = ReadPtr(h + 0x388);
+                Log("jump probe: holder[%d] %p vt %p | actor entry %p handle 0x%08x | active +0x388 %p vt %p | +0x1950 vt %p", i,
+                    reinterpret_cast<void*>(h), reinterpret_cast<void*>(ReadPtr(h)), reinterpret_cast<void*>(ent),
+                    ent && IsReadable(ent + 8, 4) ? *reinterpret_cast<uint32_t*>(ent + 8) : 0, reinterpret_cast<void*>(act),
+                    reinterpret_cast<void*>(act ? ReadPtr(act) : 0), reinterpret_cast<void*>(ReadPtr(h + 0x1950)));
+                const uintptr_t brain = ent ? ReadPtr(ent + 0x28) : 0;
+                Log("jump probe:   brain %p vt %p | brain+0x1950 %p vt %p | active - brain = 0x%llx | active+0x10 %p", reinterpret_cast<void*>(brain),
+                    reinterpret_cast<void*>(brain ? ReadPtr(brain) : 0), reinterpret_cast<void*>(brain + 0x1950),
+                    reinterpret_cast<void*>(brain ? ReadPtr(brain + 0x1950) : 0), static_cast<unsigned long long>(act - brain),
+                    reinterpret_cast<void*>(act ? ReadPtr(act + 0x10) : 0));
+            }
         }
     }
     if (g_jumpProbe == 2 && !armed && motion) {

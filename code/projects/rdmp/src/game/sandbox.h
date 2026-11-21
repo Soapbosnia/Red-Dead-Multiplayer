@@ -56,6 +56,9 @@ uint32_t SpawnRemotePuppet(const Vec3& pos, float heading, const char* label);
 bool SetPuppetTransform(uint32_t goh, const Vec3& pos, float heading);
 // Same without the warp reset of the motion component (keeps the locomotion running): small per-frame corrections.
 bool NudgePuppet(uint32_t goh, const Vec3& pos, float heading);
+// goh handle -> actor entry (the 0x142C457F8 table object) / its actor handle; 0 = gone.
+uintptr_t ActorFromGohHandle(uint32_t gohHandle);
+uint32_t ActorHandleFromGohHandle(uint32_t gohHandle);
 // Puppet actor, with an AI brain created if missing (needed for the locomotion override). 0 = gone.
 uintptr_t PreparePuppetLocomotion(uint32_t goh);
 bool GetPuppetPosition(uint32_t goh, Vec3& pos);

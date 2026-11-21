@@ -55,6 +55,9 @@ namespace RDMP::Shared {
         float moveBack    = 0.0f; // -1..1
         float moveHeading = 0.0f; // 0..2pi
         uint8_t gait      = 0;    // locomotion gait byte
+        // Controller state (shared/types.h PlayerState::controls): every on-foot input, 8 bits each.
+        static constexpr int kControls = 30;
+        uint8_t controls[kControls] = {};
 
         // --- reliable delta fields -----------------------------------------
         uint8_t flags  = kAlive; // server field
@@ -103,6 +106,9 @@ namespace RDMP::Shared {
             fields.FloatBits(moveBack, -1.0f, 1.0f, kStickBits);
             fields.FloatBits(moveHeading, 0.0f, 6.2831853f, kMoveHeadingBits);
             fields.BitsRange<uint8_t>(gait, 0, 255);
+            for (uint8_t &c : controls) {
+                fields.BitsRange<uint8_t>(c, 0, 255);
+            }
         }
 
         void SerializeFields(FieldSerializer &fields) override {

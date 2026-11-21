@@ -26,7 +26,17 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
   replication callbacks run on the game's main thread and may call game natives directly.
 * **Players.** The owner writes its pose and movement input every frame; the server forces poses and queues actions
   (acknowledged by sequence number) for spawn, fade, camera, control and health.
-* **Remote-player sync** (MTA-style: input + position in one packet). Each transform update (unreliable, every tick)
+* **Remote players are driven by the game's player code** (src/game/puppet_player.cpp, MTA:SA's context switch
+  applied to RDR; `[net] puppet_mode=player`, the default). Each transform carries the sender's controller state
+  (the 30 on-foot input values of its control object) and desired heading. Every puppet has a player-info and an
+  on-foot control object of its own (copies of the local player's, its input records filled from the network), the
+  game's player-control components, and its MarstonBehave (the player behaviour every actor's behaviour set holds)
+  made its active behaviour. Around the puppet's control update and its behaviour update the global player-info
+  pointer points at the puppet's, so the game's own player code walks, sprints, jumps and climbs it exactly like
+  the local player. Position is corrected only beyond 1 m (more with speed), teleported beyond 4 m. Measured
+  (two copies, replayed key input): 0.31 m median while moving, 4% of moving frames pulled. Details:
+  re/NOTES.md "Player input path".
+* **Remote-player sync, desire mode** (`puppet_mode=desire`; MTA-style: input + position in one packet). Each transform update (unreliable, every tick)
   carries position, heading, speed and the movement input (`MoveInput`: stick, desired heading, gait), timed by the
   sender's game-frame clock. The receiver interpolates `interp_ms` behind the newest sample and drives one puppet per
   remote player (src/game/puppet_control.cpp): the puppet gets the remote's input as its locomotion desire, steered by

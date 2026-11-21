@@ -19,6 +19,9 @@ struct PuppetTarget {
     float heading = 0.0f;  // remote facing (deg)
     float leadMs = 0.0f;   // how old pos is (the puppet shows the remote this much late)
     net::MoveInput input;  // the remote's movement input
+    // The game's player code moves the puppet from the remote's controls (puppet_player.h): no movement request of
+    // ours, no AI brain; only the position corrections below.
+    bool playerDriven = false;
 };
 
 // Per-puppet controller state.

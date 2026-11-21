@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Remote players are driven by the game's own player code** (MTA:SA's model, `[net] puppet_mode=player`, default):
+  their controller state (every on-foot input) travels with the position each tick; on the other side the puppet
+  runs the same player code as the local player from those inputs, so walking, sprinting, stopping, jumping and
+  climbing look exactly like the real player (src/game/puppet_player.cpp, RE in re/NOTES.md). fw_api v8.
+* Radar blips attached to a remote player follow the puppet the game shows (no blip stuck where the network put it).
+* playerblips: smaller blips (`BLIP_SIZE`, default 1 = half the game's icon size).
+* `[debug] autopilot` replays recorded controller input (traces now carry it) on one copy; `puppet_player_test`
+  drives puppets from a fixed input pattern; `jump_probe` RE probes. re/gh.ps1 starts Ghidra without its launcher.
 * **Puppets move with their own animation.** Measured with two game copies: pulling the puppet onto the network
   position every frame cancelled the walk animation's own motion (the feet slid ~80% of the time). The new controller
   (src/game/puppet_control.cpp) replays the remote's movement input (stick pressed / released, magnitude, gait,

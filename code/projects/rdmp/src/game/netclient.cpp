@@ -25,6 +25,7 @@
 #include "host.h"
 #include "locomotion.h"
 #include "puppet_control.h"
+#include "puppet_player.h"
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
@@ -122,7 +123,15 @@ struct Puppet {
     bool hidden = false;
     int corrections = 0;
     PuppetDrive drive;
+    bool playerFailed = false;  // player control could not be set up: movement request instead
+    float testHeading = 0.0f;  // [debug] puppet_player_test
+    Vec3 testPos{};
+    float testHeadingDeg = 0.0f;
 };
+bool g_puppetPlayerTest = false;
+// rdmp.ini [net] puppet_mode: player (default) = the game's player code drives puppets from the remote's controller state
+// (MTA's model); desire = our controller steers the remote's movement request.
+bool g_puppetPlayerMode = true;
 // rdmp.ini [net] lead_ms: velocity prediction (ms) that cancels the delay of the network position. -1 = auto (default):
 // interp_ms + the estimated sender->us delay (both pings / 2 + one server tick, see LeadMsFor).
 int g_leadMs = -1;
@@ -264,7 +273,7 @@ float LerpAngleDeg(float a, float b, float t) {
 
 // Position at render time: linear interpolation between the two samples around it (clamped to the newest), plus the
 // remote's velocity (m/s, from the surrounding samples) for path-following.
-bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveInput& input, Vec3& vel) {
+bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveInput& input, uint8_t* controls, Vec3& vel) {
     if (samples.empty()) return false;
     size_t ia = 0, ib = samples.size() - 1;
     if (renderT <= samples[ia].t) {
@@ -286,6 +295,7 @@ bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, f
     pos = Vec3{a->s.x + (b->s.x - a->s.x) * t, a->s.y + (b->s.y - a->s.y) * t, a->s.z + (b->s.z - a->s.z) * t};
     heading = LerpAngleDeg(a->s.heading, b->s.heading, t);
     input = b->s.input;
+    std::memcpy(controls, b->s.controls, sizeof(b->s.controls));
     // velocity over a ~100 ms window ending at b (single-sample spans are too jittery)
     size_t iv = ib;
     while (iv > 0 && samples[ib].t - samples[iv].t < 100.0) --iv;
@@ -318,7 +328,7 @@ MoveInput InputFromDesire(const uint8_t* desire) {
 
 // Sync trace ([debug] net_trace=1): CSV per game copy (rdmp_trace[_N].csv) with a shared high-resolution clock, so the
 // traces of two copies on one PC can be compared (tools/sync_report.py):
-//   L,t_ms,x,y,z,heading,speed,moving                          (this copy's player, every frame)
+//   L,t_ms,x,y,z,heading,speed,moving,desire words,C:controls(hex),H:control heading   (this copy's player, every frame)
 //   R,t_ms,id,tx,ty,tz,theading,px,py,pz,pheading,err,moving,tp,pulled,transit,offset,lead (each remote: network
 //     target, puppet before this frame's correction, gap to the predicted present, teleported, soft pull applied)
 FILE* g_trace = nullptr;
@@ -361,6 +371,7 @@ void NetFrame(float /*gameTime*/) {
         float heading;
         bool stale;
         MoveInput input;
+        uint8_t controls[PlayerState::kControlCount];
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -379,6 +390,8 @@ void NetFrame(float /*gameTime*/) {
         if (!g_local.timeMs) g_local.timeMs = 1;  // 0 = "no clock"
         static uint8_t desire[kDesireSize];
         if (GetPlayerDesire(desire, nullptr)) g_local.input = InputFromDesire(desire);
+        PlayerControls controls;
+        if (CaptureLocalControls(controls)) std::memcpy(g_local.controls, controls.value, sizeof(g_local.controls));
         float health = 0.0f;
         if (GetLocalPlayerHealth(health)) g_localHealth = health;
         g_localValid = true;
@@ -387,7 +400,10 @@ void NetFrame(float /*gameTime*/) {
             const uint32_t* w = reinterpret_cast<const uint32_t*>(desire);  // raw desire: every non-zero word (idx:hex)
             for (int i = 0; i < kDesireWords; ++i)
                 if (w[i]) fprintf(g_trace, "%02x:%08x ", i, w[i]);
-            fputc('\n', g_trace);
+            // controller state (30 input values) and the control heading, for replays in player mode
+            fprintf(g_trace, ",C:");
+            for (uint8_t c : g_local.controls) fprintf(g_trace, "%02x", c);
+            fprintf(g_trace, ",H:%.4f\n", controls.valid ? controls.heading : 0.0f);
         }
 
         if (g_teleportPending) {  // server override of our position (framework backend)
@@ -405,7 +421,7 @@ void NetFrame(float /*gameTime*/) {
             else r.offset += (target - r.offset) * 0.02;
             r.haveOffset = !r.transit.empty();
             View& v = views[nViews];
-            if (Interpolate(r.samples, renderT - r.offset, v.pos, v.heading, v.input, v.vel)) {
+            if (Interpolate(r.samples, renderT - r.offset, v.pos, v.heading, v.input, v.controls, v.vel)) {
                 v.id = it->first;
                 v.name = r.name;
                 v.stale = stale;
@@ -459,6 +475,11 @@ void NetFrame(float /*gameTime*/) {
                        }
                        for (int i = 0; i < r->count; ++i) {
                            if (r->views[i].id == static_cast<uint16_t>(netId) && !r->views[i].stale) {
+                               // where the remote is drawn: its puppet when it has one, else the network position
+                               const auto pit = g_puppetsById.find(r->views[i].id);
+                               if (pit != g_puppetsById.end() && pit->second.goh && !pit->second.hidden &&
+                                   GetPuppetPosition(pit->second.goh, out))
+                                   return true;
                                out = r->views[i].pos;
                                return true;
                            }
@@ -477,6 +498,7 @@ void NetFrame(float /*gameTime*/) {
         const float dist = std::sqrt(sdx * sdx + sdz * sdz);
         if (v.stale || (p.goh && !p.hidden && dist > g_streamOut)) {
             if (p.goh && !p.hidden) {
+                DetachPlayerControl(p.goh);
                 StreamOutPuppet(p.goh);
                 p.hidden = true;
                 Log("net: player %u \"%s\" streamed out (%s, %.0f m)", v.id, v.name.c_str(), v.stale ? "timed out" : "far", dist);
@@ -494,12 +516,49 @@ void NetFrame(float /*gameTime*/) {
             Log("net: player %u \"%s\" streamed in (%.0f m)", v.id, v.name.c_str(), dist);
         }
         p.hidden = false;
+        if (g_puppetPlayerTest) {
+            // [debug] puppet_player_test: the puppet is driven by the game's player code from a fixed input pattern
+            // (8 s loop: 3 s stick forward, 1 s nothing, the 0x18 input pressed for 0.2 s, rest), no network input.
+            if (!HasPlayerControl(p.goh)) {
+                if (!AttachPlayerControl(p.goh)) continue;
+                // 6 m in front of the local player, so the test is in view
+                const float hr = heading * 0.01745329f;
+                SetPuppetTransform(p.goh, Vec3{pos.x - std::sin(hr) * 6.0f, pos.y + 0.3f, pos.z - std::cos(hr) * 6.0f}, heading + 90.0f);
+            }
+            PlayerControls c;
+            c.valid = true;
+            c.value[0x11] = c.value[0x12] = 0x7f;
+            const double t = std::fmod(nowMs / 1000.0, 8.0);
+            if (t < 3.0) c.value[0x12] = 0x00;            // stick forward
+            if (t >= 4.0 && t < 4.2) c.value[0x18] = 0xff;  // jump / sprint input
+            if (t >= 5.0 && t < 7.0) c.value[0x12] = 0x00, c.value[0x18] = (std::fmod(t, 0.4) < 0.2) ? 0xff : 0;  // tapped: sprint
+            // walk across the local player's view, back the other way every second loop
+            const bool back = static_cast<int64_t>(nowMs / 8000.0) % 2 != 0;
+            c.heading = std::fmod(heading * 0.01745329f + 3.14159265f + (back ? -1.5707963f : 1.5707963f) + 6.2831853f, 6.2831853f);
+            SetPlayerControls(p.goh, c);
+            continue;
+        }
         PuppetTarget target;
         target.pos = v.pos;
         target.vel = v.vel;
         target.heading = v.heading;
         target.leadMs = v.leadMs;
         target.input = v.input;
+        if (g_puppetPlayerMode) {
+            // MTA-style: the game's own player code moves the puppet from the remote's controller state
+            if (!HasPlayerControl(p.goh) && !p.playerFailed) {
+                p.playerFailed = !AttachPlayerControl(p.goh);
+                if (p.playerFailed) Log("net: player %u: no player control, falling back to the movement request", v.id);
+            }
+            if (HasPlayerControl(p.goh)) {
+                PlayerControls c;
+                std::memcpy(c.value, v.controls, sizeof(c.value));
+                c.heading = v.input.heading;
+                c.valid = true;
+                SetPlayerControls(p.goh, c);
+                target.playerDriven = true;
+            }
+        }
         const PuppetDriveResult d = DrivePuppet(p.goh, p.drive, target, nowMs);
         if (d.teleported && d.err >= 0.0f && ++p.corrections <= 20)
             Log("net: player %u drift %.2f m (%s) -> teleport", v.id, d.err, d.moving ? "moving" : "idle");
@@ -508,6 +567,7 @@ void NetFrame(float /*gameTime*/) {
                     v.pos.y, v.pos.z, v.heading, d.cur.x, d.cur.y, d.cur.z, d.curHeading, d.err, d.moving ? 1 : 0,
                     d.teleported ? 1 : 0, d.corrected ? 1 : 0, v.transit, v.offset, v.leadMs);
     }
+    PuppetPlayerFrame();
     if (g_trace) fflush(g_trace);  // test runs end by killing the game
 }
 
@@ -534,6 +594,9 @@ void StartNetClient(const wchar_t* ini) {
     g_streamOut = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_out", 200, ini));
     if (g_streamOut < g_streamIn) g_streamOut = g_streamIn;
     LoadPuppetControlConfig(ini);
+    g_puppetPlayerTest = GetPrivateProfileIntW(L"debug", L"puppet_player_test", 0, ini) != 0;
+    GetPrivateProfileStringW(L"net", L"puppet_mode", L"player", w, 64, ini);
+    g_puppetPlayerMode = _wcsicmp(w, L"desire") != 0;
     GetPrivateProfileStringW(L"net", L"lead_ms", L"auto", w, 64, ini);
     g_leadMs = (_wcsicmp(w, L"auto") == 0 || !*w) ? -1 : _wtoi(w);
     // Everything lives next to rdmp.ini / rdmp.dll (the build's bin folder): the client DLL and framework runtime,

@@ -16,7 +16,8 @@ namespace rdmp::fw {
 // v6: invoke_native returns kResultSlots slots (Vector3 results); actions carry text (kill, HUD text); Host:
 //     show_text (styles) instead of print_text, kill_local, get_camera.
 // v7: PlayerState carries MoveInput (stick, desired heading, gait) instead of the sparse desire.
-constexpr uint32_t kApiVersion = 7;
+// v8: PlayerState carries the controller state (controls[30]).
+constexpr uint32_t kApiVersion = 8;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
