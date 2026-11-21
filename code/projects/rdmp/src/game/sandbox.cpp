@@ -8,6 +8,7 @@
 //     a0=808, a1="player", a2=0, pos=(736.49, 89.17, 1199.33), rot=0, a7=12
 #include "sandbox.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -166,7 +167,7 @@ uintptr_t ReadPtr(uintptr_t addr) { return IsReadable(addr, 8) ? *reinterpret_ca
 
 // Script threads (RE: VM runner FUN_1402066d0, scrThread::Kill FUN_1401e6710):
 //   threads = *(0x142b0d1e0) (array of scrThread*), count = *(u16*)0x142b0d1e8
-//   thread +0x08 program, +0x10 id, +0x14 state
+//   thread +0x08 program index (0 = free slot), +0x10 id (name hash), +0x14 state
 constexpr uintptr_t kThreadsPtr = 0x142B0D1E0;
 constexpr uintptr_t kThreadCount = 0x142B0D1E8;
 constexpr uintptr_t kScrThreadKill = 0x1401E6710;
@@ -202,6 +203,32 @@ void KillScriptThreads(const char* why) {
         }
     }
     Log("scripts (%s): killed %d thread(s) of %u", why, killed, count);
+}
+
+// The sandbox runs no game scripts (story and ambient are scrapped: only the map and players). The world still starts
+// script threads later on its own (location-triggered world scripts near Armadillo station crashed the VM: they read
+// story state that never exists here). Every frame after the spawn, any running script thread is stopped before the
+// VM runs it (frame callbacks run before the script runner), and logged once per script.
+void ScriptGuardFrame(float) {
+    if (!g_killScripts || !g_playerSpawned) return;
+    const uintptr_t arr = ReadPtr(GameAddr(kThreadsPtr));
+    const uint16_t count = *reinterpret_cast<uint16_t*>(GameAddr(kThreadCount));
+    using KillFn = void (*)(uintptr_t thread);
+    auto kill = reinterpret_cast<KillFn>(GameAddr(kScrThreadKill));
+    static std::vector<uint32_t> logged;
+    for (uint16_t i = 0; arr && i < count && i < 256; ++i) {
+        const uintptr_t th = ReadPtr(arr + i * 8);
+        if (!th || !IsReadable(th, 0x90)) continue;
+        const uintptr_t prog = ReadPtr(th + 8);
+        if (!prog) continue;
+        const uint32_t id = *reinterpret_cast<uint32_t*>(th + 0x10);  // the script's name hash
+        if (std::find(logged.begin(), logged.end(), id) == logged.end()) {
+            logged.push_back(id);
+            Log("scripts: stopped a world script (id 0x%08x, program #%llu, thread slot %u) before it ran", id,
+                static_cast<unsigned long long>(prog), i);
+        }
+        kill(th);
+    }
 }
 
 // Attaches the gameplay camera to the local player, exactly like the world-load setup FUN_1401f9830 does when the
@@ -1636,6 +1663,7 @@ void LoadSandboxConfig(const wchar_t* ini) {
         WideCharToMultiByte(CP_UTF8, 0, ev, -1, g_directStartEvent, sizeof(g_directStartEvent), nullptr, nullptr);
     }
     g_killScripts = GetPrivateProfileIntW(L"sandbox", L"kill_scripts", 1, ini) != 0;
+    if (g_killScripts) AddFrameCallback(&ScriptGuardFrame);
     g_playerVariation = static_cast<int32_t>(GetPrivateProfileIntW(L"sandbox", L"player_variation", 12, ini));
     g_puppetVariation = static_cast<int32_t>(GetPrivateProfileIntW(L"sandbox", L"puppet_variation", 12, ini));
     g_clearScriptCamera = GetPrivateProfileIntW(L"sandbox", L"clear_script_camera", 1, ini) != 0;

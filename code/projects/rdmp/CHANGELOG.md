@@ -5,6 +5,9 @@
   their controller state (every on-foot input) travels with the position each tick; on the other side the puppet
   runs the same player code as the local player from those inputs, so walking, sprinting, stopping, jumping and
   climbing look exactly like the real player (src/game/puppet_player.cpp, RE in re/NOTES.md). fw_api v8.
+* Fixed: walking into Armadillo station froze and crashed the game. World scripts the game starts by itself near
+  certain places (after the sandbox killed the boot scripts) ran in the script VM and read story state that never
+  exists here. Every frame after the spawn, any script thread is now stopped before it runs (logged once per script).
 * Radar blips attached to a remote player follow the puppet the game shows (no blip stuck where the network put it).
 * playerblips: smaller blips (`BLIP_SIZE`, default 1 = half the game's icon size).
 * `[debug] autopilot` replays recorded controller input (traces now carry it) on one copy; `puppet_player_test`

@@ -97,6 +97,10 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
    after a death (follow the DirectInput keyboard state into the game, or diff render / game state objects before and
    after the key). No workaround (no injected input).
 2. LAN discovery for the Local tab (today: this PC, ports 27015-27020). Masterlist announcing needs a server token.
+3. **Before release: no auto-join, no local server.** For testing, RDMP.exe boots straight into the world and joins
+   a server it starts itself: buildindmp.ini has `[net] autoconnect=1` and `start_local_server=1` (the owner wants
+   this while testing). A release must open the main menu and start nothing: configdmp.ini already ships
+   `autoconnect=0`, but still `start_local_server=1` -> set 0 (and check the launcher starts no server then).
 
 ## Next (chosen: horses first)
 1. **Horses and horse sync**: spawn a horse from a script, mount / dismount, sync rider + horse movement so others see
