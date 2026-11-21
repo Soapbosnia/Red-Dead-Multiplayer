@@ -79,6 +79,13 @@ namespace RDMP::Shared {
         uint32_t nametagColor  = 0;   // 0xAARRGGBB, 0 = default (white)
         uint8_t nametagShowing = 1;
 
+        // The vehicle (shared/vehicle.h) the server has this player on (0 = on foot). Server field: the owner hears it
+        // through a forced state and mounts / dismounts when it changes (warpPedIntoVehicle, removePedFromVehicle).
+        uint64_t vehicle = 0;
+        // Owner -> server: the vehicle the game has the player on (mounted with the game's own controls, or after a
+        // warp). The server accepts it when the vehicle is free and makes the rider its owner.
+        uint64_t localVehicle = 0;
+
         // Owner -> server: the last actSeq this client has queued for the game (see the header comment).
         uint8_t actAck = 0;
 
@@ -127,6 +134,8 @@ namespace RDMP::Shared {
             fields.ServerField(nametagShowing);
             fields.Field(actAck);
             fields.Field(localHealth);
+            fields.ServerField(vehicle);
+            fields.Field(localVehicle);
         }
 
         // The owner only hears a server field through a forced state, so repeat them here.
@@ -144,6 +153,7 @@ namespace RDMP::Shared {
             fields.Field(nametagText);
             fields.Field(nametagColor);
             fields.Field(nametagShowing);
+            fields.Field(vehicle);
         }
 
         void OnStateForced() override {

@@ -103,7 +103,8 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
    `autoconnect=0`, but still `start_local_server=1` -> set 0 (and check the launcher starts no server then).
 
 ## Next (chosen: horses first)
-1. **Horses and horse sync**: spawn a horse from a script, mount / dismount, sync rider + horse movement so others see
-   it, MTA-style vehicle functions (createVehicle-like, warpPedIntoVehicle, getPedOccupiedVehicle, ...).
+1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:
+   remote horses are driven by the rider's movement request (desire mode), not yet by the rider's horse controls
+   through the context switch (playerInfo+0x138 input_horse, MarstonBehave state 5); horse health / death, carriages.
 2. Weapons and damage sync. 3. Peds (createPed; killPed already accepts peds by design). 4. Markers / colshapes.
 5. Client-side blips, addCommandHandler. 6. World control (weather, time). 7. Persistent accounts.

@@ -26,6 +26,8 @@
 #include "locomotion.h"
 #include "puppet_control.h"
 #include "puppet_player.h"
+#include "remote_timeline.h"
+#include "vehicles.h"
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
@@ -34,64 +36,6 @@ namespace rdmp {
 namespace {
 
 using namespace rdmp::net;
-
-// High-resolution local clock (ms). GetTickCount64 only ticks every ~15.6 ms, which is too coarse to time samples and
-// interpolation (it also made the speed estimate wrong by ~2x).
-double NowMs() {
-    static LARGE_INTEGER freq{};
-    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
-    LARGE_INTEGER c;
-    QueryPerformanceCounter(&c);
-    return static_cast<double>(c.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
-}
-
-// Timeline: samples are placed by the SENDER's capture time (PlayerState.timeMs, unwrapped to ms), not by when they
-// happened to arrive, so polling/tick jitter on the way doesn't wobble the interpolation and the buffer can be short.
-// The sender's clock is mapped onto ours with the smallest (arrival - send) seen recently = clock offset + fastest
-// transit (on one PC the clocks are the same, so that's just the fastest transit).
-struct Sample {
-    double t;        // sender capture time on the sender's clock (ms); arrival time when the sender has no clock
-    double arrival;  // local receive time (NowMs)
-    PlayerState s;
-};
-
-struct Remote {
-    std::string name;
-    std::deque<Sample> samples;
-    ULONGLONG lastSeenMs = 0;
-    uint32_t lastTimeMs = 0;            // last raw sender clock (for unwrapping)
-    double offset = 0;                  // in use: local time = sender time + offset (eased toward offsetMin)
-    bool haveOffset = false;
-    std::deque<std::pair<double, double>> transit;  // (arrival, arrival - send) of the last ~3 s
-    int pingMs = 0;                     // that player's round trip to the server
-};
-
-// Adds a received state to the remote's buffer. False = old/duplicate.
-bool AddSample(Remote& r, const PlayerState& s, double arrival) {
-    if (!r.samples.empty() && static_cast<int32_t>(s.seq - r.samples.back().s.seq) <= 0) return false;
-    double t = arrival;
-    if (s.timeMs) {
-        t = r.samples.empty() || !r.lastTimeMs ? static_cast<double>(s.timeMs)
-                                               : r.samples.back().t + static_cast<int32_t>(s.timeMs - r.lastTimeMs);
-        if (!r.samples.empty() && t <= r.samples.back().t) return false;  // same game frame sent twice
-        r.lastTimeMs = s.timeMs;
-        r.transit.emplace_back(arrival, arrival - t);
-        while (r.transit.size() > 2 && arrival - r.transit.front().first > 3000.0) r.transit.pop_front();
-    } else {
-        r.lastTimeMs = 0;
-        r.transit.clear();
-    }
-    r.samples.push_back(Sample{t, arrival, s});
-    while (r.samples.size() > 64) r.samples.pop_front();
-    return true;
-}
-
-// Smallest (arrival - send) in the window: the sender->local clock mapping with the fastest transit.
-double OffsetMin(const Remote& r) {
-    double m = 1e300;
-    for (const auto& e : r.transit) m = std::min(m, e.second);
-    return r.transit.empty() ? 0.0 : m;
-}
 
 // Main thread only (the framework client is pumped from the frame callback too). The mutex stays as a cheap guard.
 std::mutex g_mutex;
@@ -123,7 +67,8 @@ struct Puppet {
     bool hidden = false;
     int corrections = 0;
     PuppetDrive drive;
-    bool playerFailed = false;  // player control could not be set up: movement request instead
+    bool playerFailed = false;
+    uint32_t mountedOn = 0;     // the horse (goh) the puppet sits on, 0 = on foot  // player control could not be set up: movement request instead
     float testHeading = 0.0f;  // [debug] puppet_player_test
     Vec3 testPos{};
     float testHeadingDeg = 0.0f;
@@ -264,67 +209,7 @@ void FwStep() {
     }
 }
 
-float LerpAngleDeg(float a, float b, float t) {
-    float d = std::fmod(b - a, 360.0f);
-    if (d > 180.0f) d -= 360.0f;
-    if (d < -180.0f) d += 360.0f;
-    return a + d * t;
-}
 
-// Position at render time: linear interpolation between the two samples around it (clamped to the newest), plus the
-// remote's velocity (m/s, from the surrounding samples) for path-following.
-bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveInput& input, uint8_t* controls, Vec3& vel) {
-    if (samples.empty()) return false;
-    size_t ia = 0, ib = samples.size() - 1;
-    if (renderT <= samples[ia].t) {
-        ib = ia;
-    } else if (renderT < samples[ib].t) {
-        for (size_t i = 1; i < samples.size(); ++i) {
-            if (samples[i].t >= renderT) {
-                ia = i - 1;
-                ib = i;
-                break;
-            }
-        }
-    } else {
-        ia = ib;
-    }
-    const Sample* a = &samples[ia];
-    const Sample* b = &samples[ib];
-    const float t = b->t > a->t ? static_cast<float>((renderT - a->t) / (b->t - a->t)) : 1.0f;
-    pos = Vec3{a->s.x + (b->s.x - a->s.x) * t, a->s.y + (b->s.y - a->s.y) * t, a->s.z + (b->s.z - a->s.z) * t};
-    heading = LerpAngleDeg(a->s.heading, b->s.heading, t);
-    input = b->s.input;
-    std::memcpy(controls, b->s.controls, sizeof(b->s.controls));
-    // velocity over a ~100 ms window ending at b (single-sample spans are too jittery)
-    size_t iv = ib;
-    while (iv > 0 && samples[ib].t - samples[iv].t < 100.0) --iv;
-    const double dt = (samples[ib].t - samples[iv].t) / 1000.0;
-    vel = dt > 0.02 ? Vec3{static_cast<float>((samples[ib].s.x - samples[iv].s.x) / dt), 0.0f,
-                           static_cast<float>((samples[ib].s.z - samples[iv].s.z) / dt)}
-                    : Vec3{0.0f, 0.0f, 0.0f};
-    // past the newest sample (a late update): keep going along the velocity for up to 100 ms instead of freezing, so a
-    // short interp buffer doesn't stutter
-    if (ia == ib && ib == samples.size() - 1 && renderT > b->t) {
-        const float over = static_cast<float>(std::min(renderT - b->t, 100.0)) / 1000.0f;
-        pos.x += vel.x * over;
-        pos.z += vel.z * over;
-    }
-    return true;
-}
-
-// The movement input inside the local player's 0x110-byte locomotion desire (shared/types.h MoveInput).
-MoveInput InputFromDesire(const uint8_t* desire) {
-    MoveInput in;
-    std::memcpy(&in.right, desire + 0x14 * 4, 4);
-    std::memcpy(&in.back, desire + 0x16 * 4, 4);
-    std::memcpy(&in.heading, desire + 0x38 * 4, 4);
-    uint32_t gait = 0;
-    std::memcpy(&gait, desire + 0x3f * 4, 4);
-    in.gait = static_cast<uint8_t>(gait & 0xff);
-    if (!(in.heading >= 0.0f && in.heading <= 6.3f)) in.heading = 0.0f;  // not a heading (stick released / garbage)
-    return in;
-}
 
 // Sync trace ([debug] net_trace=1): CSV per game copy (rdmp_trace[_N].csv) with a shared high-resolution clock, so the
 // traces of two copies on one PC can be compared (tools/sync_report.py):
@@ -372,6 +257,7 @@ void NetFrame(float /*gameTime*/) {
         bool stale;
         MoveInput input;
         uint8_t controls[PlayerState::kControlCount];
+        uint64_t vehicle;  // the vehicle the server has them on (newest state), 0 = on foot
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -389,8 +275,9 @@ void NetFrame(float /*gameTime*/) {
         g_local.timeMs = static_cast<uint32_t>(static_cast<uint64_t>(nowMs));
         if (!g_local.timeMs) g_local.timeMs = 1;  // 0 = "no clock"
         static uint8_t desire[kDesireSize];
-        if (GetPlayerDesire(desire, nullptr)) g_local.input = InputFromDesire(desire);
+        if (GetPlayerDesire(desire, nullptr)) g_local.input = MoveInputFromDesire(desire);
         PlayerControls controls;
+        g_local.vehicle = LocalVehicle();
         if (CaptureLocalControls(controls)) std::memcpy(g_local.controls, controls.value, sizeof(g_local.controls));
         float health = 0.0f;
         if (GetLocalPlayerHealth(health)) g_localHealth = health;
@@ -428,12 +315,14 @@ void NetFrame(float /*gameTime*/) {
                 v.transit = r.samples.empty() ? -1.0f : static_cast<float>(r.samples.back().arrival - r.samples.back().t);
                 v.offset = static_cast<float>(r.offset);
                 v.leadMs = LeadMsFor(r);
+                v.vehicle = r.samples.empty() ? 0 : r.samples.back().s.vehicle;
                 ++nViews;
             }
             ++it;
         }
     }
     FwStep();  // hand the new local state to the network now, take the server's
+    VehiclesFrame(g_api, pos, nowMs, g_interpMs, static_cast<float>(g_interpMs) + 20.0f);
 
     // Script blips: reconcile the engine's blips with the server's set. An attached blip follows the live position
     // of its element when we have it (the local player, or a remote player's interpolated position), else the
@@ -516,6 +405,23 @@ void NetFrame(float /*gameTime*/) {
             Log("net: player %u \"%s\" streamed in (%.0f m)", v.id, v.name.c_str(), dist);
         }
         p.hidden = false;
+        // On a horse: the horse carries the puppet (no player control, no corrections of its own).
+        if (const uint32_t horse = v.vehicle ? VehicleGoh(v.vehicle) : 0) {
+            if (p.mountedOn != horse) {
+                DetachPlayerControl(p.goh);
+                if (const uintptr_t a = ActorFromGohHandle(p.goh)) ClearPuppetDesire(a);
+                MountActor(p.goh, horse);
+                p.mountedOn = horse;
+                Log("net: player %u mounts horse goh 0x%08x", v.id, horse);
+            }
+            continue;
+        }
+        if (p.mountedOn) {
+            DismountActor(p.goh);
+            p.mountedOn = 0;
+            p.drive = PuppetDrive{};
+            Log("net: player %u dismounts", v.id);
+        }
         if (g_puppetPlayerTest) {
             // [debug] puppet_player_test: the puppet is driven by the game's player code from a fixed input pattern
             // (8 s loop: 3 s stick forward, 1 s nothing, the 0x18 input pressed for 0.2 s, rest), no network input.
@@ -594,6 +500,7 @@ void StartNetClient(const wchar_t* ini) {
     g_streamOut = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_out", 200, ini));
     if (g_streamOut < g_streamIn) g_streamOut = g_streamIn;
     LoadPuppetControlConfig(ini);
+    LoadVehicleConfig(ini);
     g_puppetPlayerTest = GetPrivateProfileIntW(L"debug", L"puppet_player_test", 0, ini) != 0;
     GetPrivateProfileStringW(L"net", L"puppet_mode", L"player", w, 64, ini);
     g_puppetPlayerMode = _wcsicmp(w, L"desire") != 0;

@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Horses** (MTA's vehicles): `createVehicle(model, x, y, z[, rz])` (rideable animals 976..1005), `getVehicleModel`,
+  `warpPedIntoVehicle`, `removePedFromVehicle`, `getPedOccupiedVehicle`, `getVehicleOccupant`, events
+  `playerVehicleEnter` / `playerVehicleExit`; vehicles in getElementType / getElementsByType / get/setElementPosition /
+  destroyElement. Players mount and dismount with the game's own controls (hold E, the game's animations); the rider
+  syncs the horse, everyone else sees it ridden with the rider on it; a riderless horse stands still (no animal AI).
+  devtools: `/horse`, `/mount`, `/dismount`. fw_api v9.
 * **Remote players are driven by the game's own player code** (MTA:SA's model, `[net] puppet_mode=player`, default):
   their controller state (every on-foot input) travels with the position each tick; on the other side the puppet
   runs the same player code as the local player from those inputs, so walking, sprinting, stopping, jumping and

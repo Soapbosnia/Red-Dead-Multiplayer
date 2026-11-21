@@ -17,7 +17,8 @@ namespace rdmp::fw {
 //     show_text (styles) instead of print_text, kill_local, get_camera.
 // v7: PlayerState carries MoveInput (stick, desired heading, gait) instead of the sparse desire.
 // v8: PlayerState carries the controller state (controls[30]).
-constexpr uint32_t kApiVersion = 8;
+// v9: vehicles (get_vehicles, set_vehicle, get_assigned_vehicle); PlayerState::vehicle.
+constexpr uint32_t kApiVersion = 9;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -97,6 +98,19 @@ struct Blip {
     uint8_t flags = 0;          // BlipFlags
 };
 
+// A vehicle (server entity RDMP::Vehicle, shared/vehicle.h: a horse), as currently replicated to us.
+struct Vehicle {
+    uint64_t netId = 0;
+    uint32_t model = 0;        // actor definition index (976..1005: rideable animals)
+    float x = 0, y = 0, z = 0;  // Y up
+    float heading = 0;          // degrees
+    float speed = 0;            // m/s
+    net::MoveInput input;       // the input its rider gives it (zero = stands)
+    uint64_t occupant = 0;      // network id of its rider, 0 = none
+    uint32_t timeMs = 0;        // send time of this pose on our clock (numbers / times the sample), 0 = server's
+    int32_t mine = 0;           // 1 = we own it (we ride it): we write its state with set_vehicle
+};
+
 using LogFn = void (*)(const char* line);
 
 // What rdmp.dll offers the client DLL. Every function runs synchronously on the caller's thread, which is the game's
@@ -144,6 +158,10 @@ struct Api {
     void (*get_link)(Link* out);
     int (*get_blips)(Blip* out, int max);  // every blip currently replicated to us
     uint64_t (*get_local_id)();            // our own avatar's network id, 0 until assigned
+    int (*get_vehicles)(Vehicle* out, int max);  // every vehicle currently streamed to us
+    // The state of the vehicle we ride and own (ignored for any other).
+    void (*set_vehicle)(uint64_t netId, const float pos[3], float heading, float speed, const net::MoveInput* input);
+    uint64_t (*get_assigned_vehicle)();          // the vehicle the server has our avatar on, 0 = none
 };
 
 }  // namespace rdmp::fw

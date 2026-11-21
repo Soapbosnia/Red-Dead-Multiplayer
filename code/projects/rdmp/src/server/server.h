@@ -28,10 +28,12 @@
 #include "shared/blip.h"
 #include "shared/fw_api.h"
 #include "shared/player.h"
+#include "shared/vehicle.h"
 #include "shared/script_api.h"
 
 namespace RDMP::Server {
     using Framework::Networking::Replication::Ref;
+    using Framework::Networking::Replication::ConstRef;
     using Framework::Networking::Replication::World;
     using RDMP::Shared::Blip;
     using RDMP::Shared::Player;
@@ -62,7 +64,7 @@ namespace RDMP::Server {
     MafiaNet::PeerGuid PlayerGuid(uint64_t playerId);             // the connection behind a player element
     Ref<Player> PlayerFromArg(const Args &args, int index = 0);
     v8::Local<v8::Value> WrapElement(v8::Isolate *isolate, uint64_t id);
-    bool ElementPosition(World &world, uint64_t id, glm::vec3 &out); // players and blips
+    bool ElementPosition(World &world, uint64_t id, glm::vec3 &out); // players, blips and vehicles
 
     // ---- shared state ----
     std::mutex &StateMutex();
@@ -103,6 +105,9 @@ namespace RDMP::Server {
     void RegisterElementApi(const ScriptApi::Publisher &publish);
     void RegisterBlipApi(const ScriptApi::Publisher &publish);
     void RegisterHudApi(const ScriptApi::Publisher &publish);
+    void RegisterVehicleApi(const ScriptApi::Publisher &publish);
 
     void UpdateAttachedBlips(World &world); // tick thread (api_blips.cpp)
+    void UpdateVehicles(World &world);      // tick thread (api_vehicles.cpp): who rides what
+    void LeaveVehicleOnDisconnect(uint64_t playerId);
 } // namespace RDMP::Server

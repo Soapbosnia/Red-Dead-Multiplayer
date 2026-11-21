@@ -49,6 +49,8 @@ Names follow MTA where an MTA function does the same thing. Below, each function
 | `playerWasted` | player | died (any cause) |
 | `playerChat` | player, message | a chat line; return `false` from a handler to keep it from being broadcast |
 | `playerCommand` | player, command, ...args | a chat line starting with `/` (`/tp 1 2 3` → `"tp", "1", "2", "3"`) |
+| `playerVehicleEnter` | player, vehicle | got on a vehicle (the game's own mount, E held, or `warpPedIntoVehicle`) |
+| `playerVehicleExit` | player, vehicle | got off (own dismount, `removePedFromVehicle`, the vehicle destroyed, the rider left) |
 
 ### Players
 | Function | Notes |
@@ -61,7 +63,7 @@ Names follow MTA where an MTA function does the same thing. Below, each function
 ### Elements
 | Function | Notes |
 |---|---|
-| `destroyElement(element)` | blips |
+| `destroyElement(element)` | blips, vehicles |
 | `attachElements(blip, element)` / `detachElements(blip)` / `getElementAttachedTo(blip)` | |
 | `setElementVisibleTo(blip, player \| null, visible)` | a player: show/hide for them; `null`: everyone / nobody |
 
@@ -76,6 +78,21 @@ Names follow MTA where an MTA function does the same thing. Below, each function
 `icon` is an RDR blip icon: a number 299..572 or a name (`BlipIcon.BLIP_OBJECTIVE`, `"objective"`). `size` 2 (the
 default) is the engine's normal scale. The colour is a tint applied only when given (`BLIP_MP_COLOR_*` take tints
 well). `visibleDistance >= 16383` means unlimited. `visibleTo` (a player) makes the blip exist for that player only.
+
+### Vehicles (horses)
+| Function | Notes |
+|---|---|
+| `createVehicle(model, x, y, z[, rz])` → vehicle | `model`: a rideable animal, actor definition 976..1005 (995 = saddle horse) |
+| `getVehicleModel(vehicle)` | |
+| `warpPedIntoVehicle(player, vehicle)` → bool | false when someone else rides it |
+| `removePedFromVehicle(player)` → bool | false when they were on foot |
+| `getPedOccupiedVehicle(player)` → vehicle \| false | |
+| `getVehicleOccupant(vehicle)` → player \| false | |
+
+A vehicle is an element: `getElementPosition`, `setElementPosition`, `getElementType` (`"vehicle"`),
+`getElementsByType("vehicle")`, `destroyElement`. Players also get on and off with the game's own controls (hold E
+near a horse); the server accepts it when the horse is free. While someone rides it, the rider's game syncs it; a
+horse nobody rides stands still for everyone (no animal AI).
 
 ### Console
 `players`, `tp <name> x y z`, `help`, plus the Framework's `start` / `stop` / `restart` / `refresh <resource>`, `status`.
@@ -135,4 +152,4 @@ joaat (lower-case); `re/natives_0x673783F3.csv` lists the natives this build has
 | `wasted` | server | on death: announce, fade out, respawn after 4 s, fade in |
 | `playerblips` | server | a random-colour blip on every player (`SHOW_OWN_BLIP = true` while testing alone) |
 | `scoreboard` | client | hold Tab: the players (a `dx*` drawing example) |
-| `devtools` | both | F7 position, F8 die, F9 players; `/pos`, `/tp x y z`, `/kill`, `/heal`, `/big text` (testing only) |
+| `devtools` | both | F7 position, F8 die, F9 players; `/pos`, `/tp x y z`, `/kill`, `/heal`, `/big text`, `/horse [model]`, `/mount`, `/dismount` (testing only) |

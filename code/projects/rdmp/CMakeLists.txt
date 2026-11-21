@@ -68,6 +68,7 @@ add_executable(RDMPServer
     "${RDMP_SRC}/server/api_players.cpp"
     "${RDMP_SRC}/server/api_elements.cpp"
     "${RDMP_SRC}/server/api_blips.cpp"
+    "${RDMP_SRC}/server/api_vehicles.cpp"
     "${RDMP_SRC}/server/api_hud.cpp")
 target_link_libraries(RDMPServer PRIVATE Framework::Server)
 target_include_directories(RDMPServer PRIVATE "${RDMP_SRC}")

@@ -51,6 +51,9 @@ struct PuppetDriveResult {
 // moving, default 0.6).
 void LoadPuppetControlConfig(const wchar_t* ini);
 
+// The movement input inside a captured 0x110-byte locomotion desire (shared/types.h MoveInput).
+net::MoveInput MoveInputFromDesire(const uint8_t* desire);
+
 PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget& t, double nowMs);
 
 }  // namespace rdmp

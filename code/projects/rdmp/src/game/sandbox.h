@@ -50,6 +50,8 @@ bool IsWorldReady();
 bool GetLocalPlayerHealth(float& health);
 // Engine teleport of the local player (server override, e.g. the server console "tp").
 bool TeleportLocalPlayer(const Vec3& pos, float heading);
+// Spawns an NPC actor of an actor definition (e.g. a horse, 976..1005); returns its goh handle (0 = failed).
+uint32_t SpawnActorOfDef(uint32_t def, int32_t variation, const Vec3& pos, float heading, const char* label);
 // Spawns a remote-player puppet (rdmp.ini puppet_def, default 0 = Marston model); returns its goh handle (0 = failed).
 uint32_t SpawnRemotePuppet(const Vec3& pos, float heading, const char* label);
 // Engine teleport of a puppet (FUN_140ad4ca0).

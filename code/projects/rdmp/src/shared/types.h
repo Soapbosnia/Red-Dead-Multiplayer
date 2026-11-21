@@ -37,6 +37,8 @@ struct PlayerState {
     // centre). Puppets in player mode are driven by the game's own player code from these.
     static constexpr int kControlCount = 30;
     uint8_t controls[kControlCount] = {};
+    // Local: the vehicle the game has the player on. Remote: the vehicle the server has them on. 0 = on foot.
+    uint64_t vehicle = 0;
 };
 
 }  // namespace rdmp::net

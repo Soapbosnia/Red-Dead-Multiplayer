@@ -32,6 +32,7 @@ namespace {
             SetInstance(this);
             EntityRegistry::Get().Register<Player>(Player::kTypeName);
             EntityRegistry::Get().Register<Blip>(Blip::kTypeName);
+            EntityRegistry::Get().Register<RDMP::Shared::Vehicle>(RDMP::Shared::Vehicle::kTypeName);
             if (const char *v = std::getenv("RDMP_AUTO_RESPAWN")) {
                 _autoRespawn = std::atoi(v) != 0;
             }
@@ -84,6 +85,7 @@ namespace {
             _playerCount = static_cast<int>(world.IdsOf<Player>().size());
             FlushActions(world);
             UpdateAttachedBlips(world);
+            UpdateVehicles(world);
 
             // Wasted: the client reports its real health (localHealth); 0 while alive = death.
             std::vector<uint64_t> wasted, respawned;
@@ -111,6 +113,7 @@ namespace {
             RegisterElementApi(publish);
             RegisterBlipApi(publish);
             RegisterHudApi(publish);
+            RegisterVehicleApi(publish);
             Log()->info("RDMP script API registered");
         }
 
@@ -145,6 +148,7 @@ namespace {
             }
             // Blips only this player could see would stay invisible forever; attached ones detach on their own.
             DestroyElementsOnlyFor(guid);
+            LeaveVehicleOnDisconnect(id);
             ForgetPlayer(id);
             EmitPlayerEvent("playerDisconnected", id);
         }

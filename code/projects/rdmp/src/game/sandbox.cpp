@@ -970,22 +970,26 @@ bool TeleportLocalPlayer(const Vec3& pos, float heading) {
     return true;
 }
 
-uint32_t SpawnRemotePuppet(const Vec3& pos, float heading, const char* label) {
+uint32_t SpawnActorOfDef(uint32_t def, int32_t variation, const Vec3& pos, float heading, const char* label) {
     static uint32_t layout = 0;
     if (!layout) layout = g_puppetOwner ? g_puppetOwner : FindLayoutHandle();
     if (!layout) return 0;
     // Actor names must be unique and stay valid for the actor's lifetime.
-    static char names[128][40];
+    static char names[256][40];
     static int next = 0;
-    char* name = names[next % 128];
-    sprintf_s(names[next % 128], "rdmp_net_%d", next + 1);
+    char* name = names[next % 256];
+    sprintf_s(names[next % 256], "rdmp_net_%d", next + 1);
     ++next;
     const Vec3 rot{0.0f, heading, 0.0f};
-    const uint32_t h = CreateActorDirect(layout, reinterpret_cast<uint64_t>(name), g_puppetDef, pos, rot, g_puppetVariation < 0 ? 0 : g_puppetVariation);
-    Log("net puppet: \"%s\" (%s) def %u at (%.2f, %.2f, %.2f) -> goh 0x%08x", name, label ? label : "", g_puppetDef, pos.x,
-        pos.y, pos.z, h);
+    const uint32_t h = CreateActorDirect(layout, reinterpret_cast<uint64_t>(name), def, pos, rot, variation < 0 ? 0 : variation);
+    Log("net actor: \"%s\" (%s) def %u at (%.2f, %.2f, %.2f) -> goh 0x%08x", name, label ? label : "", def, pos.x, pos.y, pos.z, h);
+    if (h) TeleportActor(ActorHandleFromGohHandle(h), pos, heading);
+    return h;
+}
+
+uint32_t SpawnRemotePuppet(const Vec3& pos, float heading, const char* label) {
+    const uint32_t h = SpawnActorOfDef(g_puppetDef, g_puppetVariation, pos, heading, label);
     if (h) {
-        TeleportActor(ActorHandleFromGohHandle(h), pos, heading);
         ApplyStoryComponentMask(ActorFromGohHandle(h), "net puppet");
         const uintptr_t gt = ReadPtr(GameAddr(kGohTablePtr));
         const uintptr_t gobj = gt ? ReadPtr(gt + (h & 0xFFFF) * 0x10) : 0;

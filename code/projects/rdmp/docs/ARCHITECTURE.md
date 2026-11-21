@@ -46,6 +46,12 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
   level, drifted in slowly once standing (> 0.3 m), and teleported beyond 4 m. Measured with two copies
   (tools/sync_report.py): the puppet shows the remote ~0.1 s late, ~0.2-0.3 m mean error, ~5% of moving frames
   pulled. Not synced yet: jumps, vaults and climbs (no input for them in the desire; needs RE).
+* **Vehicles (horses).** A server `Vehicle` entity (shared/vehicle.h: model, pose, the rider's input to it, occupant).
+  Server-owned while riderless; when a player mounts (the game's own E, reported as Player::localVehicle, or
+  warpPedIntoVehicle) the server sets Player::vehicle / Vehicle::occupant and makes the rider's client its owner, so
+  the rider syncs it (MTA's driver sync). src/game/vehicles.cpp spawns a horse per vehicle in range; others drive
+  their copy with the puppet controller from the rider's input (standing still when riderless: TASK_CLEAR at spawn and
+  our locomotion override every frame, no animal AI) and mount the rider's puppet on it.
 * **Blips.** A server-side `Blip` entity (icon, colour, scale, distance, priority, flags, attachment), streamed per
   viewer with `ReplicationManager` viewer filters (`visibleTo`, `setElementVisibleTo`). `rdmp.dll` reconciles the
   replicated set with the game's blip pool every frame.

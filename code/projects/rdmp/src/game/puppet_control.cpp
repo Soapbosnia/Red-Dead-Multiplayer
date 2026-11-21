@@ -112,6 +112,18 @@ void Face(uint8_t* d, float curHeadingDeg, float headingDeg) {
 
 }  // namespace
 
+MoveInput MoveInputFromDesire(const uint8_t* desire) {
+    MoveInput in;
+    std::memcpy(&in.right, desire + 0x14 * 4, 4);
+    std::memcpy(&in.back, desire + 0x16 * 4, 4);
+    std::memcpy(&in.heading, desire + 0x38 * 4, 4);
+    uint32_t gait = 0;
+    std::memcpy(&gait, desire + 0x3f * 4, 4);
+    in.gait = static_cast<uint8_t>(gait & 0xff);
+    if (!(in.heading >= 0.0f && in.heading <= 6.3f)) in.heading = 0.0f;  // not a heading (stick released / garbage)
+    return in;
+}
+
 void LoadPuppetControlConfig(const wchar_t* ini) {
     g_corrections = GetPrivateProfileIntW(L"net", L"puppet_nudge", 1, ini) != 0;
     wchar_t w[32];

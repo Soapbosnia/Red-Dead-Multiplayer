@@ -74,6 +74,13 @@ namespace RDMP::Server {
             args.GetReturnValue().Set(true);
             return;
         }
+        if (auto vehicle = world.Write<RDMP::Shared::Vehicle>(id)) {
+            vehicle->position = {x, y, z};
+            vehicle->speed    = 0.0f;
+            vehicle->ForceState(); // a ridden one: its rider's client takes the server's pose
+            args.GetReturnValue().Set(true);
+            return;
+        }
         args.GetReturnValue().Set(false);
     }
 
@@ -86,6 +93,9 @@ namespace RDMP::Server {
         }
         else if (id && world.Is<Blip>(id)) {
             args.GetReturnValue().Set(v8::String::NewFromUtf8Literal(isolate, "blip"));
+        }
+        else if (id && world.Is<RDMP::Shared::Vehicle>(id)) {
+            args.GetReturnValue().Set(v8::String::NewFromUtf8Literal(isolate, "vehicle"));
         }
         else {
             args.GetReturnValue().Set(false);
@@ -100,7 +110,7 @@ namespace RDMP::Server {
     void GetElementsByTypeCallback(const Args &args) {
         auto *isolate = args.GetIsolate();
         if (!Has(args, 0) || !args[0]->IsString()) {
-            Throw(isolate, "getElementsByType(\"player\"|\"blip\") -> [elements]");
+            Throw(isolate, "getElementsByType(\"player\"|\"blip\"|\"vehicle\") -> [elements]");
             return;
         }
         const std::string type = *v8::String::Utf8Value(isolate, args[0]);
@@ -110,6 +120,9 @@ namespace RDMP::Server {
         }
         else if (type == "blip") {
             ids = GetWorld().IdsOf<Blip>();
+        }
+        else if (type == "vehicle") {
+            ids = GetWorld().IdsOf<RDMP::Shared::Vehicle>();
         }
         auto context = isolate->GetCurrentContext();
         auto result  = v8::Array::New(isolate, static_cast<int>(ids.size()));
@@ -123,8 +136,8 @@ namespace RDMP::Server {
     void DestroyElementCallback(const Args &args) {
         const uint64_t id = ElementId(args, 0);
         auto &world       = GetWorld();
-        if (!id || !world.Is<Blip>(id)) {
-            args.GetReturnValue().Set(false); // players are not destroyable; other elements do not exist yet
+        if (!id || !(world.Is<Blip>(id) || world.Is<RDMP::Shared::Vehicle>(id))) {
+            args.GetReturnValue().Set(false); // players are not destroyable
             return;
         }
         const bool destroyed = world.Destroy(id);

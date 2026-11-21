@@ -27,6 +27,7 @@ namespace ImGui {
 
 #include "shared/blip.h"
 #include "shared/player.h"
+#include "shared/vehicle.h"
 
 #include <functional>
 #include <string>
@@ -57,6 +58,7 @@ namespace RDMP {
         void PostInit() override {
             Framework::Networking::Replication::EntityRegistry::Get().Register<Shared::Player>(Shared::Player::kTypeName);
             Framework::Networking::Replication::EntityRegistry::Get().Register<Shared::Blip>(Shared::Blip::kTypeName);
+            Framework::Networking::Replication::EntityRegistry::Get().Register<Shared::Vehicle>(Shared::Vehicle::kTypeName);
         }
 
         void ModuleRegister(Framework::Scripting::Engine *engine) override {
@@ -127,6 +129,17 @@ namespace RDMP {
                 Framework::Networking::Replication::ClientEntities(*replication).ForEach<Shared::Blip>(
                     [&fn](Shared::Blip *blip) {
                         fn(blip);
+                    });
+            }
+        }
+
+        // Every vehicle currently streamed to us (RDMP::Vehicle).
+        template <typename Fn>
+        void ForEachVehicle(Fn &&fn) const {
+            if (auto *replication = Replication()) {
+                Framework::Networking::Replication::ClientEntities(*replication).ForEach<Shared::Vehicle>(
+                    [&fn](Shared::Vehicle *vehicle) {
+                        fn(vehicle);
                     });
             }
         }

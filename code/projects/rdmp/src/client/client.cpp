@@ -151,6 +151,7 @@ namespace {
                     me->moveHeading = g_local.input.heading;
                     me->gait        = g_local.input.gait;
                     std::memcpy(me->controls, g_local.controls, sizeof(me->controls));
+                    me->localVehicle = g_local.vehicle;
                 }
             }
 
@@ -218,6 +219,7 @@ namespace {
             remote.s.input.heading = player->moveHeading;
             remote.s.input.gait    = player->gait;
             std::memcpy(remote.s.controls, player->controls, sizeof(remote.s.controls));
+            remote.s.vehicle = player->vehicle;
         });
         return n;
     }
@@ -279,6 +281,58 @@ namespace {
         return n;
     }
 
+    int GetVehicles(fw::Vehicle *out, int max) {
+        if (!out || max <= 0 || !g_client) {
+            return 0;
+        }
+        int n = 0;
+        g_client->ForEachVehicle([&](RDMP::Shared::Vehicle *v) {
+            if (n >= max) {
+                return;
+            }
+            fw::Vehicle &o = out[n++];
+            o              = fw::Vehicle {};
+            o.netId        = v->GetNetworkID();
+            o.model        = v->model;
+            o.x = v->position.x, o.y = v->position.y, o.z = v->position.z;
+            o.heading       = v->heading;
+            o.speed         = v->speed;
+            auto stick      = [](float f) { return std::fabs(f) < 0.01f ? 0.0f : f; };
+            o.input.right   = stick(v->moveRight);
+            o.input.back    = stick(v->moveBack);
+            o.input.heading = v->moveHeading;
+            o.input.gait    = v->gait;
+            o.occupant      = v->occupant;
+            o.timeMs        = static_cast<uint32_t>(v->GetLastTransformTime());
+            o.mine          = v->IsOwner() ? 1 : 0;
+        });
+        return n;
+    }
+
+    void SetVehicle(uint64_t netId, const float pos[3], float heading, float speed, const net::MoveInput *input) {
+        if (!g_client || !pos) {
+            return;
+        }
+        auto *v = g_client->Entity<RDMP::Shared::Vehicle>(netId);
+        if (!v || !v->IsOwner()) {
+            return;
+        }
+        v->position = {pos[0], pos[1], pos[2]};
+        v->heading  = heading;
+        v->speed    = speed;
+        if (input) {
+            v->moveRight   = input->right;
+            v->moveBack    = input->back;
+            v->moveHeading = input->heading;
+            v->gait        = input->gait;
+        }
+    }
+
+    uint64_t GetAssignedVehicle() {
+        auto *me = g_client ? g_client->Owned() : nullptr;
+        return me ? me->vehicle : 0;
+    }
+
     uint64_t GetLocalId() {
         if (!g_client) {
             return 0;
@@ -317,5 +371,8 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
     out->get_link     = &GetLink;
     out->get_blips    = &GetBlips;
     out->get_local_id = &GetLocalId;
+    out->get_vehicles = &GetVehicles;
+    out->set_vehicle  = &SetVehicle;
+    out->get_assigned_vehicle = &GetAssignedVehicle;
     return 1;
 }

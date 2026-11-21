@@ -121,6 +121,10 @@ namespace RDMP::Server {
             out = b->position;
             return true;
         }
+        if (auto v = world.Read<RDMP::Shared::Vehicle>(id)) {
+            out = v->position;
+            return true;
+        }
         return false;
     }
 
