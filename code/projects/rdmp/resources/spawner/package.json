@@ -1,0 +1,6 @@
+{
+  "name": "spawner",
+  "version": "1.0.0",
+  "description": "Spawns joining players at a fixed point: fade out, spawnPlayer, camera, fade in",
+  "mafiahub": { "server": "server.js" }
+}

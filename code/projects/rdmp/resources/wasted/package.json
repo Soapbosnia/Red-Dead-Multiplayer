@@ -1,0 +1,6 @@
+{
+  "name": "wasted",
+  "version": "1.0.0",
+  "description": "Respawns players after they die",
+  "mafiahub": { "server": "server.js" }
+}

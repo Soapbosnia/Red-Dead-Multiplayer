@@ -1,0 +1,6 @@
+{
+  "name": "scoreboard",
+  "version": "1.0.0",
+  "description": "Hold Tab: the players on the server (dx drawing example)",
+  "mafiahub": { "client": "client.js" }
+}

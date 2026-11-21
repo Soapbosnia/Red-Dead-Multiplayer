@@ -1,0 +1,6 @@
+{
+  "name": "playerblips",
+  "version": "1.0.0",
+  "description": "A radar blip with a random colour on every player, seen by everybody else",
+  "mafiahub": { "server": "server.js" }
+}

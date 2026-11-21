@@ -1,0 +1,6 @@
+{
+  "name": "devtools",
+  "version": "1.1.0",
+  "description": "Testing helpers: F7 position, F8 die, F9 players; /pos /tp /kill /heal /big",
+  "mafiahub": { "server": "server.js", "client": "client.js" }
+}
