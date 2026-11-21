@@ -23,9 +23,15 @@ foreach ($a in ($Addrs -split '[,;\s]+' | Where-Object { $_ })) {
 $logDir = Join-Path $PSScriptRoot 'out'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $log = Join-Path $logDir (($Script -replace '\.(java|py)$', '') + '.log')
-& (Join-Path $ghidra.FullName 'support\analyzeHeadless.bat') $project $gpr.BaseName `
-    -process RDR.exe -noanalysis -scriptPath (Join-Path $PSScriptRoot 'ghidra_scripts') `
-    -postScript $Script @hexArgs 2>&1 | Set-Content -Path $log -Encoding utf8
+# Ghidra is started with java directly: its launcher saves the JDK choice under the user profile (not allowed here),
+# and its temp / settings folders go to build\ghidra instead of the profile.
+$java = if ($jdk) { Join-Path $jdk.FullName 'bin\java.exe' } else { 'java' }
+$state = Join-Path $repo 'build\ghidra'
+New-Item -ItemType Directory -Force (Join-Path $state 'tmp') | Out-Null
+& $java '-Djava.system.class.loader=ghidra.GhidraClassLoader' "-Djava.io.tmpdir=$state\tmp" "-Dapplication.settingsdir=$state" `
+    "-Duser.home=$state" -Xshare:off -Xmx6G -cp (Join-Path $ghidra.FullName 'Ghidra\Framework\Utility\lib\Utility.jar') `
+    ghidra.Ghidra ghidra.app.util.headless.AnalyzeHeadless $project $gpr.BaseName -process RDR.exe -noanalysis -readOnly `
+    -scriptPath (Join-Path $PSScriptRoot 'ghidra_scripts') -postScript $Script @hexArgs 2>&1 | Set-Content -Path $log -Encoding utf8
 $text = Get-Content $log
 $start = 0
 for ($i = 0; $i -lt $text.Count; $i++) {

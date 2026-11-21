@@ -573,3 +573,39 @@ median 0.049 -> 0.018 m (walking 1-2 cm, sprint/curves 7-10 cm), p95 0.11 -> 0.1
   `loader+0x2270`, 199 slots; needs the HUD entry list up. Full table and engine notes: docs/SCRIPTING_RE.md
   "Native registry" / "Blips". Implementation: core/scriptnatives.cpp, core/blips.cpp.
 
+
+## Player input path + MTA-style context switch (2026-11-21)
+MTA:SA (studied from mtasa-blue, GPLv3 - only the method is used): remote players are real `CPlayerPed`s; a hook on
+`CPlayerPed::ProcessControl` copies the remote's synced `CControllerState` into the single global pad (plus camera
+rotation, gravity, stats), runs the game's own player code, then restores the local pad (`SwitchContext` /
+`ReturnContextToLocalPlayer`, multiplayer_sa/multiplayer_keysync.cpp). Puresync packet (CNetAPI::ReadPlayerPuresync):
+keys, position, rotation, velocity, camera rotation, flags. Receiver: SetMoveSpeed(velocity), SetControllerState,
+SetTargetPosition = the error (target - current) is applied linearly over the next sync interval
+(CClientPed::UpdateTargetPosition), warp only beyond 5 + 5 * speed.
+
+RDR (build 0x673783F3), found with write watches (jump_probe=3/5) + Ghidra:
+- `playerInfo` = `*(0x1422DAF30)`, one global for the local player: +0x5ec actor handle, +0x5e9 / +0x1c8 "is set up",
+  +0x5d4 control state (2, 3, 5), +0x118 control object (vtable), +0x138 movement object (vtable, +0x30 update),
+  +0x410 / +0x418 / +0x420 sub-objects.
+- Input -> control object, main thread, player-info update: game loop 0x1401F69CD -> 0x14034C986 -> 0x14034FB2C ->
+  FUN_1403461c0 -> FUN_140370cd0 -> FUN_1403726f0 (writes the control object). The control object reads every
+  input through **vfunc +0x58(this, inputId)** -> input record (byte [0] value, [2] new, [3] previous, [4] index,
+  +8 table; the game writes [2] itself to force sprint). Ids: 0x11 / 0x12 left stick x / y (analog,
+  FUN_1403704b0), 0x18 sprint, 0x0c another button. Control object fields: +0xd0 / +0xd4 stick, +0x134 stick
+  magnitude, +0x100 stick + camera heading, +0x104 desired heading (camera-relative: atan2 of playerInfo+0x10's
+  camera forward (+0x30, +0x38) + stick angle), +0x10c gait 0-4, +0x184 sprint state machine.
+- Control object -> desire, main thread, per-actor update: 0x140AF8BB5 -> FUN_140bb4150 (player-control component;
+  **returns unless playerInfo+0x5ec == its actor**) -> clears the desire (FUN_140b25880(state+0x240)), then
+  state 2: FUN_14034e9b0 / 3: FUN_14034e470 / 5: playerInfo+0x138 vfunc +0x30, FUN_14034dbe0, FUN_14034df00 ->
+  0x14034EA09 -> 0x140374028 -> 0x140373E23 writes the stick into the desire.
+- Only the local player has that component (exec breakpoint on FUN_140bb4150 with a puppet present: one rcx).
+  FUN_140ae3ff0(out, def, ..., asPlayer, noPlayerInfo): asPlayer && !noPlayerInfo writes playerInfo (+0x5e9, +0x4f8,
+  +0x5ec, +0x1c8, +0x1c0) and creates the actor's +0xb8 and +0xd8 components from the player template
+  (*(*(*(0x142AE0468)+0x18)+0x10) +0xb8 / +0xe8 descriptors, FUN_140597660 factory, vfunc +8 init, +0x18 activate).
+- Jump: IS_ACTOR_JUMPING (0x140281BF0) = motion(*(actor+0x38))+0xc6f != 0, or (actor+0x88)+0x85d < 0 (~1.1 s per
+  jump). IS_ACTOR_USING_LEDGE = motion+0xaa8 -> +0x48 -> +0xf8 != 0. A jump is not in the desire.
+Plan (RDR's SwitchContext): per puppet a player-info + control object of its own, the control object's input fetch
+(+0x58) answering from the remote's synced input values; around the puppet's player-info update and its
+FUN_140bb4150, the global playerInfo pointer points at the puppet's, so the game's own player code drives the puppet
+from the remote's buttons, stick and camera heading. Open: playerInfo construction / size, the +0xb8 / +0xd8
+components on a puppet, which other threads read playerInfo during the swap.

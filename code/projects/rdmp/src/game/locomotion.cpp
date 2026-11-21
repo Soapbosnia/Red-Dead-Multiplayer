@@ -30,6 +30,7 @@ LocoFn g_original = nullptr;
 std::atomic<uint32_t> g_applied{0};
 
 std::atomic<uintptr_t> g_playerActor{0};
+std::atomic<uintptr_t> g_playerDesireAddr{0};  // where the local player's desire lives (debug: write watches)
 
 std::mutex g_mutex;
 uint8_t g_playerDesire[kDesireSize];
@@ -56,6 +57,7 @@ void LocoHook(uintptr_t loco, uint8_t* desire, uint64_t a3, uint64_t a4, uint64_
     if (actor && desire) {
         if (actor == g_playerActor.load(std::memory_order_relaxed)) {
             std::lock_guard lock(g_mutex);
+            g_playerDesireAddr.store(reinterpret_cast<uintptr_t>(desire), std::memory_order_relaxed);
             if (g_havePlayerOverride) std::memcpy(desire, g_playerOverride, kDesireSize);
             std::memcpy(g_playerDesire, desire, kDesireSize);
             g_havePlayerDesire = true;
@@ -118,6 +120,8 @@ bool GetPlayerDesire(uint8_t* out, uint32_t* seq) {
     if (seq) *seq = g_playerDesireSeq;
     return true;
 }
+
+uintptr_t PlayerDesireAddress() { return g_playerDesireAddr.load(); }
 
 void SetPlayerDesireOverride(const uint8_t* desire) {
     std::lock_guard lock(g_mutex);

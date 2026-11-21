@@ -538,7 +538,27 @@ void LogActorDefs() {
             for (; k + 1 < sizeof(buf) && IsReadable(name + k, 1) && s[k] >= 0x20 && s[k] < 0x7f; ++k) buf[k] = s[k];
             buf[k] = '\0';
         }
-        Log("  def[%u] = %p \"%s\"", i, reinterpret_cast<void*>(def), buf);
+        // The script-level model name (ActorModel = this index, if GET_ACTOR_ENUM_FROM_STRING agrees).
+        char enumName[96] = "";
+        NativeCall en;
+        en.Int(i);
+        if (en.Call(NativeHash("GET_ACTOR_ENUM_STRING_FROM_ENUM"))) {
+            const uintptr_t s = static_cast<uintptr_t>(en.ResultRaw());
+            size_t k = 0;
+            for (; s && k + 1 < sizeof(enumName) && IsReadable(s + k, 1); ++k) {
+                const char c = reinterpret_cast<const char*>(s)[k];
+                if (c < 0x20 || c >= 0x7f) break;
+                enumName[k] = c;
+            }
+            enumName[k] = '\0';
+        }
+        int back = -1;
+        if (enumName[0]) {
+            NativeCall from;
+            from.Ptr(enumName);
+            if (from.Call(NativeHash("GET_ACTOR_ENUM_FROM_STRING"))) back = from.ResultInt();
+        }
+        Log("  def[%u] = %p \"%s\" enum \"%s\" (from string -> %d)", i, reinterpret_cast<void*>(def), buf, enumName, back);
     }
 }
 
@@ -1025,6 +1045,136 @@ bool GetPuppetPosition(uint32_t goh, Vec3& pos) {
     return true;
 }
 
+// Debug (rdmp.ini [debug] horse_probe=<def>): a few seconds after the script spawn, creates a horse of that actor def
+// 4 m in front of the player, then mounts the player on it with ACTOR_MOUNT_ACTOR and logs what the game reports.
+int g_horseProbeDef = 0;
+void HorseProbeFrame(float) {
+    static int step = 0;
+    static ULONGLONG at = 0;
+    static uint32_t horse = 0;
+    if (!g_horseProbeDef || step >= 20 || !g_playerSpawned || g_limbo || !g_playerGoh) return;
+    const ULONGLONG now = GetTickCount64();
+    if (!at) at = now + 4000;
+    if (now < at) return;
+    at = now + 1500;
+    uintptr_t actor = 0;
+    Vec3 p{};
+    if (!PlayerActorAndPos(actor, p)) return;
+    auto native = [](const char* name, std::initializer_list<uint32_t> args) {
+        NativeCall c;
+        for (uint32_t a : args) c.Uint(a);
+        const bool ok = c.Call(NativeHash(name));
+        return ok ? c.ResultUint() : 0xFFFFFFFFu;
+    };
+    if (step == 0) {
+        const float h = ActorHeadingDeg(actor);
+        const Vec3 at4{p.x - std::sin(h * 0.01745329f) * 4.0f, p.y + 0.5f, p.z - std::cos(h * 0.01745329f) * 4.0f};
+        static char name[] = "rdmp_horse_probe";
+        const uint32_t layout = FindLayoutHandle();
+        horse = CreateActorDirect(layout, reinterpret_cast<uint64_t>(name), static_cast<uint32_t>(g_horseProbeDef), at4, Vec3{0, h, 0}, 0);
+        if (horse) TeleportActor(ActorHandleFromGohHandle(horse), at4, h);
+        Log("horse probe: def %d -> goh 0x%08x actor %p, IS_ACTOR_HORSE=%u IS_ACTOR_VALID=%u", g_horseProbeDef, horse,
+            reinterpret_cast<void*>(ActorFromGohHandle(horse)), native("IS_ACTOR_HORSE", {horse}), native("IS_ACTOR_VALID", {horse}));
+    } else if (step == 2 && horse) {
+        native("ACTOR_MOUNT_ACTOR", {g_playerGoh, horse});
+        Log("horse probe: ACTOR_MOUNT_ACTOR(player 0x%08x, horse 0x%08x)", g_playerGoh, horse);
+    } else if (horse) {
+        Vec3 hp{};
+        float hh = 0.0f;
+        GetPuppetPose(horse, hp, hh);
+        Log("horse probe [%d]: player (%.2f, %.2f, %.2f) | horse (%.2f, %.2f, %.2f) h %.1f | mounted=%u riding=%u GET_MOUNT=0x%08x "
+            "GET_RIDER=0x%08x horse brain %p",
+            step, p.x, p.y, p.z, hp.x, hp.y, hp.z, hh, native("IS_ACTOR_MOUNTED", {g_playerGoh}), native("IS_ACTOR_RIDING", {g_playerGoh}),
+            native("GET_MOUNT", {g_playerGoh}), native("GET_RIDER", {horse}),
+            reinterpret_cast<void*>(ReadPtr(ActorFromGohHandle(horse) + 0x28)));
+        if (step == 12) {
+            native("ACTOR_DISMOUNT_NOW", {g_playerGoh});
+            Log("horse probe: ACTOR_DISMOUNT_NOW(player)");
+        }
+    }
+    ++step;
+}
+
+// Debug (rdmp.ini [debug] jump_probe=1): logs the local player's jump / ledge / ragdoll state (the game's own natives)
+// and height whenever one changes, plus the motion-component bytes IS_ACTOR_JUMPING reads (RE: handler 0x140281BF0:
+// jumping = byte motion+0xc6f != 0, or (actor+0x88)+0x85d < 0; motion = *(actor+0x38)). jump_probe=2 also puts a
+// write watch on motion+0xc6c (the dword holding the jump byte) to find the code that starts a jump.
+int g_jumpProbe = 0;
+void JumpProbeFrame(float) {
+    if (!g_jumpProbe || !g_playerSpawned || g_limbo || !g_playerGoh) return;
+    uintptr_t actor = 0;
+    Vec3 p{};
+    if (!PlayerActorAndPos(actor, p)) return;
+    auto native = [](const char* name, uint32_t goh) {
+        NativeCall c;
+        c.Uint(goh);
+        return c.Call(NativeHash(name)) ? c.ResultUint() : 0xFFFFFFFFu;
+    };
+    const uintptr_t ent = ActorFromGohHandle(g_playerGoh);
+    const uintptr_t motion = ent ? ReadPtr(ent + 0x38) : 0;
+    const uintptr_t brainish = ent ? ReadPtr(ent + 0x88) : 0;
+    const uint8_t jumpByte = motion && IsReadable(motion + 0xc6f, 1) ? *reinterpret_cast<uint8_t*>(motion + 0xc6f) : 0xff;
+    const uint8_t b85d = brainish && IsReadable(brainish + 0x85d, 1) ? *reinterpret_cast<uint8_t*>(brainish + 0x85d) : 0xff;
+    const uint32_t jumping = native("IS_ACTOR_JUMPING", g_playerGoh);
+    const uint32_t ledge = native("IS_ACTOR_USING_LEDGE", g_playerGoh);
+    const uint32_t ragdoll = native("IS_ACTOR_RAGDOLL", g_playerGoh);
+    static uint32_t lastJ = 0xEE, lastL = 0xEE, lastR = 0xEE;
+    static uint8_t lastB = 0xEE, lastB2 = 0xEE;
+    static bool armed = false;
+    static uint8_t cur[kDesireSize];
+    const bool walking = GetPlayerDesire(cur, nullptr) && *reinterpret_cast<uint32_t*>(cur + 0x16 * 4) != 0;
+    if (g_jumpProbe == 3 && !armed && walking && PlayerDesireAddress()) {  // who writes the stick into the desire
+        armed = true;
+        ArmWriteWatch(PlayerDesireAddress() + 0x16 * 4, "player desire [0x16] (stick forward)");
+        Log("jump probe: write watch on the player's desire %p word 0x16", reinterpret_cast<void*>(PlayerDesireAddress()));
+    }
+    // jump_probe=4: which actors run the player-control update FUN_140bb4150 (it returns early unless the actor is
+    // playerInfo+0x5ec). Its rcx is a per-actor component: actor handle = *(*(*(rcx+0x60)+0x10)+8).
+    static ULONGLONG at4 = 0;
+    if (g_jumpProbe == 4) {
+        if (!at4) at4 = GetTickCount64() + 15000;
+        if (!armed && GetTickCount64() > at4) {
+            armed = true;
+            ArmExecWatch(0x140BB4150, "FUN_140bb4150 player-control update");
+        } else if (armed && GetTickCount64() > at4 + 3000) {
+            at4 = ~0ull - 10000;
+            const uintptr_t info = ReadPtr(GameAddr(0x1422DAF30));
+            Log("jump probe: player handle (playerInfo+0x5ec) 0x%08x, hits %d", info ? *reinterpret_cast<uint32_t*>(info + 0x5ec) : 0,
+                WatchHitCount());
+            for (int i = 0; i < 4; ++i) {
+                const uintptr_t rc = WatchExecRcx(i);
+                if (!rc) continue;
+                const uintptr_t a60 = ReadPtr(rc + 0x60), a10 = a60 ? ReadPtr(a60 + 0x10) : 0;
+                Log("jump probe:   rcx[%d] %p -> actor handle 0x%08x", i, reinterpret_cast<void*>(rc),
+                    a10 && IsReadable(a10 + 8, 4) ? *reinterpret_cast<uint32_t*>(a10 + 8) : 0);
+            }
+        }
+    }
+    // jump_probe=5: who writes the player's stick into the input object playerInfo+0x118 (+0xd0 / +0xd4).
+    if (g_jumpProbe == 5 && !armed && walking) {
+        const uintptr_t info = ReadPtr(GameAddr(0x1422DAF30));
+        const uintptr_t in = info ? ReadPtr(info + 0x118) : 0;
+        if (in) {
+            armed = true;
+            Log("jump probe: playerInfo %p, +0x118 input %p (stick %.3f %.3f, angle %.3f, gait %d), +0x138 %p", reinterpret_cast<void*>(info),
+                reinterpret_cast<void*>(in), *reinterpret_cast<float*>(in + 0xd0), *reinterpret_cast<float*>(in + 0xd4),
+                *reinterpret_cast<float*>(in + 0x104), *reinterpret_cast<int*>(in + 0x10c), reinterpret_cast<void*>(ReadPtr(info + 0x138)));
+            ArmWriteWatch(in + 0xd4, "playerInfo+0x118 input +0xd4 (stick)");
+        }
+    }
+    if (g_jumpProbe == 2 && !armed && motion) {
+        armed = true;
+        ArmWriteWatch(motion + 0xc6c, "motion+0xc6c (jump byte)");
+        Log("jump probe: ent %p motion %p (+0x88 %p): write watch on motion+0xc6c", reinterpret_cast<void*>(ent),
+            reinterpret_cast<void*>(motion), reinterpret_cast<void*>(brainish));
+    }
+    if (jumping != lastJ || ledge != lastL || ragdoll != lastR || jumpByte != lastB || b85d != lastB2) {
+        Log("jump probe: jumping=%u ledge=%u ragdoll=%u | motion+0xc6f=%02x +0x88:+0x85d=%02x | y %.3f (%.2f, %.2f)", jumping,
+            ledge, ragdoll, jumpByte, b85d, p.y, p.x, p.z);
+        lastJ = jumping, lastL = ledge, lastR = ragdoll, lastB = jumpByte, lastB2 = b85d;
+    }
+}
+
 // Debug (rdmp.ini [debug] collision_probe=1): moves the player toward -X at ~8 m/s (16 m every 2 s, like a galloping
 // horse), placed 6 m above the last ground; if he stays frozen, retries the same spot 20 m higher (rising terrain).
 // Logs landed / FROZEN / FELL THROUGH and the stream grid -> does collision + map stream in around a moving player?
@@ -1386,6 +1536,16 @@ void LoadSandboxConfig(const wchar_t* ini) {
     if (GetPrivateProfileIntW(L"debug", L"pos_log", 0, ini)) AddFrameCallback(&PosLogFrame);
     if (GetPrivateProfileIntW(L"debug", L"scene_report", 0, ini)) AddFrameCallback(&SceneReportFrame);
     if (GetPrivateProfileIntW(L"debug", L"signin_log", 0, ini)) AddFrameCallback(&SignInProbe);
+    g_jumpProbe = GetPrivateProfileIntW(L"debug", L"jump_probe", 0, ini);
+    if (g_jumpProbe) AddFrameCallback(&JumpProbeFrame);
+    g_horseProbeDef = GetPrivateProfileIntW(L"debug", L"horse_probe", 0, ini);
+    if (g_horseProbeDef) AddFrameCallback(&HorseProbeFrame);
+    // [debug] log_actor_defs=1: the actor definition table (index -> template name) once the world is up.
+    if (GetPrivateProfileIntW(L"debug", L"log_actor_defs", 0, ini)) {
+        AddFrameCallback([](float) {
+            if (g_worldReady) LogActorDefs();
+        });
+    }
     InstallBootVideoHook(ini);
     InstallGameFlow(ini);
     wcsncpy_s(g_iniPath, ini, _TRUNCATE);

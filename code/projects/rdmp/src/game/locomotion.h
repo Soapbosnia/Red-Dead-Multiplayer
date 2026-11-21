@@ -15,6 +15,9 @@ void SetLocoPlayerActor(uintptr_t actor);
 // Latest desire produced by the local player's input (false until captured). seq increments per capture.
 bool GetPlayerDesire(uint8_t* out, uint32_t* seq);
 
+// Debug: address of the local player's desire block (0 until its first locomotion update).
+uintptr_t PlayerDesireAddress();
+
 // Debug: the local player's locomotion uses `desire` instead of its input (nullptr = back to the input).
 void SetPlayerDesireOverride(const uint8_t* desire);
 
