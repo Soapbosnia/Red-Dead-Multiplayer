@@ -604,6 +604,12 @@ RDR (build 0x673783F3), found with write watches (jump_probe=3/5) + Ghidra:
   (*(*(*(0x142AE0468)+0x18)+0x10) +0xb8 / +0xe8 descriptors, FUN_140597660 factory, vfunc +8 init, +0x18 activate).
 - Jump: IS_ACTOR_JUMPING (0x140281BF0) = motion(*(actor+0x38))+0xc6f != 0, or (actor+0x88)+0x85d < 0 (~1.1 s per
   jump). IS_ACTOR_USING_LEDGE = motion+0xaa8 -> +0x48 -> +0xf8 != 0. A jump is not in the desire.
+- playerInfo is created once in FUN_1401ee680: alloc 0x5f0 (FUN_14007d6c0), ctor FUN_140344f30, then
+  FUN_140345a20(info, *(0x142AC4CA0)) and FUN_1403458f0(info). FUN_140345a20 allocates +0x410 / +0x418 / +0x420 /
+  +0x408 and loads one **input mapper per context** from XML (vfunc +0x40): +0x118 input_foot.xml (the control object
+  above), +0x130 input_cam, +0x120 input_death, +0x70 input_boat, +0x78 input_car, +0x80 input_wagon, +0x128
+  input_inv, +0x138 input_horse, +0x60 input_pushcart, +0x68 input_train, +0x140 input_minigame. A mapper's vfunc
+  +0x58(id) returns that input's record = RDR's CControllerState equivalent (horses use input_horse).
 Plan (RDR's SwitchContext): per puppet a player-info + control object of its own, the control object's input fetch
 (+0x58) answering from the remote's synced input values; around the puppet's player-info update and its
 FUN_140bb4150, the global playerInfo pointer points at the puppet's, so the game's own player code drives the puppet
