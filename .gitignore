@@ -1,0 +1,8 @@
+/build/
+/re/out/
+*.user
+*.suo
+.vs/
+.vscode/
+__pycache__/
+*.pyc

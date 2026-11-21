@@ -1,0 +1,36 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261121125423
+Username: DESKTOP-IQTSDLV\Soap
+RunAs User: DESKTOP-IQTSDLV\Soap
+Configuration Name: 
+Machine: DESKTOP-IQTSDLV (Microsoft Windows NT 10.0.26300.0)
+Host Application: powershell -NoProfile -ExecutionPolicy Bypass -File D:\Development\Repositories\rdmp\tools\setup_tools.ps1
+Process ID: 7808
+PSVersion: 5.1.26100.9818
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9818
+BuildVersion: 10.0.26100.9818
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+moved   D:\Development\Repositories\rdo.pre-rdrmp\_tools\ghidra\ghidra_12.2_PUBLIC -> D:\Development\Tools\ghidra_12.2_PUBLIC
+moved   D:\Development\Repositories\rdo.pre-rdrmp\_tools\jdk25\jdk-25.0.5+8 -> D:\Development\Tools\jdk-25.0.5+8
+moved   D:\Development\Repositories\rdo.pre-rdrmp\_tools\x64dbg -> D:\Development\Tools\x64dbg
+moved   D:\Development\Repositories\rdo.pre-rdrmp\_tools\rizin\rizin-win-installer-vs2019_static-64 -> D:\Development\Tools\rizin
+moved   D:\Development\Repositories\rdo.pre-rdrmp\_tools\cw\magicrdr\Magic-RDR-master -> D:\Development\Tools\Magic-RDR
+moved   D:\Development\Repositories\rdo.pre-rdrmp\_tools\ghproj -> D:\Development\Tools\ghidra-projects\rdr
+moved   D:\Development\Repositories\_incoming\framework-sdk-44.1.1\sdk\Framework-44.1.1-windows -> D:\Development\Tools\MafiaHub\Framework-44.1.1-windows
+moved   D:\fwb\vcpkg -> D:\Development\Tools\MafiaHub\vcpkg
+moved   D:\Development\Repositories\_incoming\ug\unethical-gangsters-main -> D:\Development\Tools\reference\unethical-gangsters
+stamped D:\Development\Tools\MafiaHub\Framework-44.1.1-windows\.fw-extracted
+set     FW_SDK_CACHE_DIR=D:\Development\Tools\MafiaHub (user environment)
+set     JAVA_HOME_OVERRIDE=D:\Development\Tools\jdk-25.0.5+8 in launch.properties
+
+Done. Close this window.
+**********************
+Windows PowerShell transcript end
+End time: 20261121125423
+**********************
