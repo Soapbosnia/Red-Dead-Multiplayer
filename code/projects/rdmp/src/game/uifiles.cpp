@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "events.h"
+#include "gameflow.h"
 #include "log.h"
 #include "netclient.h"
 #include "patch.h"
@@ -63,6 +64,19 @@ std::string ReadStream(void* stream) {
     return out;
 }
 
+// The first `what` at or after `from` that is not inside an XML comment (the game's files comment out whole blocks).
+size_t FindOutsideComments(const std::string& s, const char* what, size_t from) {
+    size_t pos = from;
+    for (;;) {
+        const size_t hit = s.find(what, pos);
+        const size_t open = s.find("<!--", pos);
+        if (hit == std::string::npos || open == std::string::npos || hit < open) return hit;
+        const size_t close = s.find("-->", open + 4);
+        if (close == std::string::npos) return std::string::npos;
+        pos = close + 3;
+    }
+}
+
 // Replaces the first `from` that follows `anchor`.
 bool ReplaceAfter(std::string& s, const char* anchor, const char* from, const char* to) {
     const size_t a = s.find(anchor);
@@ -75,6 +89,18 @@ bool ReplaceAfter(std::string& s, const char* anchor, const char* from, const ch
 void* Serve(const std::string& content, const char* name, void* a2, void* a3, void* a4) {
     g_buffers.push_back(content);
     const std::string& b = g_buffers.back();
+    if (g_logNames) {  // debug: what we served, as <rdmp.ini folder>\ui_served\<name with / -> _>
+        std::wstring dir(g_dir);
+        dir = dir.substr(0, dir.size() - std::wstring(L"ui\\native\\").size()) + L"ui_served\\";
+        CreateDirectoryW(dir.c_str(), nullptr);
+        std::wstring file = dir;
+        for (const char* p = name; *p; ++p) file += (*p == '/' || *p == '\\') ? L'_' : static_cast<wchar_t>(*p);
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, file.c_str(), L"wb") == 0 && f) {
+            fwrite(b.data(), 1, b.size(), f);
+            fclose(f);
+        }
+    }
     char path[512];
     sprintf_s(path, "memory:$%p,%d,%d:%s", static_cast<const void*>(b.data()), static_cast<int>(b.size()), 0, name);
     return g_open(path, a2, a3, a4);
@@ -89,8 +115,8 @@ void PatchPauseMenu(std::string& s) {
         Log("ui files: pause menu list not found - not patched");
         return;
     }
-    std::string moved;
-    for (const char* id : {"PM_Weapons", "PM_Outfits", "PM_Journal", "PM_Stats", "PM_SocialClub", "PM_Leaderboards", "PM_Load"}) {
+    std::string moved;  // (PM_Network, PM_SocialClub and PM_Leaderboards are commented out in the game's file)
+    for (const char* id : {"PM_Weapons", "PM_Outfits", "PM_Journal", "PM_Stats", "PM_Load"}) {
         const std::string open = std::string("<UILabel id=\"") + id + "\"";
         const size_t a = s.find(open, list);
         const size_t b = a == std::string::npos ? a : s.find("</UILabel>", a);
@@ -98,20 +124,43 @@ void PatchPauseMenu(std::string& s) {
         moved += "      " + s.substr(a, b + std::strlen("</UILabel>") - a) + "\n";
         s.erase(a, b + std::strlen("</UILabel>") - a);
     }
-    const size_t end = s.find("</UIList>", list);
-    if (end == std::string::npos) return;
+    // The one menu (MTA-style, title and pause): Map (in game), Server Browser, Direct Connect, Settings (the game's
+    // Options), Disconnect (in game), Quit. Which ones show is set on rdmp.pause (UiFilesOnEvent) before the list is
+    // entered; Back goes through rdmp.back (quit prompt on the title, close in game).
+    auto item = [](const char* id, const char* actions) {
+        return std::string("<UILabel id=\"") + id + "\" text=\"Common_Null\">\n"
+               "        <onfocused expr=\"Enter(PauseMenu_Main_Prompts)\"></onfocused>\n"
+               "        <transition event=\"@UI.ACCEPT*RELEASED\" consume=\"true\">\n"
+               "          <action expr=\"PlaySound('HUD_MENU_SELECT_MASTER')\"></action>\n" + actions +
+               "        </transition>\n"
+               "      </UILabel>\n      ";
+    };
+    if (const size_t opt = s.find("<UILabel id=\"PM_Options\"", list); opt != std::string::npos) {
+        s.insert(opt, item("RdmpPM_Browser",
+                           "          <action expr=\"Exit(PauseMenu_Main_Prompts)\"></action>\n"
+                           "          <action expr=\"unfocus(PauseMenu)\"></action>\n"
+                           "          <action expr=\"Enter(RdmpBrowser)\"></action>\n"
+                           "          <action expr=\"focus(RdmpBrowser)\"></action>\n") +
+                      item("RdmpPM_Direct", "          <action expr=\"SendEvent('rdmp.direct')\"></action>\n"));
+    }
     const std::string disconnect =
-        "<UILabel id=\"RdmpPM_Disconnect\" text=\"Common_Null\">\n"
-        "        <onfocused expr=\"Enter(PauseMenu_Main_Prompts)\"></onfocused>\n"
-        "        <transition event=\"@UI.ACCEPT*RELEASED\" consume=\"true\">\n"
-        "          <action expr=\"PlaySound('HUD_MENU_SELECT_MASTER')\"></action>\n"
-        "          <action expr=\"Enter(RdmpDisconnectConf)\"></action>\n"
-        "        </transition>\n"
-        "        <transition event=\"@UI.CANCEL*RELEASED\">\n"
-        "          <action expr=\"PlaySound('HUD_MENU_BACK_MASTER')\"></action>\n"
-        "          <action expr=\"StackPop()\"></action>\n"
-        "        </transition>\n"
-        "      </UILabel>\n    ";
+        item("RdmpPM_Disconnect", "          <action expr=\"Enter(RdmpDisconnectConf)\"></action>\n") +
+        item("RdmpPM_Quit", "          <action expr=\"Enter(QuitGame)\"></action>\n");
+    // Scene: our cue to set the entries before the list is entered, and Back / Pause through rdmp.back.
+    if (const size_t e = s.find("expr=\"Enter(PauseMenu)\"></onfocused>"); e != std::string::npos) {
+        const size_t on = s.rfind("<onfocused", e);
+        if (on != std::string::npos) s.insert(on, "<onfocused expr=\"SendEvent('rdmp.pause')\"></onfocused>\n       ");
+    }
+    ReplaceAfter(s, "<transition event=\"@UI.CANCEL*RELEASED\" target=\"StackPop()\"", "target=\"StackPop()\"", "target=\"SendEvent('rdmp.back')\"");
+    ReplaceAfter(s, "<transition event=\"@PAUSE.PAUSE*RELEASED\" target=\"StackPop()\"", "target=\"StackPop()\"", "target=\"SendEvent('rdmp.back')\"");
+    if (const size_t t = s.find("<transition event=\"rdmp.openBrowser\""); t != std::string::npos) {
+        s.insert(t, "<transition event=\"rdmp.back.title\"><action expr=\"Enter(QuitGame)\"></action></transition>\n       "
+                    "<transition event=\"rdmp.back.ingame\"><action expr=\"PlaySound('HUD_MENU_BACK_MASTER')\"></action>"
+                    "<action expr=\"StackPop()\"></action></transition>\n       ");
+    }
+    // (after the inserts above: they move everything below them)
+    const size_t end = FindOutsideComments(s, "</UIList>", s.find("<UIList id=\"PauseMenu\""));
+    if (end == std::string::npos) return;
     const std::string afterList =
         "</UIList>\n"
         "    <UILayer id=\"RdmpPauseUnused\">\n" + moved + "    </UILayer>\n"
@@ -134,7 +183,7 @@ void PatchPauseMenu(std::string& s) {
         "      </UIPromptStrip>\n"
         "    </UIMessageBox>";
     s.replace(end, std::strlen("</UIList>"), disconnect + afterList);
-    Log("ui files: pause menu patched (single-player items out, Disconnect in)");
+    Log("ui files: pause menu patched (one menu)");
 }
 
 void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
@@ -201,33 +250,20 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
         return Serve(s, name, a2, a3, a4);
     }
     if (_stricmp(name, "Boot.sc") == 0) {
-        // The title's mode list (SinglePlayerList in StartScreen2: Normal / Hardcore / Undead Nightmare) becomes our
-        // main menu (ui/native/MainMenuList.sc).
+        // One menu (MTA-style): the boot goes straight to StartScreen2 (the title's logo + background, keeping the title
+        // movie loaded so the game treats the pause scene as the front end's: no Map) instead of the "press Play"
+        // title, and StartScreen2 opens the pause scene, whose list is our menu (PatchPauseMenu). The single-player
+        // mode list and StartScreen2's prompts are not entered.
         std::string s = ReadStream(g_open(name, a2, a3, a4));
-        const size_t from = s.find("<UIScrollableList id=\"SinglePlayerList\"");
-        const size_t end = from == std::string::npos ? from : s.find("</UIScrollableList>", from);
-        const std::string ours = ReadOurFile("MainMenuList.sc");
-        if (end == std::string::npos || ours.empty()) {
-            Log("ui files: Boot.sc mode list %s - not patched", ours.empty() ? "replacement missing" : "not found");
-        } else {
-            s.replace(from, end + std::strlen("</UIScrollableList>") - from, ours);
-            Log("ui files: Boot.sc patched (main menu)");
-        }
-        // One main menu: the boot goes straight to it (StartScreen2) instead of the "press Play" title, and its Back
-        // (Esc) asks to quit.
-        if (ReplaceAfter(s, "<transition event=\"benchmarkComplete\"", "target=\"StartScreen1\"", "target=\"StartScreen2\""))
-            Log("ui files: Boot.sc patched (boot to the main menu)");
-        const char* stripTag = "<UIPromptStrip id=\"StartScreen2PromptStrip\"";
-        const size_t strip = s.find(stripTag);
-        const size_t t0 = strip == std::string::npos ? strip : s.find("<transition event=\"@UI.CANCEL*RELEASED\"", strip);
-        const size_t t1 = t0 == std::string::npos ? t0 : s.find("</transition>", t0);
-        if (t1 != std::string::npos) {
-            s.replace(t0, t1 + std::strlen("</transition>") - t0,
-                      "<transition event=\"@UI.CANCEL*RELEASED\" consume=\"true\"><action expr=\"Enter(QuitGame)\"></action></transition>");
-            ReplaceAfter(s, stripTag, "text=\"Common_Back\"", "text=\"Common_Quit\"");
-            ReplaceAfter(s, stripTag, "text=\"Common_Play\"", "text=\"Common_Select\"");
-            Log("ui files: Boot.sc patched (main menu Esc = quit)");
-        }
+        int done = 0;
+        done += ReplaceAfter(s, "<transition event=\"benchmarkComplete\"", "target=\"StartScreen1\"", "target=\"StartScreen2\"");
+        const char* ss2 = "<RDRUIStartScreen2 id=\"StartScreen2\"";
+        done += ReplaceAfter(s, ss2, "<onactivate expr=\"Enter(MainMenuPrompts)\"       ></onactivate>",
+                             "<onactivate expr=\"StackPush(PauseMenuScene)\"></onactivate>");
+        done += ReplaceAfter(s, ss2, "<onactivate expr=\"Enter(StartScreen2PromptStrip)\"></onactivate>", "");
+        done += ReplaceAfter(s, ss2, "<onactivate expr=\"Enter(StartScreen_NewsTicker)\"></onactivate>", "");
+        done += ReplaceAfter(s, ss2, "<onactivate expr=\"Enter(StartScreen_NewsState)\" ></onactivate>", "");
+        Log("ui files: Boot.sc patched (one menu: %d/5 edits)", done);
         return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
     }
     return g_open(name, a2, a3, a4);
@@ -277,6 +313,10 @@ std::map<std::string, std::string> g_texts = {
     {"RdmpPrompt_Favorite", "Favorite"},
     {"RdmpPrompt_Refresh", "Refresh"},
     {"RdmpPM_Disconnect", "DISCONNECT"},
+    {"RdmpPM_Browser", "SERVER BROWSER"},
+    {"RdmpPM_Direct", "DIRECT CONNECT"},
+    {"RdmpPM_Quit", "QUIT"},
+    {"PM_Options", "SETTINGS"},
 };
 
 // Server browser model (rows of ui/native/Browser.sc: RdmpSrv_<i> with RdmpSrvName_<i> / RdmpSrvInfo_<i>).
@@ -535,6 +575,22 @@ void UiFilesOnEvent(const char* name) {
         Log("ui: join %s:%d (%s)", g_rows[i].host.c_str(), g_rows[i].port, g_rows[i].name.c_str());
         NetBrowserJoin(g_rows[i].host.c_str(), g_rows[i].port);
         PostUiEvent("rdmp.joining");  // our menus close (PauseMenuScene.sc patch), the world load takes over
+    } else if (ev == "pause") {
+        // The one menu opens (title or pause): show the entries that fit, before the list is entered.
+        const bool frontEnd = !GameflowWorldLoadStarted();
+        const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
+        auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
+        auto setHidden = reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810));
+        const struct { const char* id; bool hide; } kItems[] = {
+            {"RdmpPM_Browser", !frontEnd}, {"RdmpPM_Direct", !frontEnd}, {"RdmpPM_Disconnect", frontEnd},
+            // the pause screen's pocket watch and money mean nothing on the title
+            {"clock", frontEnd}, {"pauseMoney", frontEnd}, {"pauseMoneyValue", frontEnd}};
+        for (const auto& it : kItems)
+            if (const uintptr_t w = root ? find(root, it.id) : 0) setHidden(w, it.hide ? 1 : 0);
+    } else if (ev == "back") {
+        PostUiEvent(GameflowWorldLoadStarted() ? "rdmp.back.ingame" : "rdmp.back.title");
+    } else if (ev == "direct") {
+        Log("ui: direct connect (not built yet)");
     } else if (ev == "disconnect") {
         NetDisconnect();
     } else if (ev.rfind("favorite.", 0) == 0) {

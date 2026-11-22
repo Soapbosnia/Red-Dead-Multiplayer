@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **One native menu (MTA-style), title and pause:** Map (in game), Server Browser, Direct Connect, Settings (the
+  game's Options), Disconnect (in game, with confirmation), Quit; Back on the title asks to quit, in game it closes.
+  Server browser in the game's Options style: Internet / Local / Favorites / Recent, players and ping, Join /
+  Favourite / Refresh; joining shows the game's loading screen. fw_api v11 (server browser, disconnect).
 * **Native menus (in progress, `[game] title_screen=1`, off by default):** the game boots through its own legal pages
   and title screen (~10 s, the logo video skipped) with no world loaded; Settings and Quit are the game's own. Our
   menus are written in the game's own UI language (SCXML, like its menus in content.rpf) and loaded with them

@@ -52,7 +52,8 @@ body = '''  <!--
     <transition event="@UI.CANCEL*RELEASED" consume="true">
       <action expr="PlaySound('HUD_MENU_BACK_MASTER')"></action>
       <action expr="Exit(RdmpBrowser)"></action>
-      <action expr="StackPop()"></action>
+      <action expr="focus(PauseMenu)"></action>
+      <action expr="Enter(PauseMenu_Main_Prompts)"></action>
     </transition>
 
     <UILabel id="RdmpHeader" movie="list" flashObject="top_title" text="Common_Null"></UILabel>
