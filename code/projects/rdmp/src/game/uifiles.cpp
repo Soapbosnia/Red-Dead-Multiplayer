@@ -169,7 +169,6 @@ const Text kTexts[] = {
     {"RdmpMenu_Browser", "Server Browser"},
     {"RdmpMenu_Direct", "Direct Connect"},
     {"RdmpMenu_MpSettings", "Multiplayer Settings"},
-    {"logo", "RED DEAD MULTIPLAYER"},  // the title logo is a text field in the game's "Redemption" font
 };
 
 // Flash variables of a UI movie (what SetFlashInt/Float/Bool/String do, FUN_1400ed8a0..FUN_1400eda00): movie wrapper =
