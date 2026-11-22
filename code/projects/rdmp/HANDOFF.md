@@ -113,7 +113,7 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   menu (title list) -> Server Browser (pause scene, Internet/Local/Favorites/Recent, real servers via fw_api v11) ->
   Join -> the game's loading screen -> in game; pause menu = Map / Options / Disconnect; Settings = game's Options.
   NEXT (owner's wishes, in order):
-  1. ONE menu like MTA: the pause scene's list as the main menu too (push PauseMenuScene at the title; the game
+  1. DONE (3a083d09): ONE menu like MTA: the pause scene's list as the main menu too (push PauseMenuScene at the title; the game
      already hides Map while the title movie is loaded). Entries: Map (in game), Server Browser, Direct Connect,
      Settings, Disconnect (in game), Quit; Back at the title = quit prompt (route Cancel through an rdmp.back event,
      C++ posts rdmp.back.title / rdmp.back.ingame with XML transitions Enter(QuitGame) / StackPop()). Owner said the
