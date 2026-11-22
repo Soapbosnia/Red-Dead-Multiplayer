@@ -1,0 +1,13 @@
+# Coming next - New main menu
+- A new main menu: home, server browser, direct connect and settings.
+- Esc in game opens the in-game menu: Resume, Settings, Disconnect, Quit.
+- Disconnect takes you straight back to the main menu.
+- Remote players are driven by the game's own movement: walking, sprinting, jumping and climbing.
+# 0.6 - Server browser
+- Internet, Local, Favourites and Recent servers, search and ping.
+- Password prompt and direct connect.
+- Your nickname, nametags and chat in Settings.
+# 0.5 - Overlay and chat
+- Chat box: T opens it, Enter sends.
+- Nametags with health above other players.
+- Server and client scripts with on-screen drawing.

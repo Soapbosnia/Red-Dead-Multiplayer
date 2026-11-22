@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **ImGui main menu** (src/client/menu_ui.cpp, frontend.cpp): replaces the CEF HTML menu (ui/index.html, app.js,
+  style.css removed) and the native SCXML menus as the default. Home (recent servers, changelog from
+  ui/changelog.txt), server browser (Internet / Local / Favorites / Recent, search, filters, sorting), direct
+  connect, settings (multiplayer + the game's own). MTA flow: the world loads at boot under the menu
+  (`title_screen=0`). Esc in a session opens the in-game menu (Resume, Settings, Disconnect, Quit); the game never
+  sees Esc (window messages, raw input, DirectInput), and while the menu is up the game gets no mouse or keyboard.
+  `[client] menu=1` (replaces `html_menu`).
 * **Disconnect can unload the world** (development, `[game] disconnect_unload=1`): the session restarts in-process (the
   game's own level-load path) into an empty session - player, puppets, horses, blips and scripts gone - and joining
   loads a new one (the player owner's handle generation is read at spawn, so the player is created in the new

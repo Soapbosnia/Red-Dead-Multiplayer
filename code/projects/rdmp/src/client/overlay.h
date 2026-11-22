@@ -8,7 +8,7 @@
  * the ImGui frame inside every Present. Widgets are pushed from the main thread each frame (Frame()).
  *
  * Input: the game window's procedure is subclassed; ImGui sees every message, and while text is being typed
- * (chat) or the cursor is shown, the keyboard / mouse messages do not reach the game.
+ * (chat), the cursor is shown or the main menu is up, the keyboard / mouse messages do not reach the game.
  */
 
 #include <functional>
@@ -38,6 +38,14 @@ namespace RDMP::Overlay {
     // Mouse cursor for script UIs: shown = the game no longer gets mouse input.
     void ShowCursor(bool show);
     bool CursorShown();
+
+    // The main menu is on screen: it gets the cursor, the mouse and the keyboard; the game gets none of them.
+    void SetMenuActive(bool active);
+    // Esc never reaches the game (its pause menu does not open); each press is reported once through PollEscape.
+    void CaptureEscape(bool capture);
+    bool PollEscape();
+    // The game window (HWND), null until Ready().
+    void *Window();
 
     // Our UI holds the keyboard: the chat input, an ImGui text field or a focused web view (the main menu).
     bool UiHasKeyboard();

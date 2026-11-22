@@ -54,6 +54,7 @@ add_library(rdmp_client SHARED
     "${RDMP_SRC}/client/api_natives.cpp"
     "${RDMP_SRC}/client/hud.cpp"
     "${RDMP_SRC}/client/frontend.cpp"
+    "${RDMP_SRC}/client/menu_ui.cpp"
     "${RDMP_SRC}/client/server_query.cpp"
     "${RDMP_SRC}/client/overlay.cpp")
 target_link_libraries(rdmp_client PRIVATE Framework::Client minhook::minhook d3d12 dxgi dinput8 dxguid)

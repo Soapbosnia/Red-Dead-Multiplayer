@@ -56,7 +56,10 @@ namespace RDMP::Overlay {
 
         std::atomic_bool g_ready {false};
         std::atomic_bool g_failed {false};
-        std::atomic_bool g_cursor {false};
+        std::atomic_bool g_cursor {false};       // a script UI's cursor
+        std::atomic_bool g_menu {false};         // the main menu is up
+        std::atomic_bool g_captureEscape {false};
+        std::atomic_bool g_escape {false};       // an Esc press for PollEscape
         std::atomic<float> g_width {0.0f};
         std::atomic<float> g_height {0.0f};
 
@@ -114,13 +117,19 @@ namespace RDMP::Overlay {
         }
 
         // ---- DirectInput (the game reads keyboard and mouse through it, not window messages) ----
+        bool TypingText() {
+            auto *web = g_client->GetWebManager();
+            return g_client->GetChatBox().IsInputActive() || Framework::External::ImGUI::Wrapper::WantsTextInput() ||
+                   (web && web->IsAnyViewFocused());
+        }
         bool KeyboardBlocked() {
             if (!g_ready.load() || !g_client) {
                 return false;
             }
-            auto *web = g_client->GetWebManager();
-            return g_client->GetChatBox().IsInputActive() || Framework::External::ImGUI::Wrapper::WantsTextInput() ||
-                   (web && web->IsAnyViewFocused());
+            return g_menu.load() || TypingText();
+        }
+        bool MouseBlocked() {
+            return g_cursor.load() || (g_ready.load() && g_menu.load());
         }
 
         HRESULT STDMETHODCALLTYPE DiGetDeviceStateHook(IDirectInputDevice8W *device, DWORD size, LPVOID data) {
@@ -128,8 +137,11 @@ namespace RDMP::Overlay {
             if (SUCCEEDED(hr) && data) {
                 const bool keyboard = size == 256;
                 const bool mouse    = size == sizeof(DIMOUSESTATE) || size == sizeof(DIMOUSESTATE2);
-                if ((keyboard && KeyboardBlocked()) || (mouse && (g_cursor.load() || KeyboardBlocked()))) {
+                if ((keyboard && KeyboardBlocked()) || (mouse && (MouseBlocked() || KeyboardBlocked()))) {
                     std::memset(data, 0, size); // nothing pressed, no movement
+                }
+                else if (keyboard && g_captureEscape.load()) {
+                    static_cast<uint8_t *>(data)[DIK_ESCAPE] = 0; // the game's pause menu never opens
                 }
             }
             return hr;
@@ -137,8 +149,22 @@ namespace RDMP::Overlay {
 
         HRESULT STDMETHODCALLTYPE DiGetDeviceDataHook(IDirectInputDevice8W *device, DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD count, DWORD flags) {
             const HRESULT hr = g_origDiData(device, size, data, count, flags);
-            if (SUCCEEDED(hr) && count && (KeyboardBlocked() || g_cursor.load()) && !(flags & DIGDD_PEEK)) {
+            if (SUCCEEDED(hr) && count && (KeyboardBlocked() || MouseBlocked()) && !(flags & DIGDD_PEEK)) {
                 *count = 0; // buffered events are dropped while our UI holds the input
+            }
+            else if (SUCCEEDED(hr) && count && data && g_captureEscape.load()) {
+                // Esc presses leave the buffer (no mouse or joystick offset is 1, so only the keyboard's Esc matches).
+                DWORD kept = 0;
+                for (DWORD i = 0; i < *count; ++i) {
+                    auto *event = reinterpret_cast<LPDIDEVICEOBJECTDATA>(reinterpret_cast<uint8_t *>(data) + i * size);
+                    if (event->dwOfs != DIK_ESCAPE) {
+                        if (kept != i) {
+                            std::memcpy(reinterpret_cast<uint8_t *>(data) + kept * size, event, size);
+                        }
+                        ++kept;
+                    }
+                }
+                *count = kept;
             }
             return hr;
         }
@@ -183,6 +209,23 @@ namespace RDMP::Overlay {
                         web->ProcessKeyboardEvent(hwnd, msg, wParam, lParam);
                     }
                 }
+                // Esc is ours: the in-game menu (unless a text field takes it), never the game's pause menu.
+                if (g_captureEscape.load()) {
+                    if ((msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) && wParam == VK_ESCAPE) {
+                        if (msg == WM_KEYDOWN && !(lParam & (1 << 30)) && !TypingText()) {
+                            g_escape = true;
+                        }
+                        return 0;
+                    }
+                    if (msg == WM_INPUT) {
+                        RAWINPUT raw {};
+                        UINT rawSize = sizeof(raw);
+                        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &rawSize, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1) &&
+                            raw.header.dwType == RIM_TYPEKEYBOARD && raw.data.keyboard.VKey == VK_ESCAPE) {
+                            return DefWindowProcW(hwnd, msg, wParam, lParam);
+                        }
+                    }
+                }
                 const bool typing = KeyboardBlocked();
                 // T opens the chat (the character that follows is swallowed so it is not typed).
                 static bool swallowChar = false;
@@ -201,8 +244,8 @@ namespace RDMP::Overlay {
                     }
                     return 0;
                 }
-                if (g_cursor.load()) {
-                    if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP || msg == WM_MBUTTONDOWN || msg == WM_MBUTTONUP) {
+                if (MouseBlocked()) {
+                    if (!g_menu.load() && (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP || msg == WM_MBUTTONDOWN || msg == WM_MBUTTONUP)) {
                         Click c {};
                         c.button = (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP) ? 0 : (msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP) ? 1 : 2;
                         c.down   = msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN;
@@ -378,8 +421,27 @@ namespace RDMP::Overlay {
     void ShowCursor(bool show) {
         g_cursor = show;
         if (g_ready.load()) {
-            Framework::External::ImGUI::Wrapper::ShowCursor(show);
+            Framework::External::ImGUI::Wrapper::ShowCursor(show || g_menu.load());
         }
+    }
+
+    void SetMenuActive(bool active) {
+        g_menu = active;
+        if (g_ready.load()) {
+            Framework::External::ImGUI::Wrapper::ShowCursor(active || g_cursor.load());
+        }
+    }
+
+    void CaptureEscape(bool capture) {
+        g_captureEscape = capture;
+    }
+
+    bool PollEscape() {
+        return g_escape.exchange(false);
+    }
+
+    void *Window() {
+        return g_ready.load() ? static_cast<void *>(g_window) : nullptr;
     }
 
     bool UiHasKeyboard() {

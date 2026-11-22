@@ -174,8 +174,11 @@ namespace {
                     g_host->set_input_lock(typing ? 1 : 0);
                 }
             }
-            RDMP::Frontend::Frame();                    // main menu (shown while not in a session)
-            RDMP::Overlay::Frame(&RDMP::Hud::Draw);    // renderer bring-up, then this frame's ImGui widgets
+            RDMP::Frontend::Frame(); // main menu state (shown while not in a session, Esc in one)
+            RDMP::Overlay::Frame([] { // renderer bring-up, then this frame's ImGui widgets: HUD, the menu over it
+                RDMP::Hud::Draw();
+                RDMP::Frontend::Draw();
+            });
             g_client->Update();             // networking, replication, client scripts, ImGui frame
         }
         catch (const std::exception &e) {

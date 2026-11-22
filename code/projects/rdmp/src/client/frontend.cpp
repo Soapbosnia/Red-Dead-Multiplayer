@@ -1,50 +1,62 @@
 /*
- * Main menu controller: see frontend.h.
+ * Main menu controller: see frontend.h. The menu's data (menu_model.h) lives here; menu_ui.cpp draws it.
  */
 
 #include <utils/safe_win32.h>
 
-#include <gui/manager.h>
-#include <gui/view.h>
 #include <nlohmann/json.hpp>
 #include <utils/path.h>
 
 #include "client/frontend.h"
 #include "client/fw_client.h"
 #include "client/hud.h"
+#include "client/menu_model.h"
+#include "client/menu_ui.h"
 #include "client/overlay.h"
 #include "client/server_query.h"
 #include "shared/fw_api.h"
 #include "shared/game_options.h"
 
 #include <algorithm>
-#include <deque>
 #include <cstring>
-#include <set>
+#include <deque>
 #include <filesystem>
 #include <fstream>
-#include <imgui.h>
+#include <map>
+#include <set>
 
 namespace RDMP::Frontend {
     namespace {
-        using json = nlohmann::json;
+        using json  = nlohmann::json;
+        using FwPhase = Framework::Integrations::Client::ConnectionPhase;
 
         FwClient *g_client           = nullptr;
         const rdmp::fw::Host *g_host = nullptr;
-        bool g_failed                = false;
-        int g_viewId                 = 0;
-        bool g_pageReady             = false;
+        bool g_enabled               = true;  // [client] menu
+        bool g_inGameMenu            = false; // the Esc menu over a session
         bool g_visible               = false;
-        float g_viewW = 0, g_viewH = 0;
 
         std::filesystem::path g_binDir;
         std::wstring g_ini;
         json g_servers = {{"favorites", json::array()}, {"recent", json::array()}};
         std::deque<ServerQuery::Info> g_native; // server browser answers for the native menus (BrowserPoll)
 
+        std::map<std::string, std::vector<Model::Server>> g_lists;
+        std::map<std::string, uint64_t> g_refreshAt;
+        std::map<std::string, std::string> g_listErrors;
+        std::vector<Model::ChangelogEntry> g_changelog;
+        std::vector<std::pair<int, int>> g_resolutions;
+        std::vector<int> g_rates;
+        Model::Notice g_notice;
+
         // What the menu is doing with the connection.
-        std::string g_pendingAddress; // "host:port" while connecting from the menu
+        std::string g_pendingAddress; // "host:port" while connecting / connected from the menu
         bool g_wasConnected = false;
+        bool g_leaving      = false; // our own Disconnect (not a drop)
+
+        uint64_t NowMs() {
+            return GetTickCount64();
+        }
 
         // ---- settings (rdmp.ini) ----
         std::string IniString(const wchar_t *section, const wchar_t *key, const wchar_t *fallback) {
@@ -63,119 +75,10 @@ namespace RDMP::Frontend {
             WritePrivateProfileStringW(section, key, w, g_ini.c_str());
         }
 
-        json Settings() {
-            return {{"nickname", IniString(L"net", L"name", L"player")},
-                    {"nametags", IniInt(L"client", L"nametags", 1) != 0},
-                    {"nametagDistance", IniInt(L"client", L"nametag_distance", 60)},
-                    {"chat", IniInt(L"client", L"chat", 1) != 0}};
-        }
-
         void ApplySettings() {
             Hud::SetNametagsEnabled(IniInt(L"client", L"nametags", 1) != 0);
             Hud::SetNametagDrawDistance(static_cast<float>(IniInt(L"client", L"nametag_distance", 60)));
             Hud::SetChatVisible(IniInt(L"client", L"chat", 1) != 0);
-        }
-
-        std::string CleanNickname(std::string name) {
-            name.erase(std::remove_if(name.begin(), name.end(), [](unsigned char c) { return c < 0x20 || c == '"' || c == '\\'; }), name.end());
-            if (name.size() > 22) {
-                name.resize(22);
-            }
-            return name.empty() ? std::string("player") : name;
-        }
-
-        // ---- the game's own settings (shared/game_options.h, through rdmp.dll) ----
-        namespace opt = rdmp::opt;
-        void Send(const std::string &type, const json &data); // page bridge, below
-
-        uint8_t *BlockOf(const opt::Field &f, uint8_t *loaded, uint8_t *graphics) {
-            return f.block == opt::Block::Loaded ? loaded : graphics;
-        }
-
-        json ReadField(const opt::Field &f, const uint8_t *base) {
-            const uint8_t *p = base + f.offset;
-            switch (f.type) {
-            case opt::Type::Bool: return *p != 0;
-            case opt::Type::U8: return static_cast<int>(*p);
-            case opt::Type::I32: {
-                int32_t v;
-                std::memcpy(&v, p, 4);
-                return v;
-            }
-            case opt::Type::F32: {
-                float v;
-                std::memcpy(&v, p, 4);
-                return v;
-            }
-            }
-            return nullptr;
-        }
-
-        bool WriteField(const opt::Field &f, uint8_t *base, const json &value) {
-            uint8_t *p = base + f.offset;
-            uint8_t before[4];
-            std::memcpy(before, p, 4);
-            switch (f.type) {
-            case opt::Type::Bool: *p = value.is_boolean() ? value.get<bool>() : value.is_number() && value.get<double>() != 0.0; break;
-            case opt::Type::U8: if (value.is_number()) *p = static_cast<uint8_t>(std::clamp(value.get<double>(), 0.0, 255.0)); break;
-            case opt::Type::I32: if (value.is_number()) { const int32_t v = static_cast<int32_t>(value.get<double>()); std::memcpy(p, &v, 4); } break;
-            case opt::Type::F32: if (value.is_number()) { const float v = static_cast<float>(value.get<double>()); std::memcpy(p, &v, 4); } break;
-            }
-            return std::memcmp(before, p, f.type == opt::Type::Bool || f.type == opt::Type::U8 ? 1 : 4) != 0;
-        }
-
-        // The monitor's display modes: resolutions (largest first) and the refresh rates each offers.
-        json DisplayModes() {
-            std::set<std::pair<int, int>> sizes;
-            std::set<int> rates;
-            DEVMODEW mode {};
-            mode.dmSize = sizeof(mode);
-            for (DWORD i = 0; EnumDisplaySettingsW(nullptr, i, &mode); ++i) {
-                if (mode.dmBitsPerPel >= 24 && mode.dmPelsWidth >= 800) {
-                    sizes.insert({static_cast<int>(mode.dmPelsWidth), static_cast<int>(mode.dmPelsHeight)});
-                    rates.insert(static_cast<int>(mode.dmDisplayFrequency));
-                }
-            }
-            json res = json::array(), hz = json::array();
-            for (auto it = sizes.rbegin(); it != sizes.rend(); ++it) {
-                res.push_back({it->first, it->second});
-            }
-            for (int r : rates) {
-                hz.push_back(r);
-            }
-            return {{"resolutions", res}, {"refreshRates", hz}};
-        }
-
-        json GameSettings() {
-            uint8_t loaded[opt::kLoadedSize] {}, graphics[opt::kGraphicsSize] {};
-            if (!g_host || !g_host->get_game_options || !g_host->get_game_options(loaded, graphics)) {
-                return {{"available", false}};
-            }
-            json values = json::object();
-            for (const auto &f : opt::kFields) {
-                values[f.key] = ReadField(f, BlockOf(f, loaded, graphics));
-            }
-            return {{"available", true}, {"values", values}, {"modes", DisplayModes()}};
-        }
-
-        // Applies the page's values: only the blocks that changed go to the game (graphics re-applies the renderer).
-        void ApplyGameSettings(const json &values) {
-            uint8_t loaded[opt::kLoadedSize] {}, graphics[opt::kGraphicsSize] {};
-            if (!g_host || !g_host->set_game_options || !g_host->get_game_options(loaded, graphics) || !values.is_object()) {
-                Send("status", {{"state", "error"}, {"message", "The game's settings are not available right now."}});
-                return;
-            }
-            bool loadedChanged = false, graphicsChanged = false;
-            for (const auto &f : opt::kFields) {
-                if (values.contains(f.key) && WriteField(f, BlockOf(f, loaded, graphics), values[f.key])) {
-                    (f.block == opt::Block::Loaded ? loadedChanged : graphicsChanged) = true;
-                }
-            }
-            if (loadedChanged || graphicsChanged) {
-                g_host->set_game_options(loadedChanged ? loaded : nullptr, graphicsChanged ? graphics : nullptr);
-            }
-            Send("gameSettings", GameSettings());
-            Send("status", {{"state", "ok"}, {"message", loadedChanged || graphicsChanged ? "Game settings applied." : "Nothing changed."}});
         }
 
         // ---- servers.json ----
@@ -203,11 +106,15 @@ namespace RDMP::Frontend {
         bool SameServer(const json &entry, const std::string &host, int port) {
             return entry.value("host", std::string()) == host && entry.value("port", 0) == port;
         }
-        void Remember(const char *list, const std::string &host, int port, const std::string &name, size_t keep) {
+        void Forget(const char *list, const std::string &host, int port) {
             auto &arr = g_servers[list];
             for (auto it = arr.begin(); it != arr.end();) {
                 it = SameServer(*it, host, port) ? arr.erase(it) : it + 1;
             }
+        }
+        void Remember(const char *list, const std::string &host, int port, const std::string &name, size_t keep) {
+            Forget(list, host, port);
+            auto &arr = g_servers[list];
             arr.insert(arr.begin(), json {{"host", host}, {"port", port}, {"name", name}});
             while (arr.size() > keep) {
                 arr.erase(arr.end() - 1);
@@ -223,28 +130,214 @@ namespace RDMP::Frontend {
             return out;
         }
 
-        // ---- page bridge ----
-        Framework::GUI::View *View() {
-            auto *web = g_client ? g_client->GetWebManager() : nullptr;
-            return web && g_viewId ? web->GetView(g_viewId) : nullptr;
+        // A remembered list as rows before the servers answer.
+        void SeedRemembered(const char *list) {
+            auto &rows = g_lists[list];
+            rows.clear();
+            for (const auto &e : g_servers[list]) {
+                Model::Server row;
+                row.info.list = list;
+                row.info.host = e.value("host", std::string("127.0.0.1"));
+                row.info.port = static_cast<uint16_t>(e.value("port", 27015));
+                row.info.name = e.value("name", std::string());
+                rows.push_back(row);
+            }
         }
 
-        void Send(const std::string &type, const json &data) {
-            auto *view = View();
-            if (!view || !g_pageReady) {
+        void TakeAnswer(const ServerQuery::Info &info) {
+            auto &rows = g_lists[info.list];
+            for (auto &row : rows) {
+                if (row.info.host == info.host && row.info.port == info.port) {
+                    const std::string remembered = row.info.name;
+                    row.info                     = info;
+                    if (row.info.name.empty()) {
+                        row.info.name = remembered;
+                    }
+                    row.answered = true;
+                    return;
+                }
+            }
+            // The browsed lists show only servers that answered; remembered ones are listed either way.
+            if (info.online || (info.list != "internet" && info.list != "local")) {
+                rows.push_back({info, true});
+            }
+            // A name the server gave goes into favourites / recents too.
+            if (info.online && !info.name.empty()) {
+                bool changed = false;
+                for (const char *list : {"favorites", "recent"}) {
+                    for (auto &e : g_servers[list]) {
+                        if (SameServer(e, info.host, info.port) && e.value("name", std::string()) != info.name) {
+                            e["name"] = info.name;
+                            changed   = true;
+                        }
+                    }
+                }
+                if (changed) {
+                    SaveServers();
+                }
+            }
+        }
+
+        void LoadChangelog() {
+            std::ifstream file(g_binDir / "ui" / "changelog.txt");
+            std::string line;
+            while (std::getline(file, line)) {
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                if (line.rfind("# ", 0) == 0) {
+                    g_changelog.push_back({line.substr(2), {}});
+                }
+                else if (line.rfind("- ", 0) == 0 && !g_changelog.empty()) {
+                    g_changelog.back().lines.push_back(line.substr(2));
+                }
+            }
+        }
+
+        void LoadDisplayModes() {
+            std::set<std::pair<int, int>> sizes;
+            std::set<int> rates;
+            DEVMODEW mode {};
+            mode.dmSize = sizeof(mode);
+            for (DWORD i = 0; EnumDisplaySettingsW(nullptr, i, &mode); ++i) {
+                if (mode.dmBitsPerPel >= 24 && mode.dmPelsWidth >= 800) {
+                    sizes.insert({static_cast<int>(mode.dmPelsWidth), static_cast<int>(mode.dmPelsHeight)});
+                    rates.insert(static_cast<int>(mode.dmDisplayFrequency));
+                }
+            }
+            g_resolutions.assign(sizes.rbegin(), sizes.rend());
+            g_rates.assign(rates.begin(), rates.end());
+        }
+
+        bool Connected() {
+            return g_client && g_client->connected;
+        }
+
+        void SetVisible(bool visible) {
+            if (visible == g_visible) {
                 return;
             }
-            const json message = {{"type", type}, {"data", data}};
-            view->EvaluateScript("window.rdmp && window.rdmp.receive(" + message.dump() + ");");
+            g_visible = visible;
+            Overlay::SetMenuActive(visible);
+            if (visible) {
+                MenuUi::Opened(Connected());
+            }
+        }
+    } // namespace
+
+    // =================================================================================================================
+    // Model
+    // =================================================================================================================
+    namespace Model {
+        namespace opt = rdmp::opt;
+
+        std::string CleanNickname(std::string name) {
+            name.erase(std::remove_if(name.begin(), name.end(), [](unsigned char c) { return c < 0x20 || c == '"' || c == '\\'; }), name.end());
+            if (name.size() > 22) {
+                name.resize(22);
+            }
+            return name.empty() ? std::string("player") : name;
+        }
+
+        MpSettings LoadMp() {
+            MpSettings s;
+            s.nickname        = CleanNickname(IniString(L"net", L"name", L"player"));
+            s.nametags        = IniInt(L"client", L"nametags", 1) != 0;
+            s.nametagDistance = IniInt(L"client", L"nametag_distance", 60);
+            s.chat            = IniInt(L"client", L"chat", 1) != 0;
+            return s;
+        }
+
+        void SaveMp(const MpSettings &s) {
+            IniWrite(L"net", L"name", CleanNickname(s.nickname));
+            IniWrite(L"client", L"nametags", s.nametags ? "1" : "0");
+            IniWrite(L"client", L"nametag_distance", std::to_string(std::clamp(s.nametagDistance, 5, 500)));
+            IniWrite(L"client", L"chat", s.chat ? "1" : "0");
+            ApplySettings();
+        }
+
+        bool ReadGame(GameBlocks &out) {
+            return g_host && g_host->get_game_options && g_host->get_game_options(out.loaded, out.graphics);
+        }
+
+        bool ApplyGame(const GameBlocks &before, const GameBlocks &after, bool &loadedChanged, bool &graphicsChanged) {
+            loadedChanged   = std::memcmp(before.loaded, after.loaded, sizeof(after.loaded)) != 0;
+            graphicsChanged = std::memcmp(before.graphics, after.graphics, sizeof(after.graphics)) != 0;
+            if (!g_host || !g_host->set_game_options) {
+                return false;
+            }
+            if (loadedChanged || graphicsChanged) {
+                g_host->set_game_options(loadedChanged ? after.loaded : nullptr, graphicsChanged ? after.graphics : nullptr);
+            }
+            return true;
+        }
+
+        const opt::Field *FindField(const char *key) {
+            for (const auto &f : opt::kFields) {
+                if (std::strcmp(f.key, key) == 0) {
+                    return &f;
+                }
+            }
+            return nullptr;
+        }
+
+        double GetField(const opt::Field &f, const GameBlocks &blocks) {
+            const uint8_t *p = (f.block == opt::Block::Loaded ? blocks.loaded : blocks.graphics) + f.offset;
+            switch (f.type) {
+            case opt::Type::Bool:
+            case opt::Type::U8: return *p;
+            case opt::Type::I32: {
+                int32_t v;
+                std::memcpy(&v, p, 4);
+                return v;
+            }
+            case opt::Type::F32: {
+                float v;
+                std::memcpy(&v, p, 4);
+                return v;
+            }
+            }
+            return 0.0;
+        }
+
+        void SetField(const opt::Field &f, GameBlocks &blocks, double value) {
+            uint8_t *p = (f.block == opt::Block::Loaded ? blocks.loaded : blocks.graphics) + f.offset;
+            switch (f.type) {
+            case opt::Type::Bool: *p = value != 0.0 ? 1 : 0; break;
+            case opt::Type::U8: *p = static_cast<uint8_t>(std::clamp(value, 0.0, 255.0)); break;
+            case opt::Type::I32: {
+                const int32_t v = static_cast<int32_t>(value);
+                std::memcpy(p, &v, 4);
+            } break;
+            case opt::Type::F32: {
+                const float v = static_cast<float>(value);
+                std::memcpy(p, &v, 4);
+            } break;
+            }
+        }
+
+        const std::vector<std::pair<int, int>> &Resolutions() {
+            return g_resolutions;
+        }
+        const std::vector<int> &RefreshRates() {
+            return g_rates;
+        }
+
+        const std::vector<Server> &List(const std::string &list) {
+            return g_lists[list];
         }
 
         void Refresh(const std::string &list) {
+            g_refreshAt[list] = NowMs();
+            g_listErrors.erase(list);
             if (list == "internet") {
+                g_lists[list].clear();
                 ServerQuery::QueryMasterlist(IniString(L"browser", L"masterlist", L"https://masterlist.mafiahub.dev"),
                                              IniString(L"browser", L"gamemode", L"rdmp"));
             }
             else if (list == "local") {
                 // This PC: the default port and the next few (several servers on one machine).
+                g_lists[list].clear();
                 std::vector<ServerQuery::Address> local;
                 for (uint16_t port = 27015; port <= 27020; ++port) {
                     local.push_back({"127.0.0.1", port});
@@ -252,195 +345,252 @@ namespace RDMP::Frontend {
                 ServerQuery::QueryAddresses("local", local);
             }
             else if (list == "favorites" || list == "recent") {
+                SeedRemembered(list.c_str());
                 ServerQuery::QueryAddresses(list, AddressesOf(list.c_str()));
             }
         }
 
+        bool Refreshing(const std::string &list) {
+            const auto it = g_refreshAt.find(list);
+            if (it == g_refreshAt.end() || NowMs() - it->second > 4000) {
+                return false;
+            }
+            if (list == "favorites" || list == "recent") {
+                for (const auto &row : g_lists[list]) {
+                    if (!row.answered) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            return NowMs() - it->second < 2500;
+        }
+
+        std::string ListError(const std::string &list) {
+            const auto it = g_listErrors.find(list);
+            return it == g_listErrors.end() ? std::string() : it->second;
+        }
+
+        bool IsFavorite(const std::string &host, int port) {
+            for (const auto &e : g_servers["favorites"]) {
+                if (SameServer(e, host, port)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        void SetFavorite(const std::string &host, int port, const std::string &name, bool favorite) {
+            if (favorite) {
+                Remember("favorites", host, port, name, 200);
+                auto &rows = g_lists["favorites"];
+                if (std::none_of(rows.begin(), rows.end(), [&](const Server &r) { return r.info.host == host && r.info.port == port; })) {
+                    Server row;
+                    row.info.list = "favorites";
+                    row.info.host = host;
+                    row.info.port = static_cast<uint16_t>(port);
+                    row.info.name = name;
+                    for (const auto &[list, others] : g_lists) {
+                        for (const auto &other : others) {
+                            if (other.answered && other.info.host == host && other.info.port == port) {
+                                row = other;
+                            }
+                        }
+                    }
+                    row.info.list = "favorites";
+                    rows.insert(rows.begin(), row);
+                }
+            }
+            else {
+                Forget("favorites", host, port);
+                SaveServers();
+                auto &rows = g_lists["favorites"];
+                rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const Server &r) { return r.info.host == host && r.info.port == port; }), rows.end());
+            }
+        }
+
+        Phase ConnectionPhase() {
+            if (Connected()) {
+                return Phase::Connected;
+            }
+            return g_pendingAddress.empty() ? Phase::Idle : Phase::Connecting;
+        }
+
+        std::string PendingAddress() {
+            return g_pendingAddress;
+        }
+
+        std::string ConnectingStep() {
+            switch (g_client ? g_client->GetConnectionPhase() : FwPhase::Disconnected) {
+            case FwPhase::Authenticating: return "Signing in";
+            case FwPhase::Downloading: return "Downloading the server's resources";
+            case FwPhase::Starting: return "Starting the server's scripts";
+            case FwPhase::InGame: return "Joining";
+            default: return "Connecting";
+            }
+        }
+
+        bool ParseAddress(const std::string &text, std::string &host, int &port) {
+            std::string t = text;
+            t.erase(std::remove_if(t.begin(), t.end(), [](unsigned char c) { return std::isspace(c); }), t.end());
+            if (t.empty()) {
+                return false;
+            }
+            port             = 27015;
+            const size_t pos = t.rfind(':');
+            if (pos != std::string::npos) {
+                const std::string p = t.substr(pos + 1);
+                if (p.empty() || !std::all_of(p.begin(), p.end(), [](unsigned char c) { return std::isdigit(c); }) || p.size() > 5) {
+                    return false;
+                }
+                port = std::stoi(p);
+                t    = t.substr(0, pos);
+            }
+            host = t;
+            return !host.empty() && port > 0 && port <= 65535;
+        }
+
         void Connect(const std::string &host, int port, const std::string &password) {
             if (host.empty() || port <= 0 || port > 65535 || !g_client) {
-                Send("status", {{"state", "error"}, {"message", "Enter a server address (host:port)."}});
+                Notify(true, "Enter a server address (host:port).");
+                return;
+            }
+            if (Connected() || !g_pendingAddress.empty()) {
                 return;
             }
             const std::string nickname = CleanNickname(IniString(L"net", L"name", L"player"));
             g_pendingAddress           = host + ":" + std::to_string(port);
-            Send("status", {{"state", "connecting"}, {"message", "Connecting to " + g_pendingAddress + " ..."}});
             if (!g_client->Connect(host, port, nickname, password)) {
-                Send("status", {{"state", "error"}, {"message", "Could not start a connection to " + g_pendingAddress + "."}});
+                Notify(true, "Could not start a connection to " + g_pendingAddress + ".");
                 g_pendingAddress.clear();
                 return;
             }
-            Remember("recent", host, port, "", 20);
-            Send("lists", g_servers);
-        }
-
-        void OnPageEvent(const std::string &name, const std::string &payload) {
-            const json data = json::parse(payload.empty() ? "{}" : payload, nullptr, false);
-            if (name == "ready") {
-                g_pageReady = true;
-                Send("settings", Settings());
-                Send("lists", g_servers);
-                Send("version", {{"version", g_client ? g_client->GetOptions().modVersion : ""}});
-                const json game = GameSettings();
-                Send("gameSettings", game);
-                if (game.value("available", false)) {
-                    const auto &v = game["values"];
-                    Log()->info("menu: game settings read: brightness {} mouse {} sfx {} music {} | {}x{} @ {} Hz, streaming {} m",
-                                v["display.fBrightness"].dump(), v["kbMouse.fMouseScalarSensitivity"].dump(), v["audio.fSFXVolume"].dump(),
-                                v["audio.fMusicVolume"].dump(), v["ResolutionX"].dump(), v["ResolutionY"].dump(), v["RefreshRate"].dump(),
-                                v["WorldStreamingRadius"].dump());
-                }
-            }
-            else if (name == "refresh" && data.is_object()) {
-                Refresh(data.value("list", std::string("local")));
-            }
-            else if (name == "connect" && data.is_object()) {
-                Connect(data.value("host", std::string()), data.value("port", 27015), data.value("password", std::string()));
-            }
-            else if (name == "favorite" && data.is_object()) {
-                const std::string host = data.value("host", std::string());
-                const int port         = data.value("port", 27015);
-                if (data.value("add", true)) {
-                    Remember("favorites", host, port, data.value("name", std::string()), 200);
-                }
-                else {
-                    auto &arr = g_servers["favorites"];
-                    for (auto it = arr.begin(); it != arr.end();) {
-                        it = SameServer(*it, host, port) ? arr.erase(it) : it + 1;
+            std::string name;
+            for (const auto &[list, rows] : g_lists) {
+                for (const auto &row : rows) {
+                    if (row.info.host == host && row.info.port == port && !row.info.name.empty()) {
+                        name = row.info.name;
                     }
-                    SaveServers();
-                }
-                Send("lists", g_servers);
-            }
-            else if (name == "settings" && data.is_object()) {
-                IniWrite(L"net", L"name", CleanNickname(data.value("nickname", std::string("player"))));
-                IniWrite(L"client", L"nametags", data.value("nametags", true) ? "1" : "0");
-                IniWrite(L"client", L"nametag_distance", std::to_string(std::clamp(data.value("nametagDistance", 60), 5, 500)));
-                IniWrite(L"client", L"chat", data.value("chat", true) ? "1" : "0");
-                ApplySettings();
-                Send("settings", Settings());
-                Send("status", {{"state", "info"}, {"message", "Settings saved."}});
-            }
-            else if (name == "gameSettings" && data.is_object()) {
-                ApplyGameSettings(data.value("values", json::object()));
-            }
-            else if (name == "quit") {
-                if (HWND window = GetForegroundWindow()) {
-                    PostMessageW(window, WM_CLOSE, 0, 0);
                 }
             }
+            Remember("recent", host, port, name, 20);
         }
 
-        void BringUp() {
-            auto *web = g_client->GetWebManager();
-            if (!web || !g_client->GetRenderer()) {
-                return;
+        void Disconnect() {
+            auto *net = g_client ? g_client->GetNetworkingEngine() : nullptr;
+            if (auto *peer = net ? net->GetNetworkClient() : nullptr) {
+                g_leaving = Connected();
+                (void)peer->Disconnect();
             }
-            float w, h;
-            Overlay::ScreenSize(w, h);
-            if (w <= 0 || h <= 0) {
-                return; // the first widget pass has not run yet
-            }
-            if (auto res = web->Init(g_binDir.string(), {static_cast<int>(w), static_cast<int>(h)}, g_client->GetRenderer(), false); !res) {
-                g_failed = true;
-                Log()->error("menu: the web UI did not start: {}", res.GetError().message);
-                return;
-            }
-            web->RegisterResourceDirectory("rdmp", g_binDir / "ui");
-            g_viewId = web->CreateView(Framework::GUI::Manager::ResourceURL("rdmp", "index.html"), 0, 0);
-            auto *view = web->GetView(g_viewId);
-            if (!view) {
-                g_failed = true;
-                Log()->error("menu: could not create the menu view");
-                return;
-            }
-            view->SetZIndex(1000);
-            view->SetAlwaysComposite(true);
-            for (const char *event : {"ready", "refresh", "connect", "favorite", "settings", "gameSettings", "quit"}) {
-                const std::string name = event;
-                view->AddEventListener("rdmp:" + name, [name](const std::string &payload) {
-                    OnPageEvent(name, payload);
-                });
-            }
-            g_viewW = w, g_viewH = h;
-            Log()->info("menu: web UI up ({}x{})", w, h);
+            g_pendingAddress.clear();
+            g_inGameMenu = false;
         }
 
-        void SetVisible(bool visible) {
-            auto *view = View();
-            if (!view || visible == g_visible) {
-                return;
+        void Quit() {
+            if (HWND window = static_cast<HWND>(Overlay::Window())) {
+                PostMessageW(window, WM_CLOSE, 0, 0);
             }
-            g_visible = visible;
-            view->Display(visible);
-            view->Focus(visible);
-            Overlay::ShowCursor(visible);
         }
-    } // namespace
 
+        int PingMs() {
+            return g_client ? g_client->PingMs() : -1;
+        }
+
+        std::string Version() {
+            return g_client ? g_client->GetOptions().modVersion : std::string();
+        }
+
+        const Notice &LastNotice() {
+            return g_notice;
+        }
+
+        void Notify(bool error, const std::string &text) {
+            g_notice = {error, text, NowMs()};
+        }
+
+        const std::vector<ChangelogEntry> &Changelog() {
+            return g_changelog;
+        }
+    } // namespace Model
+
+    // =================================================================================================================
+    // Flow
+    // =================================================================================================================
     void Attach(FwClient *client, const rdmp::fw::Host *host) {
-        g_client = client;
-        g_host   = host;
-        g_binDir = std::filesystem::path(Framework::Utils::GetModuleDirW());
-        g_ini    = (g_binDir / "rdmp.ini").wstring();
+        g_client  = client;
+        g_host    = host;
+        g_binDir  = std::filesystem::path(Framework::Utils::GetModuleDirW());
+        g_ini     = (g_binDir / "rdmp.ini").wstring();
+        g_enabled = IniInt(L"client", L"menu", 1) != 0;
+        MenuUi::Attach(client);
         LoadServers();
+        LoadChangelog();
+        LoadDisplayModes();
         ApplySettings();
+        SeedRemembered("favorites");
+        SeedRemembered("recent");
+        // The game's own pause menu never opens: Esc is ours (the in-game menu).
+        Overlay::CaptureEscape(g_enabled);
     }
 
     void Frame() {
-        if (!g_client || g_failed) {
+        if (!g_client) {
             return;
         }
-        // [client] html_menu=0: the game's own front end shows our menus (native); no web view, the server browser
-        // answers go to BrowserPoll only.
-        const bool html = IniInt(L"client", L"html_menu", 1) != 0;
-        if (html) {
-            if (!Overlay::Ready()) {
-                return;
-            }
-            if (!g_viewId) {
-                BringUp();
-                return;
-            }
-            // Track the window size.
-            float w, h;
-            Overlay::ScreenSize(w, h);
-            if (w > 0 && h > 0 && (w != g_viewW || h != g_viewH)) {
-                g_viewW = w, g_viewH = h;
-                g_client->GetWebManager()->Resize(static_cast<int>(w), static_cast<int>(h));
-            }
-        }
-
-        // Shown while not in a session.
-        const bool connected = g_client->connected;
+        const bool connected = Connected();
         if (connected && !g_wasConnected) {
-            Send("status", {{"state", "connected"}, {"message", "Connected."}});
-            g_pendingAddress.clear();
+            g_inGameMenu = false;
+            g_leaving    = false;
         }
         if (!connected && g_wasConnected) {
-            Send("status", {{"state", "error"}, {"message", "Disconnected from the server."}});
+            g_pendingAddress.clear();
+            if (!g_leaving) {
+                Model::Notify(true, "Disconnected from the server.");
+            }
+            g_leaving    = false;
+            g_inGameMenu = false;
         }
-        if (!connected && !g_pendingAddress.empty() &&
-            g_client->GetConnectionPhase() == Framework::Integrations::Client::ConnectionPhase::Disconnected) {
-            Send("status", {{"state", "error"}, {"message", "Could not connect to " + g_pendingAddress + "."}});
+        if (!connected && !g_pendingAddress.empty() && g_client->GetConnectionPhase() == FwPhase::Disconnected) {
+            Model::Notify(true, "Could not connect to " + g_pendingAddress + ".");
             g_pendingAddress.clear();
         }
         g_wasConnected = connected;
-        if (html) {
-            SetVisible(!connected);
-        }
 
         for (const auto &info : ServerQuery::Poll()) {
             if (g_native.size() < 1024) {
                 g_native.push_back(info);
             }
-            Send("server", {{"list", info.list}, {"host", info.host}, {"port", info.port}, {"online", info.online}, {"name", info.name},
-                            {"version", info.version}, {"players", info.players}, {"maxPlayers", info.maxPlayers},
-                            {"password", info.password}, {"ping", info.pingMs}});
+            TakeAnswer(info);
         }
         std::string list, message;
         while (ServerQuery::PollError(list, message)) {
-            Send("listError", {{"list", list}, {"message", message}});
+            g_listErrors[list] = message;
         }
+
+        if (!g_enabled) {
+            return;
+        }
+        if (Overlay::PollEscape() && Overlay::Ready()) {
+            if (g_visible) {
+                if (!MenuUi::Back() && connected) {
+                    g_inGameMenu = false; // Esc on the in-game menu's first page: back to the game
+                }
+            }
+            else if (connected) {
+                g_inGameMenu = true;
+            }
+        }
+        SetVisible(Overlay::Ready() && (!connected || g_inGameMenu || g_leaving)); // leaving: until the session is closed
+    }
+
+    void Draw() {
+        if (g_enabled && g_visible) {
+            MenuUi::Draw(Connected());
+        }
+    }
+
+    void CloseInGameMenu() {
+        g_inGameMenu = false;
     }
 
     bool Visible() {
@@ -451,9 +601,10 @@ namespace RDMP::Frontend {
         ServerQuery::Shutdown();
     }
 
+    // ---- native menus (fw_api v11 / v12) ----
     void BrowserRefresh(const char *list) {
         if (list) {
-            Refresh(list);
+            Model::Refresh(list);
         }
     }
 
@@ -472,27 +623,15 @@ namespace RDMP::Frontend {
             o.maxPlayers = info.maxPlayers;
             o.password   = info.password ? 1 : 0;
             o.pingMs     = info.pingMs;
-            for (const auto &e : g_servers["favorites"]) {
-                o.favorite |= SameServer(e, info.host, info.port) ? 1 : 0;
-            }
+            o.favorite   = Model::IsFavorite(info.host, info.port) ? 1 : 0;
             g_native.pop_front();
         }
         return n;
     }
 
     void BrowserFavorite(const char *host, int port, const char *name, bool add) {
-        if (!host) {
-            return;
-        }
-        if (add) {
-            Remember("favorites", host, port, name ? name : "", 200);
-        }
-        else {
-            auto &arr = g_servers["favorites"];
-            for (auto it = arr.begin(); it != arr.end();) {
-                it = SameServer(*it, host, port) ? arr.erase(it) : it + 1;
-            }
-            SaveServers();
+        if (host) {
+            Model::SetFavorite(host, port, name ? name : "", add);
         }
     }
 
@@ -500,7 +639,7 @@ namespace RDMP::Frontend {
         if (!host || !g_client) {
             return false;
         }
-        Connect(host, port, password ? password : "");
+        Model::Connect(host, port, password ? password : "");
         return !g_pendingAddress.empty();
     }
 
@@ -508,19 +647,20 @@ namespace RDMP::Frontend {
         if (!out) {
             return;
         }
-        *out = {};
-        strncpy_s(out->nickname, CleanNickname(IniString(L"net", L"name", L"player")).c_str(), _TRUNCATE);
-        out->nametags        = IniInt(L"client", L"nametags", 1) != 0 ? 1 : 0;
-        out->nametagDistance = IniInt(L"client", L"nametag_distance", 60);
-        out->chat            = IniInt(L"client", L"chat", 1) != 0 ? 1 : 0;
+        *out                 = {};
+        const auto s         = Model::LoadMp();
+        strncpy_s(out->nickname, s.nickname.c_str(), _TRUNCATE);
+        out->nametags        = s.nametags ? 1 : 0;
+        out->nametagDistance = s.nametagDistance;
+        out->chat            = s.chat ? 1 : 0;
     }
 
     void SetSettings(const rdmp::fw::Settings &in) {
-        std::string nickname(in.nickname, strnlen(in.nickname, sizeof(in.nickname)));
-        IniWrite(L"net", L"name", CleanNickname(nickname));
-        IniWrite(L"client", L"nametags", in.nametags ? "1" : "0");
-        IniWrite(L"client", L"nametag_distance", std::to_string(std::clamp(static_cast<int>(in.nametagDistance), 5, 500)));
-        IniWrite(L"client", L"chat", in.chat ? "1" : "0");
-        ApplySettings();
+        Model::MpSettings s;
+        s.nickname        = std::string(in.nickname, strnlen(in.nickname, sizeof(in.nickname)));
+        s.nametags        = in.nametags != 0;
+        s.nametagDistance = in.nametagDistance;
+        s.chat            = in.chat != 0;
+        Model::SaveMp(s);
     }
 } // namespace RDMP::Frontend

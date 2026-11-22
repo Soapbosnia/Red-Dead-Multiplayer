@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <utils/safe_win32.h>
+
 #include <integrations/client/instance.h>
 #include <logging/logger.h>
 #include <networking/network_client.h>
@@ -29,6 +31,7 @@ namespace ImGui {
 #include "shared/player.h"
 #include "shared/vehicle.h"
 
+#include <filesystem>
 #include <functional>
 #include <string>
 
@@ -179,6 +182,24 @@ namespace RDMP {
             opts.usePresence          = false; // no Discord
             opts.initRendererManually = true;
             opts.verifyBuildToken     = true; // must match the server: same game/mod identity, same salt
+            if (renderer) {
+                // The menu's type (menu_ui.cpp): Bahnschrift for the UI, Palatino for headings, Segoe MDL2 for icons;
+                // all ship with Windows 10 / 11. A missing one falls back to ImGui's own font.
+                wchar_t windows[MAX_PATH] {};
+                GetWindowsDirectoryW(windows, MAX_PATH);
+                const std::filesystem::path fonts = std::filesystem::path(windows) / "Fonts";
+                auto font = [&](const char *file) {
+                    const auto path = fonts / file;
+                    return std::filesystem::exists(path) ? path.string() : std::string();
+                };
+                opts.imguiFontPath = font("bahnschrift.ttf");
+                opts.imguiFontSize = 18.0f;
+                for (const auto &[name, file] : {std::pair {"title", "palab.ttf"}, std::pair {"serif", "pala.ttf"}, std::pair {"icons", "segmdl2.ttf"}}) {
+                    if (const std::string path = font(file); !path.empty()) {
+                        opts.imguiFonts.push_back({name, path});
+                    }
+                }
+            }
             if (auto res = Init(opts); !res) {
                 Log()->error("client init failed: {}", res.GetError().message);
                 return false;
