@@ -10,5 +10,7 @@ void InstallUiFiles(const wchar_t* iniPath);
 void UiFilesFrame(bool frontEnd);
 // UI events ("rdmp.*" from our menus: browser tabs, join, favorite, refresh).
 void UiFilesOnEvent(const char* name);
+// The server dropped us (not our Disconnect): back to the title with the world unloaded, as after a Disconnect.
+void UiFilesServerDropped();
 
 }  // namespace rdmp

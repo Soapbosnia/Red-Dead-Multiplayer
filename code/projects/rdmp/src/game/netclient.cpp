@@ -33,6 +33,7 @@
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
+#include "uifiles.h"
 
 namespace rdmp {
 namespace {
@@ -162,8 +163,8 @@ void FwStep() {
         if (g_conn == fw::Conn::Connected && conn != fw::Conn::Connected) {
             // back to limbo behind the main menu; with the native menus without a fade (sandbox.h)
             ScriptLeaveSession(!GameflowTitleMode());
-            // Dropped by the server (not our Disconnect, whose menu is still open): the main menu opens (uifiles.cpp).
-            if (GameflowTitleMode() && g_session) PostUiEvent("rdmp.menu");
+            // Dropped by the server (not our Disconnect): back to the title, the world unloaded (uifiles.cpp).
+            if (GameflowTitleMode() && g_session) UiFilesServerDropped();
             g_session = false;
         }
         g_conn = conn;
@@ -605,6 +606,15 @@ void NetDisconnect() {
 }
 
 bool NetOnServer() { return g_session; }
+
+void NetWorldUnloaded() {
+    g_remotes.clear();
+    g_puppetsById.clear();
+    g_blips.clear();
+    VehiclesForget();
+    BlipsForget();
+    Log("net: world unloaded - puppets, horses and blips forgotten");
+}
 
 void NetShutdown() {
     if (!g_fwUp) return;

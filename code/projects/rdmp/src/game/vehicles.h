@@ -13,6 +13,8 @@
 namespace rdmp {
 
 void LoadVehicleConfig(const wchar_t* ini);
+// The world was unloaded (Disconnect): the horses' actors are gone with it; forget them.
+void VehiclesForget();
 
 // One frame: the replicated set from the client DLL, the local player's position (streaming), the time, the
 // interpolation buffer and the network delay of the shown position.

@@ -1996,7 +1996,7 @@ void SandboxOnUiEvent(const char* name) {
     if (strcmp(name, "enterSinglePlayer") == 0) {
         g_inSinglePlayer = true;
         g_enteredSinglePlayer = true;
-    } else if (g_worldLoading && g_autoFinish && !g_playerSpawned && strncmp(name, "Loading", 7) == 0 &&
+    } else if (g_worldLoading && g_autoFinish && !g_playerSpawned && !GameflowWorldParked() && strncmp(name, "Loading", 7) == 0 &&
                GetTickCount64() - g_worldLoadStartMs >= g_finishDelayMs) {
         // The loading screen posts LoadingBulletInOut/LoadingRevolverSpin repeatedly while it waits; once the
         // world has had time to stream in, keep the finish request set until loadComplete.
@@ -2008,7 +2008,8 @@ void SandboxOnUiEvent(const char* name) {
             const uintptr_t loader = *reinterpret_cast<uintptr_t*>(GameAddr(kLoaderPtr));
             if (loader) *reinterpret_cast<volatile uint8_t*>(loader + kLoaderFlags) |= 0x10;
         }
-    } else if (g_worldLoading && strcmp(name, "loadComplete") == 0) {
+    } else if (g_worldLoading && strcmp(name, "loadComplete") == 0 && !GameflowWorldParked()) {
+        // (not for the empty session a Disconnect loads: no player, the world is not ready - gameflow.cpp)
         g_worldReady = true;
         if (!g_playerSpawned && (g_spawnPlayer || g_limboSpawn)) {
             // MTA-style join: park the player underground with the screen black. The streamer and the
@@ -2130,6 +2131,17 @@ void SetUiInputLock(bool locked) {
 
 // The session ended (disconnected / kicked): black screen and no control until a script spawns the player again on the
 // next server, like a player who just joined.
+void SandboxWorldUnloaded() {
+    g_worldReady        = false;  // (the net client connects again once the next world load is complete)
+    g_playerSpawned     = false;
+    g_playerActorHandle = 0;
+    g_playerGoh         = 0;
+    g_localDead         = false;
+    g_limbo             = false;
+    g_scriptControl     = true;
+    Log("sandbox: world unloaded - player and session state forgotten");
+}
+
 void ScriptLeaveSession(bool fadeToBlack) {
     RunOnMainThread([fadeToBlack] {
         if (fadeToBlack) EngineFadeToBlack(0.5f, "left the server");

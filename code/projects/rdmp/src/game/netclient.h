@@ -28,6 +28,8 @@ void NetBrowserJoin(const char* host, int port);
 void NetDisconnect();
 // We joined a server from the menus and have not left it (or been dropped).
 bool NetOnServer();
+// The world was unloaded (Disconnect): remote players' puppets, horses and blips are gone with it; forget them.
+void NetWorldUnloaded();
 // Our game loop ended (quit or a game restart): shut the framework client down here, on the main thread, before the game
 // tears itself down; left to its static destructor at DLL unload it crashed (Framework scripting module, process exit).
 void NetShutdown();

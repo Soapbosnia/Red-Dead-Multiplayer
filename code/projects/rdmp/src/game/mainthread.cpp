@@ -18,6 +18,7 @@
 #include <mutex>
 #include <vector>
 
+#include "gameflow.h"
 #include "log.h"
 #include "patch.h"
 
@@ -52,6 +53,10 @@ void FrameHook(int timeslice) {
         g_lastClock = clock;
         for (auto& fn : callbacks) fn(clock);
     }
+    // The world is unloaded (Disconnect, gameflow.cpp): its session restarted and its load is held, so no script runs
+    // until the next join finishes that load (at boot the scripts run during the load too; running them on the held
+    // session crashed the VM). The root script and the others the restart requested wait for then.
+    if (GameflowWorldParked()) return;
     g_trampoline(timeslice);
 }
 

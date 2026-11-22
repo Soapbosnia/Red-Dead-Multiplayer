@@ -758,3 +758,28 @@ components on a puppet, which other threads read playerInfo during the swap.
   and on the title. Both reverted. Next: patch the "paused" tests that freeze the world (not input/camera) one by one,
   as done for the three render tests (gameflow.cpp InstallGameFlow step 5), then drop the state-3 hold; that should also
   give the cursor back.
+
+## Disconnect: unloading the world (2026-11-22, [game] disconnect_unload=1, open)
+- The game never unloads a level in-process: its "return to main menu" (AwaitRebootTransition, also the graphics
+  RestartGame) restarts the process ("PlayRDR.exe -restart", started by the Rockstar layer, not RDR.exe's
+  CreateProcessA import; the new copy has no mod); quitting returns from Game::Run and calls ExitProcess (0x14007FD48)
+  with the level loaded. "net.DevSoftReset" (FUN_1401f38d0, game+0x12d bit 0x20 + 0x12e bit 8) is commented out in the
+  UI files ("ResetNotSupported").
+- But its level load restarts the session when one exists: game+0x12e |= 1 in game -> FUN_1401f38d0 -> FUN_1401f85b0
+  (drains streaming 0x142AC50F8, waits on *(0x142C45780), renderer to loading mode: rm+0x34 = 1 with the frame mutex
+  rm+0x48 / event rm+0x10 handshake at 0x1401F887F) -> FUN_1401f8a00: with a session (0x142AC2925 set) the block from
+  0x1401F8BE3 releases it (session objects 0x142AD1CC8 / 0x142AD1F50 / 0x142AC5118, actors - the player too, scripts)
+  before the common init at 0x1401F8FEE. Tested: in game, a new-game request reloads in-process (loadStart ->
+  loadComplete), no crash, the player gone (our sandbox creates it only at the boot spawn).
+- gameflow GameflowUnloadWorld uses it: request the restart (fader held black until the trigger ran), finish its load
+  at once (an empty session), no scripts run meanwhile (mainthread.cpp skips the VM runner while parked: running them
+  on the restarted, unfinished session crashed in the VM at 0x1401E4EB5 via FUN_1402066d0), the sandbox spawns nothing
+  and the net client forgets puppets / horses / blips; a join requests another restart and runs the boot's phases.
+- Open: (1) the empty session's terrain stays drawn behind the menu. Switching the renderer to loading mode ourselves
+  (the handshake above) was undone within ~4 ms and the game died, also when done once ~1 s after the load's hand-back
+  to the normal render; the loader fader held black (loader+0x25800 = 1) does not cover the normal render. (2) After a
+  restart the player cannot be created: the sandbox spawns into the fixed layout handle 808 (captured from the story
+  script at the first boot), which a restarted session does not have (handle 0) - find the player layout dynamically.
+  (3) Re-entering the boot's Startup / StartScreen2 for the title background drew a broken menu column and the logo.
+- Debug: ui_exec "w <addr> <off> <hex>" writes a byte at *(addr)+off; lines already in ui_exec.txt at start are no
+  longer run (a stale "w" request re-ran a level load at every boot).

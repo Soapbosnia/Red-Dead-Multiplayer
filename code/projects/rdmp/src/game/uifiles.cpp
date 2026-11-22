@@ -387,7 +387,12 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
                      "<action expr=\"ClearStack()\"></action>"
                      "<action expr=\"StackPush_NoTransition(HudSceneOffline)\"></action></transition>"
                      // rdmp.menu (dropped by the server): the main menu opens over the world, as the pause key does
-                     "\n    <transition event=\"rdmp.menu\"><action expr=\"StackPush(PauseMenuScene)\"></action></transition>");
+                     "\n    <transition event=\"rdmp.menu\"><action expr=\"StackPush(PauseMenuScene)\"></action></transition>"
+                     // rdmp.title (Disconnect, the world unloaded): our main menu again, over the empty (loading-mode)
+                     // screen. ClearStack drops the session restart's LoadingScreen. (Re-entering the boot's Startup /
+                     // StartScreen2 for the title's own background drew a broken menu column and the logo: open.)
+                     "\n    <transition event=\"rdmp.title\"><action expr=\"ClearStack()\"></action>"
+                     "<action expr=\"StackPush(PauseMenuScene)\"></action></transition>");
         }
         Log("ui files: UserInterface.sc patched (rdmp/Main.sc included%s)", r != std::string::npos ? ", global transitions" : "");
         return Serve(s, name, a2, a3, a4);
@@ -503,7 +508,8 @@ struct TextEntry {
     bool open = false;
 } g_entry;
 std::string g_lastAddress;  // the last Direct Connect address (offered again)
-ULONGLONG g_menuAtMs = 0;   // when to open the main menu again after a Disconnect (0 = not pending)
+ULONGLONG g_titleAtMs = 0;  // when to unload the world and show the title after a Disconnect (0 = not pending)
+bool g_titlePending = false;  // the world is being unloaded; the title front end follows
 bool g_inView = false;      // a view (Options, server browser) is open from the main list (rdmp.view.*)
 
 uint32_t TextHash(const char* key) {
@@ -797,7 +803,9 @@ void ExecFile() {
     WIN32_FILE_ATTRIBUTE_DATA a;
     if (!GetFileAttributesExW(g_execPath, GetFileExInfoStandard, &a)) return;
     if (CompareFileTime(&a.ftLastWriteTime, &lastWrite) == 0) return;
+    const bool first = lastWrite.dwLowDateTime == 0 && lastWrite.dwHighDateTime == 0;
     lastWrite = a.ftLastWriteTime;
+    if (first) return;  // what the file held before this start is not run (a stale experiment would run at every boot)
     FILE* f = nullptr;
     if (_wfopen_s(&f, g_execPath, L"r") != 0 || !f) return;
     char line[512];
@@ -846,6 +854,16 @@ void ExecFile() {
                 Log("ui exec: chain %s: %s", movie, out.c_str());
                 continue;
             }
+            case 'w': {  // w <ghidra address> <off> <hex byte>: write a byte at *(addr)+off (RE experiments)
+                const uintptr_t base = *reinterpret_cast<uintptr_t*>(GameAddr(strtoull(movie, nullptr, 16)));
+                if (base) {
+                    auto* p = reinterpret_cast<uint8_t*>(base + strtoull(var, nullptr, 16));
+                    const uint8_t before = *p;
+                    *p = static_cast<uint8_t>(strtoul(rest, nullptr, 16));
+                    Log("ui exec: write %s+%s: %02x -> %02x", movie, var, before, *p);
+                }
+                continue;
+            }
             case 'h': {  // h <widget> <0|1>: show / hide it (FUN_1400fe810)
                 if (const uintptr_t w = Widget(movie))
                     reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810))(w, atoi(var) ? 1 : 0);
@@ -887,9 +905,20 @@ void ExecFile() {
 void UiFilesFrame(bool frontEnd) {
     if (!g_open) return;
     if (g_exec) ExecFile();
-    if (g_menuAtMs && GetTickCount64() >= g_menuAtMs) {
-        g_menuAtMs = 0;
-        PostUiEvent("rdmp.menu");
+    if (g_titleAtMs && GetTickCount64() >= g_titleAtMs) {
+        g_titleAtMs = 0;
+        if (GameflowUnloadOnDisconnect()) {
+            GameflowUnloadWorld();
+            g_titlePending = true;
+        } else {
+            // the world stays loaded, the player waits in limbo (sandbox ScriptLeaveSession): the main menu again, over it
+            // (the pause scene builds its menu column when it opens, so the one the Disconnect came from closed first)
+            PostUiEvent("rdmp.menu");
+        }
+    }
+    if (g_titlePending && GameflowUnloadDone()) {  // (after the restart's own LoadingScreen push)
+        g_titlePending = false;
+        PostUiEvent("rdmp.title");
     }
     if (frontEnd) NetTitleFrame();  // (with a world loaded the client is pumped by the net frame)
     PollBrowser();                  // (the browser also works in game, after a Disconnect)
@@ -936,6 +965,10 @@ void JoinStarted() {
     if (GameflowWorldLoadStarted()) PostUiEvent("rdmp.ingame");
 }
 }  // namespace
+
+void UiFilesServerDropped() {
+    if (g_open) g_titleAtMs = GetTickCount64() + 400;
+}
 
 void UiFilesOnEvent(const char* name) {
     if (!g_open || !name || std::strncmp(name, "rdmp.", 5) != 0) return;
@@ -1011,12 +1044,11 @@ void UiFilesOnEvent(const char* name) {
     } else if (ev == "opt.changed") {
         SaveMpOptions();
     } else if (ev == "disconnect") {
-        // Leave the server and stay in this menu, now the main menu: the world stays loaded behind it and the player waits
-        // in limbo for the next server (netclient, sandbox ScriptLeaveSession). The pause scene builds its menu column
-        // when it opens, from the entries shown then (entries shown later get no row): the Disconnect entry closes it and
-        // it opens again with the main menu's entries (rdmp.menu, queued after the entry's actions).
+        // Leave the server: the Disconnect entry closes the pause scene, then (UiFilesFrame) the main menu opens again -
+        // over the loaded world (player in limbo), or with [game] disconnect_unload=1 after the world is unloaded
+        // (gameflow GameflowUnloadWorld, rdmp.title).
         NetDisconnect();
-        g_menuAtMs = GetTickCount64() + 400;  // (posted while the scene is still closing, the push is lost)
+        g_titleAtMs = GetTickCount64() + 400;  // (posted while the scene is still closing, a stack push is lost)
     } else if (ev.rfind("favorite.", 0) == 0) {
         const int i = atoi(ev.c_str() + 9);
         if (i < 0 || i >= static_cast<int>(g_rows.size()) || g_rows[i].host.empty()) return;

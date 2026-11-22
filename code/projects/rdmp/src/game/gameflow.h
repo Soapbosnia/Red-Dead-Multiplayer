@@ -12,6 +12,15 @@ bool OwnBootGateOpen();
 bool GameflowTitleMode();
 bool GameflowWorldLoadStarted();
 void GameflowRequestWorldLoad();
+// The pause menu's Disconnect (title mode): the loaded world goes away and the game is back at its title, as after the
+// boot; the next GameflowRequestWorldLoad brings a world in again. See gameflow.cpp GameflowUnloadWorld.
+void GameflowUnloadWorld();
+// [game] disconnect_unload=1: Disconnect unloads the world (else it stays loaded behind the main menu).
+bool GameflowUnloadOnDisconnect();
+// The world was unloaded and its reload is held until the next join (no finishing of the level load meanwhile).
+bool GameflowWorldParked();
+// The unload's session restart has run (the title front end can be shown).
+bool GameflowUnloadDone();
 // UI event notification (from the sandbox event hook): later loads (story/missions) are finished by us too.
 void GameflowOnUiEvent(const char* name);
 

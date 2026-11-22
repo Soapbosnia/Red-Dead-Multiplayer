@@ -82,6 +82,9 @@ void SetUiInputLock(bool locked);
 // fadeToBlack = false (native menus): no engine fade - it brings the UI's FadeToBlack scene, which ends the pause (the
 // menu the player left from) and holds the UI stack until a fade-in; the player stays where it is, in limbo behind the menu.
 void ScriptLeaveSession(bool fadeToBlack);
+// The world was unloaded (Disconnect, gameflow GameflowUnloadWorld): the player and everything tied to the session are
+// gone with it. Forget them; the next world load creates the player again (limbo, as at a first join).
+void SandboxWorldUnloaded();
 
 // Sets the loader's "finish loading" request bit (the frame update acts on it once the world is ready).
 void RequestFinishLoading(const char* why);

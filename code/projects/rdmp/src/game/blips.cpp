@@ -118,6 +118,11 @@ int32_t Create(const WantedBlip& w, const Vec3& pos) {
 
 }  // namespace
 
+void BlipsForget() {
+    g_live.clear();
+    g_failed.clear();
+}
+
 int LiveBlipCount() { return static_cast<int>(g_live.size()); }
 
 void ApplyBlips(const WantedBlip* wanted, int count, ElementPositionFn resolve, void* user) {

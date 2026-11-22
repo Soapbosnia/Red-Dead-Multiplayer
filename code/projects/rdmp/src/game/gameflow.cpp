@@ -86,6 +86,15 @@ ULONGLONG g_finishLaterLoadAt = 0;   // later loads (story/missions): when to re
 // the world load waits for GameflowRequestWorldLoad (joining a server) instead of starting at the boot gate.
 bool g_titleMode = false;
 volatile long g_worldLoadRequested = 0;
+// Disconnect unloaded the world (GameflowUnloadWorld): the engine's session restart is under way / held, no world is
+// drawn or run, until the next join finishes the level load.
+bool g_worldParked = false;
+// [game] disconnect_unload=1 (development, default 0): Disconnect unloads the world (GameflowUnloadWorld). Off: the world
+// stays loaded behind the main menu, the player waits in limbo. Open while off by default: after the session restart the
+// player cannot be created (the sandbox's fixed layout handle 808 is not valid in a restarted session).
+bool g_unloadOnDisconnect = false;
+bool g_unloadDone = false;  // the unload is complete (empty session, loading-mode render): the title can come back
+int g_unloadStep = 0;       // 0 restart pending/running, 1 its load finishing, 2 done (empty session)
 
 uintptr_t Device() { return At<uintptr_t>(G<uintptr_t>(kDeviceHolder), 0x530); }
 
@@ -252,6 +261,28 @@ void MapTrace() {
     }
 }
 
+// The loader's post-loading-screen cleanup (FUN_14063ac00, flag loader+50000) pops the top UI phases, which includes
+// "effects"; without the loading screen we drop it the same way (count-1, clear the slot). It covers all UI otherwise.
+void DropEffectsUiPhase() {
+    if (const uintptr_t ui = G<uintptr_t>(0x142C45610)) {
+        int& count = At<int32_t>(ui, 0x180);
+        const uintptr_t top = count > 0 ? At<uintptr_t>(ui, 0x30 + (count - 1) * 8) : 0;
+        if (top && std::strncmp(reinterpret_cast<const char*>(top + 0x68), "effects", 8) == 0) {
+            At<uintptr_t>(ui, 0x30 + (count - 1) * 8) = 0;
+            --count;
+            Log("gameflow: dropped the top UI phase \"effects\"");
+        }
+    }
+}
+
+// Holds the loader's fader at full black: the level-load trigger FUN_1401f38d0 waits for it (normally the loading
+// screen's ActionScript fades it in).
+void HoldLoaderFaderBlack(uintptr_t loader) {
+    At<float>(loader, 0x25800) = 1.0f;
+    At<uint8_t>(loader, 0x257ec) |= 1;
+    At<uint8_t>(loader, 0x257e5) &= static_cast<uint8_t>(~0x48);
+}
+
 // Our boot sequence, run once per frame before Game::Update.
 void BootStep() {
     if (g_titleMode) UiFilesFrame(g_bootPhase < 2);
@@ -265,6 +296,44 @@ void BootStep() {
         if (!g_titleMode) _InterlockedExchange8(reinterpret_cast<volatile char*>(ui + 0x78), 1);
         g_bootPhase = 1;
         Log("gameflow: signed in after %llu ms of our loop -> boot gate open", GetTickCount64() - g_runStartMs);
+    }
+    if (g_bootPhase == 1 && g_worldParked) {
+        // After a Disconnect (GameflowUnloadWorld): (1) the session restart runs once the trigger sees the fader black;
+        // (2) its load is finished at once - an empty session (no player: the sandbox does not spawn one while parked;
+        // no script runs: mainthread.cpp); our main menu over it. A join then starts another restart and runs the boot's
+        // load phases (2..5).
+        const uintptr_t game = G<uintptr_t>(0x142C456D0);
+        const uintptr_t loader = G<uintptr_t>(kLoader);
+        if (!game || !loader) return;
+        if (At<uint8_t>(game, 0x12e) & 1) {
+            HoldLoaderFaderBlack(loader);
+            return;
+        }
+        if (g_unloadStep == 0) {
+            DropEffectsUiPhase();  // (the restart's load pushed it)
+            RequestFinishLoading("unload: empty session");
+            g_unloadStep = 1;
+            return;
+        }
+        if (g_unloadStep == 1) {
+            if (At<uint8_t>(loader, 0x257e5) & 0x10) return;  // (finish request pending until "loadComplete")
+            g_unloadStep = 2;
+            g_unloadDone = true;
+            Log("gameflow: world unloaded (empty session loaded)");
+        }
+        // (Not hidden yet: switching the renderer to loading mode outside a level load - the handshake of FUN_1401f85b0 -
+        // was undone within ~4 ms and killed the game, also when done once ~1 s after the hand-back. The empty session's
+        // terrain stays drawn behind the menu; see re/NOTES.md "Disconnect".)
+        if (!g_worldLoadRequested) return;
+        // Join: a fresh session and the boot's load (phase 2 holds the fader until the trigger ran, then 3..5).
+        g_unloadStep = 0;
+        g_unloadDone = false;
+        g_worldParked = false;
+        At<uint8_t>(game, 0x12e) |= 1;
+        g_bootPhase = 2;
+        g_phaseStartMs = GetTickCount64();
+        Log("gameflow: join after a Disconnect - loading a new session");
+        return;
     }
     if (g_bootPhase == 1 && g_titleMode && !g_worldLoadRequested) return;  // title screen: wait for a join
     if (g_bootPhase == 1 && ++g_gateFrames >= 2) {
@@ -281,25 +350,13 @@ void BootStep() {
         // The level-load trigger FUN_1401f38d0 waits until the loader's fader is at full black (normally the loading
         // screen's ActionScript fades it in). Hold it there ourselves until the trigger has run (new-game bit cleared).
         if ((At<uint8_t>(game, 0x12e) & 1) == 0) {
-            // The loader's post-loading-screen cleanup (FUN_14063ac00, flag loader+50000) pops the top UI phases, which
-            // includes "effects"; without the loading screen we drop it the same way (count-1, clear the slot).
-            if (const uintptr_t ui = G<uintptr_t>(0x142C45610)) {
-                int& count = At<int32_t>(ui, 0x180);
-                const uintptr_t top = count > 0 ? At<uintptr_t>(ui, 0x30 + (count - 1) * 8) : 0;
-                if (top && std::strncmp(reinterpret_cast<const char*>(top + 0x68), "effects", 8) == 0) {
-                    At<uintptr_t>(ui, 0x30 + (count - 1) * 8) = 0;
-                    --count;
-                    Log("gameflow: dropped the top UI phase \"effects\"");
-                }
-            }
+            DropEffectsUiPhase();
             g_bootPhase = 3;
             g_phaseStartMs = GetTickCount64();
             Log("gameflow: level load running (%llu ms after start)", GetTickCount64() - g_runStartMs);
             return;
         }
-        At<float>(loader, 0x25800) = 1.0f;
-        At<uint8_t>(loader, 0x257ec) |= 1;
-        At<uint8_t>(loader, 0x257e5) &= static_cast<uint8_t>(~0x48);
+        HoldLoaderFaderBlack(loader);
     }
     if (g_bootPhase == 3 && GetTickCount64() - g_phaseStartMs >= g_streamMs) {
         // Streaming time for the area around the spawn, then finish the load (FinishLoading -> "loadComplete").
@@ -596,6 +653,33 @@ bool OwnGameLoopActive() { return g_installed; }
 bool OwnBootGateOpen() { return g_bootPhase >= 1; }
 bool GameflowTitleMode() { return g_titleMode; }
 bool GameflowWorldLoadStarted() { return g_bootPhase >= 2; }
+// Disconnect: unload the world in-process. The game itself never unloads a level (its "return to main menu" restarts
+// the process through PlayRDR.exe -restart; quitting calls ExitProcess with the level loaded), but its level load
+// restarts the session when one exists: FUN_1401f38d0 (game+0x12e bit 0) -> FUN_1401f85b0 (streaming drained, renderer
+// to loading mode rm+0x34 = 1) -> FUN_1401f8a00, which with a session (0x142AC2925) first releases it (session objects,
+// actors - the player too, scripts, world state; the block from 0x1401F8BE3) and then sets up a fresh one. We run that
+// restart and finish its load at once: an empty session (no player, no actors, no scripts) under our main menu
+// (BootStep); the next join restarts the session again with the boot's load phases.
+void GameflowUnloadWorld() {
+    if (!g_installed || !g_titleMode || g_bootPhase < 5) return;
+    const uintptr_t game = G<uintptr_t>(0x142C456D0);
+    if (!game) return;
+    At<uint8_t>(game, 0x12e) |= 1;
+    g_worldParked = true;
+    g_unloadStep = 0;
+    g_unloadDone = false;
+    g_bootPhase = 1;
+    g_gateFrames = 0;
+    g_finishLaterLoadAt = 0;
+    _InterlockedExchange(&g_worldLoadRequested, 0);
+    SandboxWorldUnloaded();
+    NetWorldUnloaded();
+    Log("gameflow: unloading the world (Disconnect)");
+}
+bool GameflowWorldParked() { return g_worldParked; }
+bool GameflowUnloadOnDisconnect() { return g_installed && g_titleMode && g_unloadOnDisconnect; }
+bool GameflowUnloadDone() { return g_worldParked && g_unloadDone; }
+
 void GameflowRequestWorldLoad() {
     if (_InterlockedExchange(&g_worldLoadRequested, 1) == 0) Log("gameflow: world load requested");
 }
@@ -623,6 +707,7 @@ void InstallGameFlow(const wchar_t* ini) {
     if (!GetPrivateProfileIntW(L"game", L"own_loop", 0, ini)) return;
     g_streamMs = GetPrivateProfileIntW(L"game", L"stream_ms", 8000, ini);
     g_titleMode = GetPrivateProfileIntW(L"game", L"title_screen", 0, ini) != 0;
+    g_unloadOnDisconnect = GetPrivateProfileIntW(L"game", L"disconnect_unload", 0, ini) != 0;
     g_radarZoomM = static_cast<float>(GetPrivateProfileIntW(L"sandbox", L"radar_zoom", 150, ini));
     g_mapTrace = GetPrivateProfileIntW(L"debug", L"map_trace", 0, ini) != 0;
     g_noPauseFreeze = GetPrivateProfileIntW(L"sandbox", L"no_pause_freeze", 1, ini) != 0;

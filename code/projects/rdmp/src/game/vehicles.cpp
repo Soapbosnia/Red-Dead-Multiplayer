@@ -97,6 +97,10 @@ void LocalMountFrame(const fw::Api& api, double nowMs) {
 
 }  // namespace
 
+void VehiclesForget() {
+    g_horses.clear();
+}
+
 void LoadVehicleConfig(const wchar_t* ini) {
     g_streamIn = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_in", 150, ini));
     g_streamOut = static_cast<float>(GetPrivateProfileIntW(L"net", L"stream_out", 200, ini));

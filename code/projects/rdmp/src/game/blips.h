@@ -31,5 +31,7 @@ void ApplyBlips(const WantedBlip* wanted, int count, ElementPositionFn resolve, 
 
 // Number of engine blips currently created by the mod.
 int LiveBlipCount();
+// The world was unloaded (Disconnect): the game's blips are gone with it; forget ours.
+void BlipsForget();
 
 }  // namespace rdmp
