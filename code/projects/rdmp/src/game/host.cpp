@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "gamesettings.h"
 #include "log.h"
 #include "netclient.h"
 #include "memcheck.h"
@@ -154,11 +155,13 @@ bool HostGetCamera(fw::Camera* out) {
 
 void HostInputLock(int locked) { SetUiInputLock(locked != 0); }
 bool HostRemotePosition(uint64_t netId, float out[3]) { return RemotePuppetPosition(netId, out); }
+int HostGetGameOptions(uint8_t* loaded, uint8_t* graphics) { return ReadGameOptions(loaded, graphics) ? 1 : 0; }
+int HostSetGameOptions(const uint8_t* loaded, const uint8_t* graphics) { return ApplyGameOptions(loaded, graphics) ? 1 : 0; }
 
 const fw::Host g_host = {
     fw::kApiVersion, &HostLog,     &HostInvokeNative, &HostGetLocalPlayer, &HostTeleport,  &HostFade,
     &HostSetControl, &HostCamera,  &HostSetHealth,    &HostFocus,          &HostShowText,  &HostKillLocal,
-    &HostGetCamera,  &HostInputLock,    &HostRemotePosition,
+    &HostGetCamera,  &HostInputLock,    &HostRemotePosition, &HostGetGameOptions, &HostSetGameOptions,
 };
 
 }  // namespace

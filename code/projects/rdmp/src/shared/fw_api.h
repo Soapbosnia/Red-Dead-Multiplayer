@@ -18,7 +18,8 @@ namespace rdmp::fw {
 // v7: PlayerState carries MoveInput (stick, desired heading, gait) instead of the sparse desire.
 // v8: PlayerState carries the controller state (controls[30]).
 // v9: vehicles (get_vehicles, set_vehicle, get_assigned_vehicle); PlayerState::vehicle.
-constexpr uint32_t kApiVersion = 9;
+// v10: Host get_game_options / set_game_options (the game's own settings, shared/game_options.h).
+constexpr uint32_t kApiVersion = 10;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -141,6 +142,11 @@ struct Host {
     void (*set_input_lock)(int locked);
     // Where the game draws a remote player (their puppet), Y up; false while it has none.
     bool (*get_remote_position)(uint64_t netId, float out[3]);
+    // The game's own settings (shared/game_options.h): loaded = rage::LoadedOptions (opt::kLoadedSize bytes), graphics =
+    // rage::GraphicsOptions (opt::kGraphicsSize). set applies them through the game and has it save its own files;
+    // either pointer may be null.
+    int (*get_game_options)(uint8_t* loaded, uint8_t* graphics);
+    int (*set_game_options)(const uint8_t* loaded, const uint8_t* graphics);
 };
 
 // Function table filled by rdmp_client_get_api (one export keeps the dll boundary small).

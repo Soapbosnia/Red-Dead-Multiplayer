@@ -15,8 +15,11 @@
 #include "client/overlay.h"
 #include "client/server_query.h"
 #include "shared/fw_api.h"
+#include "shared/game_options.h"
 
 #include <algorithm>
+#include <cstring>
+#include <set>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
@@ -77,6 +80,100 @@ namespace RDMP::Frontend {
                 name.resize(22);
             }
             return name.empty() ? std::string("player") : name;
+        }
+
+        // ---- the game's own settings (shared/game_options.h, through rdmp.dll) ----
+        namespace opt = rdmp::opt;
+        void Send(const std::string &type, const json &data); // page bridge, below
+
+        uint8_t *BlockOf(const opt::Field &f, uint8_t *loaded, uint8_t *graphics) {
+            return f.block == opt::Block::Loaded ? loaded : graphics;
+        }
+
+        json ReadField(const opt::Field &f, const uint8_t *base) {
+            const uint8_t *p = base + f.offset;
+            switch (f.type) {
+            case opt::Type::Bool: return *p != 0;
+            case opt::Type::U8: return static_cast<int>(*p);
+            case opt::Type::I32: {
+                int32_t v;
+                std::memcpy(&v, p, 4);
+                return v;
+            }
+            case opt::Type::F32: {
+                float v;
+                std::memcpy(&v, p, 4);
+                return v;
+            }
+            }
+            return nullptr;
+        }
+
+        bool WriteField(const opt::Field &f, uint8_t *base, const json &value) {
+            uint8_t *p = base + f.offset;
+            uint8_t before[4];
+            std::memcpy(before, p, 4);
+            switch (f.type) {
+            case opt::Type::Bool: *p = value.is_boolean() ? value.get<bool>() : value.is_number() && value.get<double>() != 0.0; break;
+            case opt::Type::U8: if (value.is_number()) *p = static_cast<uint8_t>(std::clamp(value.get<double>(), 0.0, 255.0)); break;
+            case opt::Type::I32: if (value.is_number()) { const int32_t v = static_cast<int32_t>(value.get<double>()); std::memcpy(p, &v, 4); } break;
+            case opt::Type::F32: if (value.is_number()) { const float v = static_cast<float>(value.get<double>()); std::memcpy(p, &v, 4); } break;
+            }
+            return std::memcmp(before, p, f.type == opt::Type::Bool || f.type == opt::Type::U8 ? 1 : 4) != 0;
+        }
+
+        // The monitor's display modes: resolutions (largest first) and the refresh rates each offers.
+        json DisplayModes() {
+            std::set<std::pair<int, int>> sizes;
+            std::set<int> rates;
+            DEVMODEW mode {};
+            mode.dmSize = sizeof(mode);
+            for (DWORD i = 0; EnumDisplaySettingsW(nullptr, i, &mode); ++i) {
+                if (mode.dmBitsPerPel >= 24 && mode.dmPelsWidth >= 800) {
+                    sizes.insert({static_cast<int>(mode.dmPelsWidth), static_cast<int>(mode.dmPelsHeight)});
+                    rates.insert(static_cast<int>(mode.dmDisplayFrequency));
+                }
+            }
+            json res = json::array(), hz = json::array();
+            for (auto it = sizes.rbegin(); it != sizes.rend(); ++it) {
+                res.push_back({it->first, it->second});
+            }
+            for (int r : rates) {
+                hz.push_back(r);
+            }
+            return {{"resolutions", res}, {"refreshRates", hz}};
+        }
+
+        json GameSettings() {
+            uint8_t loaded[opt::kLoadedSize] {}, graphics[opt::kGraphicsSize] {};
+            if (!g_host || !g_host->get_game_options || !g_host->get_game_options(loaded, graphics)) {
+                return {{"available", false}};
+            }
+            json values = json::object();
+            for (const auto &f : opt::kFields) {
+                values[f.key] = ReadField(f, BlockOf(f, loaded, graphics));
+            }
+            return {{"available", true}, {"values", values}, {"modes", DisplayModes()}};
+        }
+
+        // Applies the page's values: only the blocks that changed go to the game (graphics re-applies the renderer).
+        void ApplyGameSettings(const json &values) {
+            uint8_t loaded[opt::kLoadedSize] {}, graphics[opt::kGraphicsSize] {};
+            if (!g_host || !g_host->set_game_options || !g_host->get_game_options(loaded, graphics) || !values.is_object()) {
+                Send("status", {{"state", "error"}, {"message", "The game's settings are not available right now."}});
+                return;
+            }
+            bool loadedChanged = false, graphicsChanged = false;
+            for (const auto &f : opt::kFields) {
+                if (values.contains(f.key) && WriteField(f, BlockOf(f, loaded, graphics), values[f.key])) {
+                    (f.block == opt::Block::Loaded ? loadedChanged : graphicsChanged) = true;
+                }
+            }
+            if (loadedChanged || graphicsChanged) {
+                g_host->set_game_options(loadedChanged ? loaded : nullptr, graphicsChanged ? graphics : nullptr);
+            }
+            Send("gameSettings", GameSettings());
+            Send("status", {{"state", "ok"}, {"message", loadedChanged || graphicsChanged ? "Game settings applied." : "Nothing changed."}});
         }
 
         // ---- servers.json ----
@@ -181,6 +278,15 @@ namespace RDMP::Frontend {
                 Send("settings", Settings());
                 Send("lists", g_servers);
                 Send("version", {{"version", g_client ? g_client->GetOptions().modVersion : ""}});
+                const json game = GameSettings();
+                Send("gameSettings", game);
+                if (game.value("available", false)) {
+                    const auto &v = game["values"];
+                    Log()->info("menu: game settings read: brightness {} mouse {} sfx {} music {} | {}x{} @ {} Hz, streaming {} m",
+                                v["display.fBrightness"].dump(), v["kbMouse.fMouseScalarSensitivity"].dump(), v["audio.fSFXVolume"].dump(),
+                                v["audio.fMusicVolume"].dump(), v["ResolutionX"].dump(), v["ResolutionY"].dump(), v["RefreshRate"].dump(),
+                                v["WorldStreamingRadius"].dump());
+                }
             }
             else if (name == "refresh" && data.is_object()) {
                 Refresh(data.value("list", std::string("local")));
@@ -211,6 +317,9 @@ namespace RDMP::Frontend {
                 ApplySettings();
                 Send("settings", Settings());
                 Send("status", {{"state", "info"}, {"message", "Settings saved."}});
+            }
+            else if (name == "gameSettings" && data.is_object()) {
+                ApplyGameSettings(data.value("values", json::object()));
             }
             else if (name == "quit") {
                 if (HWND window = GetForegroundWindow()) {
@@ -244,7 +353,7 @@ namespace RDMP::Frontend {
             }
             view->SetZIndex(1000);
             view->SetAlwaysComposite(true);
-            for (const char *event : {"ready", "refresh", "connect", "favorite", "settings", "quit"}) {
+            for (const char *event : {"ready", "refresh", "connect", "favorite", "settings", "gameSettings", "quit"}) {
                 const std::string name = event;
                 view->AddEventListener("rdmp:" + name, [name](const std::string &payload) {
                     OnPageEvent(name, payload);
