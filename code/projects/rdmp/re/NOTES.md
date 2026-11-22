@@ -638,3 +638,25 @@ components on a puppet, which other threads read playerInfo during the swap.
   *(0x1422DAF30) pointing at the puppet's player-info; FUN_140bb4150 for the puppet runs in the same context.
 - Verified: the puppet walks / sprints / stops / climbs onto the station porch roof with the remote; two copies with
   replayed key input: moving median 0.31 m, p95 0.89 m, 4.1% pulled, vertical mean 0.03 m.
+
+## Game settings (2026-11-22)
+- Files (the game's own, never written by us): %APPDATA%\.1911\Red Dead Redemption\title\options.xml
+  (rage::LoadedOptions), graphicsOptions.xml (rage::GraphicsOptions), gabindings.xml (key bindings).
+- Parser descriptors: LoadedOptions FUN_14061e630 (0x70 bytes: gameplay @0, display @4, controller @0x24, kbMouse
+  @0x44, audio @0x54, MP fields @0x60..0x6d), sub-structures FUN_14061e8b0 / ea30 / ec00 / ede0 / efa0, GraphicsOptions
+  FUN_140158580 (0x5c bytes). Each member descriptor holds its offset; the case-sensitive joaat of its name sits 8
+  bytes before it, so every field is named for certain (store order in the registration is NOT declaration order).
+  Full table: src/shared/game_options.h.
+- Options menu object (rdrOptionsLayer, UI "OptionsLayer") keeps a LoadedOptions at +0x98 (+0x110 / +0x114 = -1
+  "no override"). SyncOptionsFromGame FUN_140625f80 (live -> +0x98), SyncOptionsToGame FUN_140627370 (+0x98 -> live,
+  sets +0x10b when something changed), menu close FUN_140624f70 = UI read FUN_140626c10, ToGame, save
+  FUN_14061f410(layer+0x98) (options.xml via the parser, FUN_1400c1810). Startup gather + load: FUN_14061f170.
+- Volumes are not in ToGame: audio category table *(0x142AE3380), stride 0x14, float at +0 = volume, index
+  *(u16*)(category+0x28); SFX category *(0x142AE2E10), music *(0x142AE2E18) (FromGame reads them there).
+- Graphics: live instance at 0x1422CA340. Graphics menu callbacks (FUN_1405d3ba0 registers them):
+  ApplyCurrentGraphicsOptions FUN_1405d7260 = every handler in the std::map at *(0x142B67370) (node+0x28 = handler,
+  vfunc +0x10(handler, pending GraphicsOptions = layer+0x2d8)), then save FUN_140158be0 (graphicsOptions.xml);
+  ConfirmApplyChanges FUN_1405d7480 copies live -> pending.
+- UI option ids (Scaleform): DisplayOption_*, ControlsOption_*, KBM_*, AudioOption_* (list in this file's history).
+  The meaning of some enum values (FrameRateLimit, aaAntiAliasing, MotionBlurStyle, upscaler qualities) is not
+  confirmed yet: the menu labels them, keeps unknown values as "Custom (n)", and offers a 15 s revert for graphics.

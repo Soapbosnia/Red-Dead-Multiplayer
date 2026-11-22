@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **New main menu** (ui/): an original Red Dead Multiplayer logo and icon set, a Play page (server browser with
+  Internet / Local / Favorites / Recent, search, hide empty / locked, sortable columns, player bars, ping dots, a
+  details card for the selected server, direct connect, password prompt) and a Settings page with Multiplayer plus
+  **the game's own settings**: Display, Graphics, Audio, Keyboard & mouse, Gamepad, Interface. Changes are staged
+  (Apply / Revert, a count per section); display and graphics changes ask to be kept within 15 s or revert.
+* The game's settings are read and applied through the game's own code (src/game/gamesettings.cpp), which saves
+  its own options.xml / graphicsOptions.xml as its pause menu does. fw_api v10.
+* The game boots to the main menu and starts no server; RDMP.exe `--server` / `--connect host[:port]` for
+  development.
 * **Horses** (MTA's vehicles): `createVehicle(model, x, y, z[, rz])` (rideable animals 976..1005), `getVehicleModel`,
   `warpPedIntoVehicle`, `removePedFromVehicle`, `getPedOccupiedVehicle`, `getVehicleOccupant`, events
   `playerVehicleEnter` / `playerVehicleExit`; vehicles in getElementType / getElementsByType / get/setElementPosition /

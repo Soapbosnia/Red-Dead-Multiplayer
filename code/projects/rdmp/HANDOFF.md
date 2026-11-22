@@ -101,6 +101,14 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
 3. Done: the game boots to the main menu and starts no server; auto-join / local server only with `--connect` /
    `--server` (or the ini keys) for development.
 
+## In progress (2026-11-22)
+* New main menu + the game's own settings: built, checked in a browser with sample data; NOT yet checked in game
+  (the PC was locked). Check: the menu shows, Settings pages show your real values, Apply works (e.g. brightness,
+  mouse sensitivity, a graphics option, then the keep / revert prompt), the game's files keep the values after a
+  restart. Unconfirmed enum labels (frame limit, anti-aliasing, motion blur, upscaler qualities): see re/NOTES.md
+  "Game settings".
+* Next session (owner): a custom pause menu.
+
 ## Next (chosen: horses first)
 1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:
    remote horses are driven by the rider's movement request (desire mode), not yet by the rider's horse controls
