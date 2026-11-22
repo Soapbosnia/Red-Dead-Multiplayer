@@ -764,6 +764,24 @@ uintptr_t FlashSlot(const char* movie, const char* path) {
     const uintptr_t wrapper = *reinterpret_cast<uintptr_t*>(list + 0x30 + idx * 8ULL);
     return wrapper ? reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x140116610))(wrapper, path) : 0;
 }
+// Moves a UI movie to just below another in the UI movie list (*0x142C45610: wrappers at +0x30, count +0x180; drawn in
+// list order, so a later one covers an earlier one). Indices by name: FUN_14011a000(list, name). Returns false when
+// either is not in the list; nothing to do when it is below already.
+bool MoveMovieBelow(const char* movie, const char* other) {
+    const uintptr_t list = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45610));
+    if (!list) return false;
+    auto index = reinterpret_cast<char (*)(uintptr_t, const char*)>(GameAddr(0x14011A000));
+    const int count = *reinterpret_cast<int*>(list + 0x180);
+    const int a = index(list, movie), b = index(list, other);
+    if (a < 0 || b < 0 || a >= count || b >= count) return false;
+    if (a < b) return true;
+    auto* slots = reinterpret_cast<uintptr_t*>(list + 0x30);
+    const uintptr_t moved = slots[a];
+    for (int i = a; i > b; --i) slots[i] = slots[i - 1];
+    slots[b] = moved;
+    return true;
+}
+
 std::deque<std::string> g_flashStrings;
 void FlashSetString(const char* movie, const char* path, const std::string& text) {
     const uintptr_t slot = FlashSlot(movie, path);
@@ -862,6 +880,10 @@ void ExecFile() {
                     *p = static_cast<uint8_t>(strtoul(rest, nullptr, 16));
                     Log("ui exec: write %s+%s: %02x -> %02x", movie, var, before, *p);
                 }
+                continue;
+            }
+            case 'o': {  // o <movie> <other>: move <movie> to just below <other> in the UI movie list (draw order)
+                Log("ui exec: move %s below %s: %s", movie, var, MoveMovieBelow(movie, var) ? "ok" : "not found");
                 continue;
             }
             case 'h': {  // h <widget> <0|1>: show / hide it (FUN_1400fe810)

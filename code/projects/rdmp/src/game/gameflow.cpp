@@ -90,8 +90,8 @@ volatile long g_worldLoadRequested = 0;
 // drawn or run, until the next join finishes the level load.
 bool g_worldParked = false;
 // [game] disconnect_unload=1 (development, default 0): Disconnect unloads the world (GameflowUnloadWorld). Off: the world
-// stays loaded behind the main menu, the player waits in limbo. Open while off by default: after the session restart the
-// player cannot be created (the sandbox's fixed layout handle 808 is not valid in a restarted session).
+// stays loaded behind the main menu, the player waits in limbo. Off by default while the empty session's terrain is
+// still drawn behind the menu.
 bool g_unloadOnDisconnect = false;
 bool g_unloadDone = false;  // the unload is complete (empty session, loading-mode render): the title can come back
 int g_unloadStep = 0;       // 0 restart pending/running, 1 its load finishing, 2 done (empty session)

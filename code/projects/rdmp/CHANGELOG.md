@@ -3,8 +3,9 @@
 ## Unreleased: remote-player sync rework
 * **Disconnect can unload the world** (development, `[game] disconnect_unload=1`): the session restarts in-process (the
   game's own level-load path) into an empty session - player, puppets, horses, blips and scripts gone - and joining
-  loads a new one. Not default yet: the restarted session's terrain stays drawn behind the menu and the player cannot
-  be created after it (re/NOTES.md "Disconnect"). Default: the world stays loaded behind the main menu.
+  loads a new one (the player owner's handle generation is read at spawn, so the player is created in the new
+  session). Not default yet: the empty session's terrain stays drawn behind the menu (re/NOTES.md "Disconnect").
+  Default: the world stays loaded behind the main menu.
 * `ui_exec.txt` (debug): lines already in the file when the game starts are no longer run.
 * Fixed: after joining from inside the server browser, the in-game pause menu kept Options and Quit hidden.
 * **Native menus, each entry its own view:** Options and the server browser open as their own view in the menu column

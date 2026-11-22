@@ -388,9 +388,28 @@ namespace {
 
 void EnsureTypeAnchor();  // defined below
 
+// The player owner's handle as it is now. Game-object handles are (generation << 16) | slot (goh table *(0x142C45808),
+// entries {object, u16 generation}); owner_handle names the slot (808: the static player owner 0x1422D9F50, vt
+// 0x141C8B5E0, generation 0 at the first load). A session restart (Disconnect, gameflow GameflowUnloadWorld) may
+// register objects again with a new generation, so it is read from the table at spawn time; 0 when the slot is empty.
+uint32_t CurrentOwnerHandle(uint32_t configured) {
+    const uint32_t slot = configured & 0xFFFF;
+    const uintptr_t table = *reinterpret_cast<uintptr_t*>(GameAddr(kGohTablePtr));
+    if (!table) return 0;
+    const uintptr_t entry = table + slot * 0x10;
+    uintptr_t obj = 0, genWord = 0, vt = 0;
+    if (!TryRead64(entry, obj) || !TryRead64(entry + 8, genWord) || obj < 0x10000 || !TryRead64(obj, vt)) {
+        Log("sandbox: goh[%u] holds no object", slot);
+        return 0;
+    }
+    const uint32_t handle = (static_cast<uint32_t>(static_cast<uint16_t>(genWord)) << 16) | slot;
+    if (handle != configured) Log("sandbox: owner goh[%u] is handle 0x%08x now (vt %p)", slot, handle, reinterpret_cast<void*>(vt));
+    return handle;
+}
+
 void SpawnPlayer() {
-    uint32_t layout = g_ownerHandle;
-    if (!layout) layout = FindLayoutHandle();  // owner_handle=0: first Layout (debug/experiments)
+    uint32_t layout = g_ownerHandle ? CurrentOwnerHandle(g_ownerHandle) : 0;
+    if (!layout) layout = FindLayoutHandle();  // owner_handle=0 (debug/experiments), or no Layout at the slot: first Layout
     if (!layout) {
         Log("sandbox: no Layout object found, can't spawn the player");
         return;

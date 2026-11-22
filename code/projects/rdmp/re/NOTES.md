@@ -777,9 +777,13 @@ components on a puppet, which other threads read playerInfo during the swap.
   and the net client forgets puppets / horses / blips; a join requests another restart and runs the boot's phases.
 - Open: (1) the empty session's terrain stays drawn behind the menu. Switching the renderer to loading mode ourselves
   (the handshake above) was undone within ~4 ms and the game died, also when done once ~1 s after the load's hand-back
-  to the normal render; the loader fader held black (loader+0x25800 = 1) does not cover the normal render. (2) After a
-  restart the player cannot be created: the sandbox spawns into the fixed layout handle 808 (captured from the story
-  script at the first boot), which a restarted session does not have (handle 0) - find the player layout dynamically.
+  to the normal render; the loader fader held black (loader+0x25800 = 1) does not cover the normal render. The fader
+  layer FadeToBlack (RDRUIFader, movie "fader": fadeVal / fadeRefresh / fadeColor; Enter-able, not a stack item; its
+  onactivate also calls UIPlayer.Disable()) goes black with fadeVal 100 + fadeRefresh, but covers our menu column too
+  (only the prompt strip stays above); moved below pause_main in the UI movie list (*0x142C45610, ui_exec "o") it is
+  not drawn at all - the list is not plain draw order. (2) SOLVED: after a restart the player owner goh[808] (the
+  static object 0x1422D9F50, vt 0x141C8B5E0) has generation 1 (handle 0x10328); the sandbox now reads the slot's
+  generation at spawn (CurrentOwnerHandle). Join after an unload: the player spawns, the server's spawnPlayer works.
   (3) Re-entering the boot's Startup / StartScreen2 for the title background drew a broken menu column and the logo.
 - Debug: ui_exec "w <addr> <off> <hex>" writes a byte at *(addr)+off; lines already in ui_exec.txt at start are no
   longer run (a stale "w" request re-ran a level load at every boot).
