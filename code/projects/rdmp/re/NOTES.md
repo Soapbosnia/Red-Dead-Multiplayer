@@ -749,3 +749,12 @@ components on a puppet, which other threads read playerInfo during the swap.
   something in Game::Update that runs when it sees state 3 (our pause hold, gameflow OurRun) keeps the mouse captured.
   Next: bisect what in Game::Update / the masked game-clock call (FUN_1405c5220) re-captures it (e.g. take the clock
   call out of the hold first), then give that part the real state 4.
+- (open, 2026-11-22) The same pause hold also leaves the player's input live behind the in-game pause menu (mouse-look
+  turns the camera, movement keys move the player). Tried: (a) DisablePlayerControl (actor comp+0x48e |= 0x7d) while
+  the menu is open: logged, but the player still sprints and the camera turns (something restores it in the pause);
+  (b) the game's own MP rule instead of state 3 - keep state 4 and set net+0x1634 (*(0x142C456B8)) while paused, so
+  only the ~90 inlined "paused" tests (state 4 && (!net+0x1634 || DAT_142b0ebc8)) let the world run: crashes in
+  Game::Update -> FUN_140472a02 -> null read at 0x1404bd02f (online-session code with no session objects), in game
+  and on the title. Both reverted. Next: patch the "paused" tests that freeze the world (not input/camera) one by one,
+  as done for the three render tests (gameflow.cpp InstallGameFlow step 5), then drop the state-3 hold; that should also
+  give the cursor back.

@@ -128,8 +128,10 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22): the game has no in-process
      return to the menu (it restarts the exe), so write our own level teardown (world, actors, streaming, scripts)
      mirroring our boot (gameflow.cpp), then the title front end again. Today the world stays behind the menu.
-  2. No mouse cursor in the in-game pause menu: caused by our pause hold (no_pause_freeze presents state 3 to
-     Game::Update); measured, cause in re/NOTES.md "(open) No mouse cursor"; bisect what re-captures the mouse.
+  2. In-game pause menu: no cursor, and the player's input is live behind it (mouse-look, movement). One cause: our
+     pause hold (no_pause_freeze presents state 3 to Game::Update). Measured + two failed fixes in re/NOTES.md
+     "(open) No mouse cursor" / "(open, 2026-11-22) The same pause hold"; next: patch only the world-freeze "paused"
+     tests (like the 3 render ones) and drop the state-3 hold.
   3. Cosmetic: the nickname row shows Change arrows that do nothing (UIOption with one value); RdmpMenuTitle (list
      movie top_title) is now unused (the overlay logo replaced it).
   4. Back from Options via an injected "k @UI.CANCEL*RELEASED" sometimes also reaches the scene (quit prompt); check
