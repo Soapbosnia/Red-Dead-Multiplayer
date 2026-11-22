@@ -24,5 +24,7 @@ void NetBrowserRefresh(const char* list);
 int NetBrowserPoll(NetServer* out, int max);
 void NetBrowserFavorite(const char* host, int port, const char* name, bool add);
 void NetBrowserJoin(const char* host, int port);
+// The pause menu's Disconnect: leave the server.
+void NetDisconnect();
 
 }  // namespace rdmp

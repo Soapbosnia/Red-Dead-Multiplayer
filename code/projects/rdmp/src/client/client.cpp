@@ -8,6 +8,9 @@
 
 #include <utils/safe_win32.h>
 
+#include <integrations/client/networking/engine.h>
+#include <networking/network_client.h>
+
 #include "client/client_natives.h"
 #include "client/fw_client.h"
 #include "client/frontend.h"
@@ -107,6 +110,13 @@ namespace {
             return 0;
         }
         return g_client->Connect(address ? address : "127.0.0.1", port, nickname ? nickname : "player") ? 1 : 0;
+    }
+
+    void Disconnect() {
+        auto *net = g_client ? g_client->GetNetworkingEngine() : nullptr;
+        if (auto *peer = net ? net->GetNetworkClient() : nullptr) {
+            (void)peer->Disconnect();
+        }
     }
 
     fw::Conn Update() {
@@ -378,5 +388,6 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
     out->browser_poll     = [](rdmp::fw::BrowserServer *o, int max) { return RDMP::Frontend::BrowserPoll(o, max); };
     out->browser_favorite = [](const char *host, int port, const char *name, int add) { RDMP::Frontend::BrowserFavorite(host, port, name, add != 0); };
     out->browser_connect  = [](const char *host, int port, const char *pw) { return RDMP::Frontend::BrowserConnect(host, port, pw) ? 1 : 0; };
+    out->disconnect       = &Disconnect;
     return 1;
 }

@@ -80,6 +80,63 @@ void* Serve(const std::string& content, const char* name, void* a2, void* a3, vo
     return g_open(path, a2, a3, a4);
 }
 
+// The multiplayer pause menu (PauseMenu list in PauseMenuScene.sc): the single-player items move out of the list
+// into a container that is never entered (the game's C++ still finds them by name - FUN_140628860 falls back to the
+// root "UserInterface" widget when one is missing, so they must exist), and DISCONNECT (with a confirmation) is added.
+void PatchPauseMenu(std::string& s) {
+    const size_t list = s.find("<UIList id=\"PauseMenu\"");
+    if (list == std::string::npos) {
+        Log("ui files: pause menu list not found - not patched");
+        return;
+    }
+    std::string moved;
+    for (const char* id : {"PM_Weapons", "PM_Outfits", "PM_Journal", "PM_Stats", "PM_SocialClub", "PM_Leaderboards", "PM_Load"}) {
+        const std::string open = std::string("<UILabel id=\"") + id + "\"";
+        const size_t a = s.find(open, list);
+        const size_t b = a == std::string::npos ? a : s.find("</UILabel>", a);
+        if (b == std::string::npos) continue;
+        moved += "      " + s.substr(a, b + std::strlen("</UILabel>") - a) + "\n";
+        s.erase(a, b + std::strlen("</UILabel>") - a);
+    }
+    const size_t end = s.find("</UIList>", list);
+    if (end == std::string::npos) return;
+    const std::string disconnect =
+        "<UILabel id=\"RdmpPM_Disconnect\" text=\"Common_Null\">\n"
+        "        <onfocused expr=\"Enter(PauseMenu_Main_Prompts)\"></onfocused>\n"
+        "        <transition event=\"@UI.ACCEPT*RELEASED\" consume=\"true\">\n"
+        "          <action expr=\"PlaySound('HUD_MENU_SELECT_MASTER')\"></action>\n"
+        "          <action expr=\"Enter(RdmpDisconnectConf)\"></action>\n"
+        "        </transition>\n"
+        "        <transition event=\"@UI.CANCEL*RELEASED\">\n"
+        "          <action expr=\"PlaySound('HUD_MENU_BACK_MASTER')\"></action>\n"
+        "          <action expr=\"StackPop()\"></action>\n"
+        "        </transition>\n"
+        "      </UILabel>\n    ";
+    const std::string afterList =
+        "</UIList>\n"
+        "    <UILayer id=\"RdmpPauseUnused\">\n" + moved + "    </UILayer>\n"
+        // Same box as the game's "return to main menu" (SG_Return2MainConf): Yes leaves the server and goes back.
+        "    <UIMessageBox id=\"RdmpDisconnectConf\">\n"
+        "      <data name=\"warning\"></data>\n"
+        "      <data name=\"description\" expr=\"SG_Return2MainConf\"></data>\n"
+        "      <UIPromptStrip>\n"
+        "        <UIButton text=\"Common_Yes\" icon=\"{@UI.ACCEPT}\">\n"
+        "          <transition event=\"@UI.ACCEPT*RELEASED\">\n"
+        "            <action expr=\"SendEvent('rdmp.disconnect')\"></action>\n"
+        "            <action expr=\"SendEvent('AwaitRebootTransition')\"></action>\n"
+        "            <action expr=\"FadeOut(0.5,1.0,false)\"></action>\n"
+        "            <action expr=\"Exit(RdmpDisconnectConf)\"></action>\n"
+        "          </transition>\n"
+        "        </UIButton>\n"
+        "        <UIButton text=\"Common_No\" icon=\"{@UI.CANCEL}\">\n"
+        "          <transition event=\"@UI.CANCEL*RELEASED\"><action expr=\"Exit(RdmpDisconnectConf)\"></action></transition>\n"
+        "        </UIButton>\n"
+        "      </UIPromptStrip>\n"
+        "    </UIMessageBox>";
+    s.replace(end, std::strlen("</UIList>"), disconnect + afterList);
+    Log("ui files: pause menu patched (single-player items out, Disconnect in)");
+}
+
 void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
     if (!name) return g_open(name, a2, a3, a4);
     if (g_logNames) Log("ui files: open \"%s\"", name);
@@ -113,6 +170,7 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
                      "<action expr=\"ClearStack()\"></action></transition>\n       ");
             Log("ui files: PauseMenuScene.sc patched (server browser)");
         }
+        PatchPauseMenu(s);
         return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
     }
     if (_stricmp(name, "UserInterface.sc") == 0) {
@@ -124,7 +182,22 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
             return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
         }
         s.insert(at, "<include src=\"rdmp/Main.sc\"></include>\n    ");
-        Log("ui files: UserInterface.sc patched (rdmp/Main.sc included)");
+        // Global transitions (UserInterface's own see every event). rdmp.ingame (posted when a joined world is in):
+        // the front end's title states exit and its movie unstreams (while it is loaded the game treats the pause menu
+        // as the title's: no Map), then the HUD takes the UI stack - what HudSceneOffline's onactivate does at a normal
+        // start; our front end's screens were on the stack instead, so the HUD (and its Pause handler) had no focus.
+        const char* root = "<uiobject id=\"UserInterface\" class=\"UILayer\">";
+        const size_t r = s.find(root);
+        if (r != std::string::npos) {
+            s.insert(r + std::strlen(root),
+                     "\n    <transition event=\"rdmp.ingame\">"
+                     "<action expr=\"Exit(StartScreen1)\"></action><action expr=\"Exit(StartScreen2)\"></action>"
+                     "<action expr=\"Exit(logo)\"></action><action expr=\"Exit(background)\"></action>"
+                     "<action expr=\"Exit(Startup)\"></action><action expr=\"UnstreamMovie('startscreen')\"></action>"
+                     "<action expr=\"ClearStack()\"></action>"
+                     "<action expr=\"StackPush_NoTransition(HudSceneOffline)\"></action></transition>");
+        }
+        Log("ui files: UserInterface.sc patched (rdmp/Main.sc included%s)", r != std::string::npos ? ", global transitions" : "");
         return Serve(s, name, a2, a3, a4);
     }
     if (_stricmp(name, "Boot.sc") == 0) {
@@ -203,6 +276,7 @@ std::map<std::string, std::string> g_texts = {
     {"RdmpPrompt_Join", "Join"},
     {"RdmpPrompt_Favorite", "Favorite"},
     {"RdmpPrompt_Refresh", "Refresh"},
+    {"RdmpPM_Disconnect", "DISCONNECT"},
 };
 
 // Server browser model (rows of ui/native/Browser.sc: RdmpSrv_<i> with RdmpSrvName_<i> / RdmpSrvInfo_<i>).
@@ -380,6 +454,41 @@ void ExecFile() {
             case 'b': FlashSetBool(movie, var, atoi(rest) != 0); break;
             case 's': FlashSetString(movie, var, rest); break;
             case 'e': PostUiEvent(movie); break;
+            case 'k':  // k <input event>: raise an input event like a key press, e.g. @PAUSE.PAUSE*RELEASED (FUN_1400eeb50)
+                reinterpret_cast<void (*)(uintptr_t, const char*)>(GameAddr(0x1400EEB50))(*reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8B8)), movie);
+                break;
+            case 'm': {  // m <ghidra address> [offset]: byte / dword at *(addr)+offset when offset given, else at addr
+                const uintptr_t a = GameAddr(strtoull(movie, nullptr, 16));
+                uintptr_t p = a;
+                if (var[0]) {
+                    p = *reinterpret_cast<uintptr_t*>(a);
+                    p = p ? p + strtoull(var, nullptr, 16) : 0;
+                }
+                Log("ui exec: mem %s %s -> %s", movie, var, p ? (std::to_string(*reinterpret_cast<uint8_t*>(p)) + " / " + std::to_string(*reinterpret_cast<uint32_t*>(p))).c_str() : "null");
+                continue;
+            }
+            case 'a':    // a <widget>...: is each one active (vt+0xd8(w, 1))
+            case 'n': {  // n <widget>: Enter it (vt+0x160(w, 1), the Enter action)
+                const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
+                auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
+                std::string names = std::string(movie) + " " + var + " " + rest;
+                char report[512] = "";
+                size_t pos = 0;
+                while (pos < names.size()) {
+                    const size_t end = names.find(' ', pos);
+                    const std::string id = names.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+                    pos = end == std::string::npos ? names.size() : end + 1;
+                    if (id.empty()) continue;
+                    const uintptr_t w = root ? find(root, id.c_str()) : 0;
+                    if (!w) { strcat_s(report, (id + "=? ").c_str()); continue; }
+                    const uintptr_t vt = *reinterpret_cast<uintptr_t*>(w);
+                    if (kind == 'n') reinterpret_cast<void (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(vt + 0x160))(w, 1);
+                    const bool on = reinterpret_cast<bool (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(vt + 0xd8))(w, 1);
+                    strcat_s(report, (id + (on ? "=on " : "=off ")).c_str());
+                }
+                Log("ui exec: %s -> %s", kind == 'n' ? "enter" : "active", report);
+                continue;
+            }
             default: continue;
         }
         Log("ui exec: %s", line);
@@ -389,11 +498,13 @@ void ExecFile() {
 
 }  // namespace
 
-void UiFilesFrame() {
+void UiFilesFrame(bool frontEnd) {
     if (!g_open) return;
     if (g_exec) ExecFile();
-    NetTitleFrame();
-    PollBrowser();
+    if (frontEnd) {
+        NetTitleFrame();
+        PollBrowser();
+    }
     const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
     if (!root) return;
     auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
@@ -424,6 +535,8 @@ void UiFilesOnEvent(const char* name) {
         Log("ui: join %s:%d (%s)", g_rows[i].host.c_str(), g_rows[i].port, g_rows[i].name.c_str());
         NetBrowserJoin(g_rows[i].host.c_str(), g_rows[i].port);
         PostUiEvent("rdmp.joining");  // our menus close (PauseMenuScene.sc patch), the world load takes over
+    } else if (ev == "disconnect") {
+        NetDisconnect();
     } else if (ev.rfind("favorite.", 0) == 0) {
         const int i = atoi(ev.c_str() + 9);
         if (i < 0 || i >= static_cast<int>(g_rows.size()) || g_rows[i].host.empty()) return;

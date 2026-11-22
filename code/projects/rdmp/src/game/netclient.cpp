@@ -589,6 +589,12 @@ void NetBrowserFavorite(const char* host, int port, const char* name, bool add) 
     if (g_fwUp) g_api.browser_favorite(host, port, name, add ? 1 : 0);
 }
 
+void NetDisconnect() {
+    if (!g_fwUp) return;
+    Log("net: disconnecting (pause menu)");
+    g_api.disconnect();
+}
+
 void NetBrowserJoin(const char* host, int port) {
     strcpy_s(g_joinHost, host);
     g_joinPort = port;

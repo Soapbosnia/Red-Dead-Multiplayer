@@ -253,7 +253,7 @@ void MapTrace() {
 
 // Our boot sequence, run once per frame before Game::Update.
 void BootStep() {
-    if (g_titleMode && g_bootPhase < 2) UiFilesFrame();
+    if (g_titleMode) UiFilesFrame(g_bootPhase < 2);
     if (g_mapTrace && g_bootPhase >= 5) MapTrace();
     if (g_bootPhase == 0 && SignedIn()) {
         // The boot gate in Game::Update (FUN_1401f5820): (legals controller == 0 || done) && uiMgr+0x78. With no
@@ -329,6 +329,7 @@ void BootStep() {
         }
         g_bootPhase = 5;
         Log("gameflow: in game, HUD on (%llu ms after our loop started)", GetTickCount64() - g_runStartMs);
+        if (g_titleMode) PostUiEvent("rdmp.ingame");  // the HUD takes the UI stack from our front end (uifiles.cpp)
     }
 }
 

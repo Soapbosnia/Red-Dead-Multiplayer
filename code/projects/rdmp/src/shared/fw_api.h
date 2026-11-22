@@ -19,7 +19,8 @@ namespace rdmp::fw {
 // v8: PlayerState carries the controller state (controls[30]).
 // v9: vehicles (get_vehicles, set_vehicle, get_assigned_vehicle); PlayerState::vehicle.
 // v10: Host get_game_options / set_game_options (the game's own settings, shared/game_options.h).
-// v11: server browser for the native menus (browser_refresh / browser_poll / browser_favorite / browser_connect).
+// v11: server browser for the native menus (browser_refresh / browser_poll / browser_favorite / browser_connect);
+//      disconnect.
 constexpr uint32_t kApiVersion = 11;
 constexpr int kResultSlots = 4;
 
@@ -188,6 +189,7 @@ struct Api {
     int (*browser_poll)(BrowserServer* out, int max);
     void (*browser_favorite)(const char* host, int port, const char* name, int add);
     int (*browser_connect)(const char* host, int port, const char* password);
+    void (*disconnect)();  // leave the server (the pause menu's Disconnect)
 };
 
 }  // namespace rdmp::fw
