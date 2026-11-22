@@ -15,6 +15,7 @@
 #include <deque>
 #include <string>
 
+#include "events.h"
 #include "log.h"
 #include "patch.h"
 
@@ -56,6 +57,15 @@ std::string ReadStream(void* stream) {
     }
     reinterpret_cast<void (*)(void*)>(GameAddr(0x1400C7E90))(stream);
     return out;
+}
+
+// Replaces the first `from` that follows `anchor`.
+bool ReplaceAfter(std::string& s, const char* anchor, const char* from, const char* to) {
+    const size_t a = s.find(anchor);
+    const size_t at = a == std::string::npos ? a : s.find(from, a);
+    if (at == std::string::npos) return false;
+    s.replace(at, std::strlen(from), to);
+    return true;
 }
 
 void* Serve(const std::string& content, const char* name, void* a2, void* a3, void* a4) {
@@ -103,6 +113,21 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
             s.replace(from, end + std::strlen("</UIScrollableList>") - from, ours);
             Log("ui files: Boot.sc patched (main menu)");
         }
+        // One main menu: the boot goes straight to it (StartScreen2) instead of the "press Play" title, and its Back
+        // (Esc) asks to quit.
+        if (ReplaceAfter(s, "<transition event=\"benchmarkComplete\"", "target=\"StartScreen1\"", "target=\"StartScreen2\""))
+            Log("ui files: Boot.sc patched (boot to the main menu)");
+        const char* stripTag = "<UIPromptStrip id=\"StartScreen2PromptStrip\"";
+        const size_t strip = s.find(stripTag);
+        const size_t t0 = strip == std::string::npos ? strip : s.find("<transition event=\"@UI.CANCEL*RELEASED\"", strip);
+        const size_t t1 = t0 == std::string::npos ? t0 : s.find("</transition>", t0);
+        if (t1 != std::string::npos) {
+            s.replace(t0, t1 + std::strlen("</transition>") - t0,
+                      "<transition event=\"@UI.CANCEL*RELEASED\" consume=\"true\"><action expr=\"Enter(QuitGame)\"></action></transition>");
+            ReplaceAfter(s, stripTag, "text=\"Common_Back\"", "text=\"Common_Quit\"");
+            ReplaceAfter(s, stripTag, "text=\"Common_Play\"", "text=\"Common_Select\"");
+            Log("ui files: Boot.sc patched (main menu Esc = quit)");
+        }
         return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
     }
     return g_open(name, a2, a3, a4);
@@ -144,12 +169,87 @@ const Text kTexts[] = {
     {"RdmpMenu_Browser", "Server Browser"},
     {"RdmpMenu_Direct", "Direct Connect"},
     {"RdmpMenu_MpSettings", "Multiplayer Settings"},
+    {"logo", "RED DEAD MULTIPLAYER"},  // the title logo is a text field in the game's "Redemption" font
 };
+
+// Flash variables of a UI movie (what SetFlashInt/Float/Bool/String do, FUN_1400ed8a0..FUN_1400eda00): movie wrapper =
+// ui list *0x142C45610 entry FUN_14011a000(list, movie); slot = FUN_140116610(wrapper, path): +0 value, +8 string
+// hash, +0x10 type (1 string, 2 bool, 4 float); ints go through FUN_1400f6b30(movie, path, value).
+uintptr_t FlashSlot(const char* movie, const char* path) {
+    const uintptr_t list = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45610));
+    if (!list) return 0;
+    const int idx = reinterpret_cast<char (*)(uintptr_t, const char*)>(GameAddr(0x14011A000))(list, movie);
+    if (idx < 0 || idx >= *reinterpret_cast<int*>(list + 0x180)) return 0;
+    const uintptr_t wrapper = *reinterpret_cast<uintptr_t*>(list + 0x30 + idx * 8ULL);
+    return wrapper ? reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x140116610))(wrapper, path) : 0;
+}
+std::deque<std::string> g_flashStrings;
+void FlashSetString(const char* movie, const char* path, const std::string& text) {
+    const uintptr_t slot = FlashSlot(movie, path);
+    if (!slot) return;
+    g_flashStrings.push_back(text);
+    const char* v = g_flashStrings.back().c_str();
+    *reinterpret_cast<const char**>(slot) = v;
+    *reinterpret_cast<uint32_t*>(slot + 0x10) = 1;
+    const uint32_t h = reinterpret_cast<uint32_t (*)(const char*, int)>(GameAddr(0x1400C7510))(v, 0);
+    *reinterpret_cast<uint32_t*>(slot + 8) = ((h * 9) >> 11 ^ h * 9) * 0x8001;
+}
+void FlashSetInt(const char* movie, const char* path, int v) {
+    reinterpret_cast<void (*)(const char*, const char*, int)>(GameAddr(0x1400F6B30))(movie, path, v);
+}
+void FlashSetFloat(const char* movie, const char* path, float v) {
+    if (const uintptr_t slot = FlashSlot(movie, path)) {
+        *reinterpret_cast<float*>(slot) = v;
+        *reinterpret_cast<uint32_t*>(slot + 0x10) = 4;
+    }
+}
+void FlashSetBool(const char* movie, const char* path, bool v) {
+    if (const uintptr_t slot = FlashSlot(movie, path)) {
+        *reinterpret_cast<uint8_t*>(slot) = v ? 1 : 0;
+        *reinterpret_cast<uint32_t*>(slot + 0x10) = 2;
+    }
+}
+
+// Debug ([debug] ui_exec=1): the lines of <rdmp.ini folder>\ui_exec.txt run each time the file changes:
+//   i|f|b <movie> <path> <value>     s <movie> <path> <text...>     e <ui event>
+bool g_exec = false;
+wchar_t g_execPath[MAX_PATH] = L"";
+void ExecFile() {
+    static ULONGLONG lastCheck = 0;
+    static FILETIME lastWrite = {};
+    if (GetTickCount64() - lastCheck < 300) return;
+    lastCheck = GetTickCount64();
+    WIN32_FILE_ATTRIBUTE_DATA a;
+    if (!GetFileAttributesExW(g_execPath, GetFileExInfoStandard, &a)) return;
+    if (CompareFileTime(&a.ftLastWriteTime, &lastWrite) == 0) return;
+    lastWrite = a.ftLastWriteTime;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, g_execPath, L"r") != 0 || !f) return;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char kind = 0, movie[64] = {}, var[192] = {};
+        int used = 0;
+        if (sscanf_s(line, " %c %63s %191s %n", &kind, 1, movie, 64, var, 192, &used) < 2) continue;
+        const char* rest = used ? line + used : "";
+        switch (kind) {
+            case 'i': FlashSetInt(movie, var, atoi(rest)); break;
+            case 'f': FlashSetFloat(movie, var, static_cast<float>(atof(rest))); break;
+            case 'b': FlashSetBool(movie, var, atoi(rest) != 0); break;
+            case 's': FlashSetString(movie, var, rest); break;
+            case 'e': PostUiEvent(movie); break;
+            default: continue;
+        }
+        Log("ui exec: %s", line);
+    }
+    fclose(f);
+}
 
 }  // namespace
 
 void UiFilesFrame() {
     if (!g_open) return;
+    if (g_exec) ExecFile();
     const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
     if (!root) return;
     auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
@@ -167,6 +267,9 @@ void UiFilesFrame() {
 void InstallUiFiles(const wchar_t* iniPath) {
     if (!GetPrivateProfileIntW(L"game", L"title_screen", 0, iniPath)) return;
     g_logNames = GetPrivateProfileIntW(L"debug", L"ui_file_log", 0, iniPath) != 0;
+    g_exec = GetPrivateProfileIntW(L"debug", L"ui_exec", 0, iniPath) != 0;
+    wcscpy_s(g_execPath, iniPath);
+    if (wchar_t* slash = wcsrchr(g_execPath, L'\\')) wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - g_execPath), L"ui_exec.txt");
     wcscpy_s(g_dir, iniPath);
     if (wchar_t* slash = wcsrchr(g_dir, L'\\')) wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - g_dir), L"ui\\native\\");
     Log("ui files: %s (our menus from %S)", InstallOpenHook() ? "hook installed" : "hook FAILED (bytes mismatch)", g_dir);
