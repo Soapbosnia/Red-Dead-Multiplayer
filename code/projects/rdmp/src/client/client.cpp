@@ -374,5 +374,9 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
     out->get_vehicles = &GetVehicles;
     out->set_vehicle  = &SetVehicle;
     out->get_assigned_vehicle = &GetAssignedVehicle;
+    out->browser_refresh  = [](const char *list) { RDMP::Frontend::BrowserRefresh(list); };
+    out->browser_poll     = [](rdmp::fw::BrowserServer *o, int max) { return RDMP::Frontend::BrowserPoll(o, max); };
+    out->browser_favorite = [](const char *host, int port, const char *name, int add) { RDMP::Frontend::BrowserFavorite(host, port, name, add != 0); };
+    out->browser_connect  = [](const char *host, int port, const char *pw) { return RDMP::Frontend::BrowserConnect(host, port, pw) ? 1 : 0; };
     return 1;
 }

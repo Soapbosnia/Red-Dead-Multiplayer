@@ -1977,6 +1977,7 @@ void SkipMenus(const char* name) {
 void SandboxOnUiEvent(const char* name) {
     GameflowOnUiEvent(name);
     UiDumpOnEvent(name);
+    UiFilesOnEvent(name);
     if (!g_enabled) return;
     if (g_skipMenus) SkipMenus(name);
     if (g_inSinglePlayer && strcmp(name, "InTransitionComplete") == 0) {  // debug: [debug] hide_scene=<UI scene name>

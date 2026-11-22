@@ -19,7 +19,8 @@ namespace rdmp::fw {
 // v8: PlayerState carries the controller state (controls[30]).
 // v9: vehicles (get_vehicles, set_vehicle, get_assigned_vehicle); PlayerState::vehicle.
 // v10: Host get_game_options / set_game_options (the game's own settings, shared/game_options.h).
-constexpr uint32_t kApiVersion = 10;
+// v11: server browser for the native menus (browser_refresh / browser_poll / browser_favorite / browser_connect).
+constexpr uint32_t kApiVersion = 11;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -112,6 +113,19 @@ struct Vehicle {
     int32_t mine = 0;           // 1 = we own it (we ride it): we write its state with set_vehicle
 };
 
+// One server browser answer (native menus): a server of a browser tab, as asked (online = 0: it did not answer).
+struct BrowserServer {
+    char list[16] = {};   // "internet", "local", "favorites", "recent"
+    char host[64] = {};
+    int32_t port = 0;
+    int32_t online = 0;
+    char name[96] = {};
+    int32_t players = 0, maxPlayers = 0;
+    int32_t password = 0;
+    int32_t pingMs = -1;
+    int32_t favorite = 0;  // in the favourites list
+};
+
 using LogFn = void (*)(const char* line);
 
 // What rdmp.dll offers the client DLL. Every function runs synchronously on the caller's thread, which is the game's
@@ -168,6 +182,12 @@ struct Api {
     // The state of the vehicle we ride and own (ignored for any other).
     void (*set_vehicle)(uint64_t netId, const float pos[3], float heading, float speed, const net::MoveInput* input);
     uint64_t (*get_assigned_vehicle)();          // the vehicle the server has our avatar on, 0 = none
+    // Server browser (works before any connection): ask a tab's servers again; take the answers that arrived (each
+    // server of the tab once, as it answers); add / remove a favourite; connect (remembered under "recent").
+    void (*browser_refresh)(const char* list);
+    int (*browser_poll)(BrowserServer* out, int max);
+    void (*browser_favorite)(const char* host, int port, const char* name, int add);
+    int (*browser_connect)(const char* host, int port, const char* password);
 };
 
 }  // namespace rdmp::fw

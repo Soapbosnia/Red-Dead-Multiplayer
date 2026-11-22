@@ -28,6 +28,7 @@
 #include "puppet_player.h"
 #include "remote_timeline.h"
 #include "vehicles.h"
+#include "gameflow.h"
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
@@ -219,13 +220,22 @@ void FwStep() {
 FILE* g_trace = nullptr;
 double TraceMs() { return NowMs(); }
 
+bool g_fwStarted = false;
+// Native menus: the server picked in the browser, connected to once the world is up.
+char g_joinHost[64] = "";
+int g_joinPort = 0;
+
 void NetFrame(float /*gameTime*/) {
     // Connect as soon as the world is up, even with no player yet: in script mode the player is created
     // by the server's spawnPlayer call, so waiting for one would deadlock the join.
-    static bool started = false;
-    if (!started && IsWorldReady()) {
-        started = true;
+    if (!g_fwStarted && IsWorldReady()) {
+        g_fwStarted = true;
         g_fwUp = FwStart();
+    }
+    if (g_fwUp && g_joinHost[0] && IsWorldReady()) {
+        Log("net: joining %s:%d (picked in the server browser)", g_joinHost, g_joinPort);
+        g_api.browser_connect(g_joinHost, g_joinPort, "");
+        g_joinHost[0] = 0;
     }
 
     Vec3 pos{};
@@ -544,6 +554,46 @@ void StartNetClient(const wchar_t* ini) {
     AddFrameCallback(&NetFrame);  // starts the framework client once the world is ready
     Log("net: enabled (server %s:%u, name \"%s\", client %ls, interp %u ms, stream in %.0f / out %.0f m)", g_host, g_port,
         g_name, g_fwDir, g_interpMs, g_streamIn, g_streamOut);
+}
+
+void NetTitleFrame() {
+    if (!g_fwStarted) {
+        g_fwStarted = true;
+        g_fwUp = FwStart();
+        Log("net: framework client started on the front end: %s", g_fwUp ? "ok" : "FAILED");
+    }
+    if (g_fwUp) g_api.update();
+}
+
+void NetBrowserRefresh(const char* list) {
+    if (g_fwUp) g_api.browser_refresh(list);
+}
+
+int NetBrowserPoll(NetServer* out, int max) {
+    if (!g_fwUp) return 0;
+    fw::BrowserServer buf[32];
+    const int n = g_api.browser_poll(buf, max < 32 ? max : 32);
+    for (int i = 0; i < n; ++i) {
+        NetServer& o = out[i];
+        const fw::BrowserServer& b = buf[i];
+        strcpy_s(o.list, b.list);
+        strcpy_s(o.host, b.host);
+        strcpy_s(o.name, b.name);
+        o.port = b.port, o.online = b.online, o.players = b.players, o.maxPlayers = b.maxPlayers;
+        o.password = b.password, o.pingMs = b.pingMs, o.favorite = b.favorite;
+    }
+    return n;
+}
+
+void NetBrowserFavorite(const char* host, int port, const char* name, bool add) {
+    if (g_fwUp) g_api.browser_favorite(host, port, name, add ? 1 : 0);
+}
+
+void NetBrowserJoin(const char* host, int port) {
+    strcpy_s(g_joinHost, host);
+    g_joinPort = port;
+    GameflowRequestWorldLoad();
+    Log("net: join %s:%d requested from the server browser", host, port);
 }
 
 bool RemotePuppetPosition(unsigned long long netId, float out[3]) {

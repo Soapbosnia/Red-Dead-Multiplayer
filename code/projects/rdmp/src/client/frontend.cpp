@@ -18,6 +18,7 @@
 #include "shared/game_options.h"
 
 #include <algorithm>
+#include <deque>
 #include <cstring>
 #include <set>
 #include <filesystem>
@@ -39,6 +40,7 @@ namespace RDMP::Frontend {
         std::filesystem::path g_binDir;
         std::wstring g_ini;
         json g_servers = {{"favorites", json::array()}, {"recent", json::array()}};
+        std::deque<ServerQuery::Info> g_native; // server browser answers for the native menus (BrowserPoll)
 
         // What the menu is doing with the connection.
         std::string g_pendingAddress; // "host:port" while connecting from the menu
@@ -385,19 +387,27 @@ namespace RDMP::Frontend {
     }
 
     void Frame() {
-        if (!g_client || g_failed || !Overlay::Ready()) {
+        if (!g_client || g_failed) {
             return;
         }
-        if (!g_viewId) {
-            BringUp();
-            return;
-        }
-        // Track the window size.
-        float w, h;
-        Overlay::ScreenSize(w, h);
-        if (w > 0 && h > 0 && (w != g_viewW || h != g_viewH)) {
-            g_viewW = w, g_viewH = h;
-            g_client->GetWebManager()->Resize(static_cast<int>(w), static_cast<int>(h));
+        // [client] html_menu=0: the game's own front end shows our menus (native); no web view, the server browser
+        // answers go to BrowserPoll only.
+        const bool html = IniInt(L"client", L"html_menu", 1) != 0;
+        if (html) {
+            if (!Overlay::Ready()) {
+                return;
+            }
+            if (!g_viewId) {
+                BringUp();
+                return;
+            }
+            // Track the window size.
+            float w, h;
+            Overlay::ScreenSize(w, h);
+            if (w > 0 && h > 0 && (w != g_viewW || h != g_viewH)) {
+                g_viewW = w, g_viewH = h;
+                g_client->GetWebManager()->Resize(static_cast<int>(w), static_cast<int>(h));
+            }
         }
 
         // Shown while not in a session.
@@ -415,9 +425,14 @@ namespace RDMP::Frontend {
             g_pendingAddress.clear();
         }
         g_wasConnected = connected;
-        SetVisible(!connected && IniInt(L"client", L"html_menu", 1) != 0);
+        if (html) {
+            SetVisible(!connected);
+        }
 
         for (const auto &info : ServerQuery::Poll()) {
+            if (g_native.size() < 1024) {
+                g_native.push_back(info);
+            }
             Send("server", {{"list", info.list}, {"host", info.host}, {"port", info.port}, {"online", info.online}, {"name", info.name},
                             {"version", info.version}, {"players", info.players}, {"maxPlayers", info.maxPlayers},
                             {"password", info.password}, {"ping", info.pingMs}});
@@ -434,5 +449,58 @@ namespace RDMP::Frontend {
 
     void Shutdown() {
         ServerQuery::Shutdown();
+    }
+
+    void BrowserRefresh(const char *list) {
+        if (list) {
+            Refresh(list);
+        }
+    }
+
+    int BrowserPoll(rdmp::fw::BrowserServer *out, int max) {
+        int n = 0;
+        while (n < max && !g_native.empty()) {
+            const ServerQuery::Info &info = g_native.front();
+            rdmp::fw::BrowserServer &o    = out[n++];
+            o                             = {};
+            strncpy_s(o.list, info.list.c_str(), _TRUNCATE);
+            strncpy_s(o.host, info.host.c_str(), _TRUNCATE);
+            strncpy_s(o.name, info.name.c_str(), _TRUNCATE);
+            o.port       = info.port;
+            o.online     = info.online ? 1 : 0;
+            o.players    = info.players;
+            o.maxPlayers = info.maxPlayers;
+            o.password   = info.password ? 1 : 0;
+            o.pingMs     = info.pingMs;
+            for (const auto &e : g_servers["favorites"]) {
+                o.favorite |= SameServer(e, info.host, info.port) ? 1 : 0;
+            }
+            g_native.pop_front();
+        }
+        return n;
+    }
+
+    void BrowserFavorite(const char *host, int port, const char *name, bool add) {
+        if (!host) {
+            return;
+        }
+        if (add) {
+            Remember("favorites", host, port, name ? name : "", 200);
+        }
+        else {
+            auto &arr = g_servers["favorites"];
+            for (auto it = arr.begin(); it != arr.end();) {
+                it = SameServer(*it, host, port) ? arr.erase(it) : it + 1;
+            }
+            SaveServers();
+        }
+    }
+
+    bool BrowserConnect(const char *host, int port, const char *password) {
+        if (!host || !g_client) {
+            return false;
+        }
+        Connect(host, port, password ? password : "");
+        return !g_pendingAddress.empty();
     }
 } // namespace RDMP::Frontend

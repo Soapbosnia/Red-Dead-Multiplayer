@@ -12,11 +12,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <deque>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "events.h"
 #include "log.h"
+#include "netclient.h"
 #include "patch.h"
 
 namespace rdmp {
@@ -87,6 +91,29 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
         }
         Log("ui files: serving %s (%zu bytes)", name, s.size());
         return Serve(s, name, a2, a3, a4);
+    }
+    if (_stricmp(name, "pausemenu/PauseMenuScene.sc") == 0) {
+        // The server browser lives in the pause scene like the game's Options: include it, and open it on
+        // "rdmp.openBrowser" (the main menu pushes the scene and sends that event).
+        std::string s = ReadStream(g_open(name, a2, a3, a4));
+        const char* inc = "<include src=\"Options.sc.xml\"></include>";
+        const size_t at = s.find(inc);
+        const char* pauseT = "<transition event=\"@PAUSE.PAUSE*RELEASED\"";
+        const size_t t = s.find(pauseT);
+        if (at == std::string::npos || t == std::string::npos) {
+            Log("ui files: PauseMenuScene.sc anchors not found - not patched");
+        } else {
+            s.insert(at + std::strlen(inc), "\n    <include src=\"rdmp/Browser.sc\"></include>");
+            s.insert(t,
+                     "<transition event=\"rdmp.openBrowser\" consume=\"true\">"
+                     "<action expr=\"Exit(PauseMenu_Main_Prompts)\"></action><action expr=\"unfocus(PauseMenu)\"></action>"
+                     "<action expr=\"Enter(RdmpBrowser)\"></action><action expr=\"focus(RdmpBrowser)\"></action></transition>\n       "
+                     // joining: our menus close, the world load takes over
+                     "<transition event=\"rdmp.joining\" consume=\"true\"><action expr=\"Exit(RdmpBrowser)\"></action>"
+                     "<action expr=\"ClearStack()\"></action></transition>\n       ");
+            Log("ui files: PauseMenuScene.sc patched (server browser)");
+        }
+        return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
     }
     if (_stricmp(name, "UserInterface.sc") == 0) {
         std::string s = ReadStream(g_open(name, a2, a3, a4));
@@ -164,12 +191,128 @@ bool InstallOpenHook() {
 
 // Label texts of our menus (UILabel = text widget vt 0x141C61950: literal text = +0x80 "key dirty" 0, +0x88 char*,
 // then vt+0x3d0 to re-layout). Widgets by id: FUN_1400ef100(*0x142AAC8C0, id).
-struct Text { const char* id; const char* text; };
-const Text kTexts[] = {
+// g_texts holds every text we put on screen (id -> text); the map's strings are what the widgets point at.
+std::map<std::string, std::string> g_texts = {
     {"RdmpMenu_Browser", "Server Browser"},
     {"RdmpMenu_Direct", "Direct Connect"},
     {"RdmpMenu_MpSettings", "Multiplayer Settings"},
+    {"RdmpTab_Internet", "INTERNET"},
+    {"RdmpTab_Local", "LOCAL"},
+    {"RdmpTab_Favorites", "FAVORITES"},
+    {"RdmpTab_Recent", "RECENT"},
+    {"RdmpPrompt_Join", "Join"},
+    {"RdmpPrompt_Favorite", "Favorite"},
+    {"RdmpPrompt_Refresh", "Refresh"},
 };
+
+// Server browser model (rows of ui/native/Browser.sc: RdmpSrv_<i> with RdmpSrvName_<i> / RdmpSrvInfo_<i>).
+constexpr int kBrowserRows = 24;
+struct BrowserRow { std::string name, info, host; int port = 0; bool favorite = false; };
+std::vector<BrowserRow> g_rows;
+std::string g_tab = "internet";
+int g_shownRows = -1;  // rows currently visible (-1 = not applied yet)
+std::map<std::string, std::vector<NetServer>> g_lists;  // answers per browser tab (from the client's server query)
+bool g_searching = false;                              // the current tab was just asked, nothing back yet
+ULONGLONG g_searchStart = 0;
+
+// Browser rows: show as many as there are servers (at least one, for the "none" line), hide the rest
+// (FUN_1400fe810(widget, hide) = the hide flag 0x800 + parent re-layout). Must happen before the list activates: the
+// scroll list takes its items when activated (our rdmp.* events arrive synchronously, before the next action runs).
+void ApplyBrowserRows() {
+    const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
+    if (!root) return;
+    auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
+    const int want = (std::max)(1, static_cast<int>(g_rows.size()));
+    if (g_shownRows == want) return;
+    int applied = 0;
+    for (int i = 0; i < kBrowserRows; ++i) {
+        const uintptr_t row = find(root, ("RdmpSrv_" + std::to_string(i)).c_str());
+        if (!row) continue;
+        reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810))(row, i >= want ? 1 : 0);
+        ++applied;
+    }
+    if (applied) {
+        // Rows that change while the list is up: the scroll list takes its items when activated, so activate it again
+        // (Deactivate vt+0x100, Activate vt+0xf8 - what the Deactivate / Activate actions call).
+        if (g_shownRows >= 0) {
+            if (const uintptr_t list = find(root, "RdmpServerList")) {
+                const uintptr_t vt = *reinterpret_cast<uintptr_t*>(list);
+                reinterpret_cast<void (*)(uintptr_t)>(*reinterpret_cast<uintptr_t*>(vt + 0x100))(list);
+                reinterpret_cast<void (*)(uintptr_t)>(*reinterpret_cast<uintptr_t*>(vt + 0xf8))(list);
+            }
+        }
+        g_shownRows = want;
+    }
+}
+
+// The current tab's rows from the answers: online servers first (most players first), then the ones that did not
+// answer (favourites / recents that are down).
+void RenderBrowser() {
+    std::vector<NetServer> list = g_lists[g_tab];
+    std::stable_sort(list.begin(), list.end(), [](const NetServer& a, const NetServer& b) {
+        if (a.online != b.online) return a.online > b.online;
+        return a.players > b.players;
+    });
+    g_rows.clear();
+    for (const NetServer& s : list) {
+        if (static_cast<int>(g_rows.size()) >= kBrowserRows) break;
+        if (g_tab == "local" && !s.online) continue;  // the local scan asks ports nobody serves
+        BrowserRow r;
+        r.host = s.host, r.port = s.port, r.favorite = s.favorite != 0;
+        r.name = s.name[0] ? s.name : std::string(s.host) + ":" + std::to_string(s.port);
+        if (s.favorite && g_tab != "favorites") r.name = "* " + r.name;
+        char info[64];
+        if (s.online) sprintf_s(info, "%s%d / %d     %d ms", s.password ? "locked   " : "", s.players, s.maxPlayers, s.pingMs);
+        else strcpy_s(info, "offline");
+        r.info = info;
+        g_rows.push_back(r);
+    }
+    const char* header = g_tab == "internet" ? "INTERNET SERVERS" : g_tab == "local" ? "LOCAL SERVERS" : g_tab == "favorites" ? "FAVORITES" : "RECENT";
+    g_texts["RdmpHeader"] = header;
+    for (int i = 0; i < kBrowserRows; ++i) {
+        g_texts["RdmpSrvName_" + std::to_string(i)] = i < static_cast<int>(g_rows.size()) ? g_rows[i].name : "";
+        g_texts["RdmpSrvInfo_" + std::to_string(i)] = i < static_cast<int>(g_rows.size()) ? g_rows[i].info : "";
+    }
+    if (g_rows.empty()) {
+        const bool searching = g_searching && GetTickCount64() - g_searchStart < 6000;
+        g_texts["RdmpSrvName_0"] = searching ? "Searching for servers..." :
+                                   g_tab == "favorites" ? "No favorites yet. Press the favourite key on a server to add it." :
+                                   g_tab == "recent" ? "No recent servers." : "No servers found.";
+    }
+    ApplyBrowserRows();
+}
+
+void SetBrowserTab(const std::string& tab) {
+    g_tab = tab;
+    g_lists[tab].clear();
+    g_searching = true;
+    g_searchStart = GetTickCount64();
+    NetBrowserRefresh(tab.c_str());
+    RenderBrowser();
+}
+
+// Answers that arrived from the client's server query; re-renders when the current tab got some.
+void PollBrowser() {
+    NetServer buf[32];
+    bool changed = false;
+    int n;
+    while ((n = NetBrowserPoll(buf, 32)) > 0) {
+        for (int i = 0; i < n; ++i) {
+            auto& list = g_lists[buf[i].list];
+            auto it = std::find_if(list.begin(), list.end(), [&](const NetServer& s) {
+                return s.port == buf[i].port && std::strcmp(s.host, buf[i].host) == 0;
+            });
+            if (it != list.end()) *it = buf[i];
+            else list.push_back(buf[i]);
+            changed |= g_tab == buf[i].list;
+        }
+    }
+    static bool wasSearching = false;
+    if (changed) g_searching = false;
+    const bool searchOver = g_searching && GetTickCount64() - g_searchStart >= 6000;
+    if (changed || (searchOver && !wasSearching)) RenderBrowser();
+    wasSearching = searchOver;
+}
 
 // Flash variables of a UI movie (what SetFlashInt/Float/Bool/String do, FUN_1400ed8a0..FUN_1400eda00): movie wrapper =
 // ui list *0x142C45610 entry FUN_14011a000(list, movie); slot = FUN_140116610(wrapper, path): +0 value, +8 string
@@ -249,17 +392,44 @@ void ExecFile() {
 void UiFilesFrame() {
     if (!g_open) return;
     if (g_exec) ExecFile();
+    NetTitleFrame();
+    PollBrowser();
     const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
     if (!root) return;
     auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
     const uintptr_t textVt = GameAddr(0x141C61950);
-    for (const Text& t : kTexts) {
-        const uintptr_t w = find(root, t.id);
+    const uintptr_t buttonVt = GameAddr(0x141C64F78);  // UIButton: its text is the label at +0x90
+    for (const auto& [id, text] : g_texts) {
+        uintptr_t w = find(root, id.c_str());
+        if (w && *reinterpret_cast<uintptr_t*>(w) == buttonVt) w = *reinterpret_cast<uintptr_t*>(w + 0x90);
         if (!w || *reinterpret_cast<uintptr_t*>(w) != textVt) continue;
-        if (*reinterpret_cast<uint8_t*>(w + 0x80) == 0 && *reinterpret_cast<const char**>(w + 0x88) == t.text) continue;
+        if (*reinterpret_cast<uint8_t*>(w + 0x80) == 0 && *reinterpret_cast<const char**>(w + 0x88) == text.c_str()) continue;
         *reinterpret_cast<uint8_t*>(w + 0x80) = 0;
-        *reinterpret_cast<const char**>(w + 0x88) = t.text;
+        *reinterpret_cast<const char**>(w + 0x88) = text.c_str();
         reinterpret_cast<void (*)(uintptr_t)>(*reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(w) + 0x3d0))(w);
+    }
+    ApplyBrowserRows();
+}
+
+void UiFilesOnEvent(const char* name) {
+    if (!g_open || !name || std::strncmp(name, "rdmp.", 5) != 0) return;
+    const std::string ev = name + 5;
+    if (ev.rfind("tab.", 0) == 0) {
+        SetBrowserTab(ev.substr(4));
+    } else if (ev == "browser.open" || ev == "refresh") {
+        SetBrowserTab(g_tab);
+    } else if (ev.rfind("join.", 0) == 0) {
+        const int i = atoi(ev.c_str() + 5);
+        if (i < 0 || i >= static_cast<int>(g_rows.size()) || g_rows[i].host.empty()) return;
+        Log("ui: join %s:%d (%s)", g_rows[i].host.c_str(), g_rows[i].port, g_rows[i].name.c_str());
+        NetBrowserJoin(g_rows[i].host.c_str(), g_rows[i].port);
+        PostUiEvent("rdmp.joining");  // our menus close (PauseMenuScene.sc patch), the world load takes over
+    } else if (ev.rfind("favorite.", 0) == 0) {
+        const int i = atoi(ev.c_str() + 9);
+        if (i < 0 || i >= static_cast<int>(g_rows.size()) || g_rows[i].host.empty()) return;
+        NetBrowserFavorite(g_rows[i].host.c_str(), g_rows[i].port, g_rows[i].name.c_str(), !g_rows[i].favorite);
+        Log("ui: %s favourites: %s:%d", g_rows[i].favorite ? "removed from" : "added to", g_rows[i].host.c_str(), g_rows[i].port);
+        SetBrowserTab(g_tab);
     }
 }
 

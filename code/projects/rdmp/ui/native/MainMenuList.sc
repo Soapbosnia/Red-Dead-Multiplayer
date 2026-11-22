@@ -3,7 +3,9 @@
           <UILabel id="RdmpMenu_Browser" text="Common_Null" icon="{@UI.ACCEPT}" value="5592405">
             <transition event="@UI.ACCEPT*RELEASED">
               <action expr="PlaySound('HUD_MENU_SELECT_MASTER')"></action>
-              <action expr="SendEvent('rdmp.browser')"></action>
+              <action expr="StackPush(PauseMenuScene)"></action>
+              <action expr="MomentarilyDisableInput(0.25)"></action>
+              <action expr="SendDelayedEvent('rdmp.openBrowser', 0.25)"></action>
             </transition>
           </UILabel>
           <UILabel id="RdmpMenu_Direct" text="Common_Null" icon="{@UI.ACCEPT}" value="5592405">

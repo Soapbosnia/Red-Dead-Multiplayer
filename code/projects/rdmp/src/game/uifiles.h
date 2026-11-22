@@ -7,5 +7,7 @@ namespace rdmp {
 void InstallUiFiles(const wchar_t* iniPath);
 // Game main thread, every frame while the front end is up: keeps our menus' label texts set.
 void UiFilesFrame();
+// UI events ("rdmp.*" from our menus: browser tabs, join, favorite, refresh).
+void UiFilesOnEvent(const char* name);
 
 }  // namespace rdmp

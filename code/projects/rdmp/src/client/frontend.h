@@ -15,6 +15,7 @@ namespace RDMP {
 }
 namespace rdmp::fw {
     struct Host;
+    struct BrowserServer;
 }
 
 namespace RDMP::Frontend {
@@ -24,4 +25,10 @@ namespace RDMP::Frontend {
     // The menu is on screen (it owns mouse and keyboard).
     bool Visible();
     void Shutdown();
+
+    // Server browser for the native menus (fw_api v11); same lists, favourites and recents as the HTML page.
+    void BrowserRefresh(const char *list);
+    int BrowserPoll(rdmp::fw::BrowserServer *out, int max);
+    void BrowserFavorite(const char *host, int port, const char *name, bool add);
+    bool BrowserConnect(const char *host, int port, const char *password);
 } // namespace RDMP::Frontend
