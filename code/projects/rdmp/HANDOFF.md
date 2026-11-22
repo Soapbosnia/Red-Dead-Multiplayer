@@ -124,9 +124,11 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
     PlayRDR.exe -restart, without the mod: never use AwaitRebootTransition.
   Owner: native menus throughout, NO HTML/CEF overlays (an overlay logo + changelog was tried and removed).
   NEXT (owner's wishes):
-  1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22): the game has no in-process
-     return to the menu (it restarts the exe), so write our own level teardown (world, actors, streaming, scripts)
-     mirroring our boot (gameflow.cpp), then the title front end again. Today the world stays behind the menu.
+  1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22). In progress behind
+     [game] disconnect_unload=1 (default 0 = world stays behind the menu): the in-process session restart releases
+     the session (re/NOTES.md "Disconnect: unloading the world"). Left: hide the empty session's terrain (loading-mode
+     render killed the game when forced), create the player in a restarted session (layout 808 is gone: find the player
+     layout dynamically), title background. RDR1 itself has no level teardown (restart / ExitProcess).
   2. In-game pause menu: no cursor, and the player's input is live behind it (mouse-look, movement). One cause: our
      pause hold (no_pause_freeze presents state 3 to Game::Update). Measured + two failed fixes in re/NOTES.md
      "(open) No mouse cursor" / "(open, 2026-11-22) The same pause hold"; next: patch only the world-freeze "paused"
@@ -142,7 +144,8 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   Test automation: keys through computer-use (arrows with key, Enter / others with hold_key ~0.12 s) only when
   RDR.exe is in front, NEVER Esc (it stops Claude). build/bin/ui_exec.txt ([debug] ui_exec=1): "k <input event>",
   "e <ui event>", "a <ids>" (active / hidden), "n|x <id>" Enter / Exit, "h <id> 0|1" show / hide, "m <addr> [off]",
-  "q <addr> <off>..." pointer chain. Cursor shown or not: GetCursorInfo (screenshots do not show the cursor).
+  "q <addr> <off>..." pointer chain, "w <addr> <off> <hex>" byte write (only lines written while the game runs
+  are run). Cursor shown or not: GetCursorInfo (screenshots do not show the cursor).
   Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop it before building).
 
 ## Next (chosen: horses first)
