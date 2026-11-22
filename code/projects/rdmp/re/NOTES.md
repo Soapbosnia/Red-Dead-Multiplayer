@@ -787,3 +787,15 @@ components on a puppet, which other threads read playerInfo during the swap.
   (3) Re-entering the boot's Startup / StartScreen2 for the title background drew a broken menu column and the logo.
 - Debug: ui_exec "w <addr> <off> <hex>" writes a byte at *(addr)+off; lines already in ui_exec.txt at start are no
   longer run (a stale "w" request re-ran a level load at every boot).
+- Covering the empty session (2026-11-22, open). UI movie list *(0x142C45610): wrappers at +0x30 in draw order (0
+  mapRenderProxy, 1 pause_main, ... 9 list, ... 28 startscreen, 30 fader, 31 loading, 34 popup, 35 effects), name -> slot
+  through a hash (+0x170 buckets, +0x178 count, node {+0 name, +8 u8 slot, +0x10 next}) read by FUN_14011a000;
+  advance FUN_140119f10 walks all slots (vt+0x18). Tried: (a) the title screen's background (startscreen BG): a
+  letterbox frame (black bars, transparent middle) drawn above our menu; (b) FadeToBlack fader black (fadeVal 100,
+  fadeRefresh) + pause_main and list moved above fader (ui_exec "u", hash renumbered): our menu over solid black,
+  BUT a moved movie stops updating on screen (selection no longer moves; also after moving pause_main alone) - some
+  per-slot state outside the array and the hash (no slot field in the wrappers: ui_exec "d"); (c) pause_main's
+  pausetransition types are partial brush strokes. Next: find what keeps the per-slot draw/update state (the render
+  side of the UI list) or draw our menu in a movie that is already above the fader (popup/loading are).
+- Owner's idea (2026-11-22): run the game like MTA - load the world once at boot, hidden under our menu, so joining
+  only connects and Disconnect only resets the session; needs the same cover.

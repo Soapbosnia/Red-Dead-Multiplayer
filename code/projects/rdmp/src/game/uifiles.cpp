@@ -388,9 +388,8 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
                      "<action expr=\"StackPush_NoTransition(HudSceneOffline)\"></action></transition>"
                      // rdmp.menu (dropped by the server): the main menu opens over the world, as the pause key does
                      "\n    <transition event=\"rdmp.menu\"><action expr=\"StackPush(PauseMenuScene)\"></action></transition>"
-                     // rdmp.title (Disconnect, the world unloaded): our main menu again, over the empty (loading-mode)
-                     // screen. ClearStack drops the session restart's LoadingScreen. (Re-entering the boot's Startup /
-                     // StartScreen2 for the title's own background drew a broken menu column and the logo: open.)
+                     // rdmp.title (Disconnect, the world unloaded): our main menu again, over the empty session (covering
+                     // it is open: re/NOTES.md "Disconnect"). ClearStack drops the restart's LoadingScreen.
                      "\n    <transition event=\"rdmp.title\"><action expr=\"ClearStack()\"></action>"
                      "<action expr=\"StackPush(PauseMenuScene)\"></action></transition>");
         }
@@ -764,23 +763,41 @@ uintptr_t FlashSlot(const char* movie, const char* path) {
     const uintptr_t wrapper = *reinterpret_cast<uintptr_t*>(list + 0x30 + idx * 8ULL);
     return wrapper ? reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x140116610))(wrapper, path) : 0;
 }
-// Moves a UI movie to just below another in the UI movie list (*0x142C45610: wrappers at +0x30, count +0x180; drawn in
-// list order, so a later one covers an earlier one). Indices by name: FUN_14011a000(list, name). Returns false when
-// either is not in the list; nothing to do when it is below already.
-bool MoveMovieBelow(const char* movie, const char* other) {
+// UI movie list (*0x142C45610): movie wrappers at +0x30 (count +0x180), drawn in that order (a later one covers an
+// earlier one); names map to slots through a hash table (+0x170 buckets, +0x178 bucket count; node {+0 name, +8 u8 slot,
+// +0x10 next}) that FUN_14011a000(list, name) reads. Moving a movie moves the wrappers between the two slots and renumbers
+// the table to match, so the game's own lookups by name (SetFlash*, Stream*) still find their movie.
+bool MoveMovie(const char* movie, const char* other, bool above) {
     const uintptr_t list = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45610));
     if (!list) return false;
     auto index = reinterpret_cast<char (*)(uintptr_t, const char*)>(GameAddr(0x14011A000));
     const int count = *reinterpret_cast<int*>(list + 0x180);
-    const int a = index(list, movie), b = index(list, other);
-    if (a < 0 || b < 0 || a >= count || b >= count) return false;
-    if (a < b) return true;
+    const int from = index(list, movie), at = index(list, other);
+    if (from < 0 || at < 0 || from >= count || at >= count || count > 255) return false;
+    const int to = above ? (from < at ? at : at + 1) : (from < at ? at - 1 : at);
+    if (to == from) return true;
     auto* slots = reinterpret_cast<uintptr_t*>(list + 0x30);
-    const uintptr_t moved = slots[a];
-    for (int i = a; i > b; --i) slots[i] = slots[i - 1];
-    slots[b] = moved;
+    int newOf[256];
+    for (int i = 0; i < count; ++i) newOf[i] = i;
+    const uintptr_t moved = slots[from];
+    if (from < to) {
+        for (int i = from; i < to; ++i) { slots[i] = slots[i + 1]; newOf[i + 1] = i; }
+    } else {
+        for (int i = from; i > to; --i) { slots[i] = slots[i - 1]; newOf[i - 1] = i; }
+    }
+    slots[to] = moved;
+    newOf[from] = to;
+    const uintptr_t buckets = *reinterpret_cast<uintptr_t*>(list + 0x170);
+    const int nBuckets = *reinterpret_cast<uint16_t*>(list + 0x178);
+    for (int bkt = 0; buckets && bkt < nBuckets; ++bkt)
+        for (uintptr_t node = *reinterpret_cast<uintptr_t*>(buckets + bkt * 8ULL); node; node = *reinterpret_cast<uintptr_t*>(node + 0x10)) {
+            auto& slot = *reinterpret_cast<uint8_t*>(node + 8);
+            if (slot < count) slot = static_cast<uint8_t>(newOf[slot]);
+        }
     return true;
 }
+bool MoveMovieBelow(const char* movie, const char* other) { return MoveMovie(movie, other, false); }
+bool MoveMovieAbove(const char* movie, const char* other) { return MoveMovie(movie, other, true); }
 
 std::deque<std::string> g_flashStrings;
 void FlashSetString(const char* movie, const char* path, const std::string& text) {
@@ -880,6 +897,37 @@ void ExecFile() {
                     *p = static_cast<uint8_t>(strtoul(rest, nullptr, 16));
                     Log("ui exec: write %s+%s: %02x -> %02x", movie, var, before, *p);
                 }
+                continue;
+            }
+            case 'u': {  // u <movie> <other>: move <movie> to just above <other> in the UI movie list
+                Log("ui exec: move %s above %s: %s", movie, var, MoveMovieAbove(movie, var) ? "ok" : "not found");
+                continue;
+            }
+            case 'd': {  // d <movie>: log its slot and the wrapper's first 0x200 bytes as dwords (RE)
+                const uintptr_t list = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45610));
+                if (!list) continue;
+                const int idx = reinterpret_cast<char (*)(uintptr_t, const char*)>(GameAddr(0x14011A000))(list, movie);
+                if (idx < 0) continue;
+                const uintptr_t w = *reinterpret_cast<uintptr_t*>(list + 0x30 + idx * 8ULL);
+                std::string out;
+                char cell[24];
+                for (int off = 0; w && off < 0x200; off += 4) {
+                    sprintf_s(cell, "%x=%x ", off, *reinterpret_cast<uint32_t*>(w + off));
+                    out += cell;
+                }
+                Log("ui exec: wrapper %s slot %d at %p: %s", movie, idx, reinterpret_cast<void*>(w), out.c_str());
+                continue;
+            }
+            case 'l': {  // l: log the UI movie list in order (index, name)
+                const uintptr_t list = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45610));
+                if (!list) continue;
+                const int count = *reinterpret_cast<int*>(list + 0x180);
+                std::string out;
+                for (int i = 0; i < count && i < 64; ++i) {
+                    const uintptr_t w = *reinterpret_cast<uintptr_t*>(list + 0x30 + i * 8);
+                    out += std::to_string(i) + ":" + (w ? reinterpret_cast<const char*>(w + 0x68) : "-") + " ";
+                }
+                Log("ui exec: movies %s", out.c_str());
                 continue;
             }
             case 'o': {  // o <movie> <other>: move <movie> to just below <other> in the UI movie list (draw order)

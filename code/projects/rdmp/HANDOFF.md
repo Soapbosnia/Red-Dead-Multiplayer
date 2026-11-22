@@ -127,8 +127,9 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22). In progress behind
      [game] disconnect_unload=1 (default 0 = world stays behind the menu): the in-process session restart releases
      the session (re/NOTES.md "Disconnect: unloading the world"); join after it works (player owner generation).
-     Left: cover the empty session's terrain under the menu (loading-mode render killed the game; the FadeToBlack fader
-     covers the menu too), title background; then make it the default. RDR1 has no level teardown (restart /
+     Left: cover the empty session under the menu (re/NOTES.md "Covering the empty session": the fader goes black and
+     our menu can be moved above it, but moved UI movies stop updating), title background; then make it the default.
+     Owner's idea: MTA-style - load the world at boot hidden under the menu, join = connect only. RDR1 has no level teardown (restart /
      ExitProcess); MTA does the same (reset the game state, cover the world with its menu). UIPlayer.Disable() /
      Enable() (the fader's own actions) is the game's switch for player input under UI: try it for the pause menu.
   2. In-game pause menu: no cursor, and the player's input is live behind it (mouse-look, movement). One cause: our
