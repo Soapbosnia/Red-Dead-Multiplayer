@@ -118,6 +118,8 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
      Settings, Disconnect (in game), Quit; Back at the title = quit prompt (route Cancel through an rdmp.back event,
      C++ posts rdmp.back.title / rdmp.back.ingame with XML transitions Enter(QuitGame) / StackPop()). Owner said the
      pause menu "misses crucial stuff like settings etc." - confirm what is missing.
+  1b. Menu title "RED DEAD MULTIPLAYER": RdmpMenuTitle (list movie top_title) is entered on the title but NOT drawn
+     there (that slot belongs to list pages); try another text slot (pause_main) or the logo work.
   2. Settings: hide single-player rows (Gameplay: Golden Guns, Autosave), add a MULTIPLAYER tab (nickname, nametags,
      nametag distance, chat): patch Options.sc.xml like PauseMenuScene.sc (move items into a hidden container, never
      delete: the game's C++ finds widgets by name and falls back to the root widget).

@@ -149,7 +149,9 @@ void PatchPauseMenu(std::string& s) {
     // Scene: our cue to set the entries before the list is entered, and Back / Pause through rdmp.back.
     if (const size_t e = s.find("expr=\"Enter(PauseMenu)\"></onfocused>"); e != std::string::npos) {
         const size_t on = s.rfind("<onfocused", e);
-        if (on != std::string::npos) s.insert(on, "<onfocused expr=\"SendEvent('rdmp.pause')\"></onfocused>\n       ");
+        if (on != std::string::npos)
+            s.insert(on, "<onfocused expr=\"StreamMovie('list')\"></onfocused>\n       "
+                         "<onfocused expr=\"SendEvent('rdmp.pause')\"></onfocused>\n       ");
     }
     ReplaceAfter(s, "<transition event=\"@UI.CANCEL*RELEASED\" target=\"StackPop()\"", "target=\"StackPop()\"", "target=\"SendEvent('rdmp.back')\"");
     ReplaceAfter(s, "<transition event=\"@PAUSE.PAUSE*RELEASED\" target=\"StackPop()\"", "target=\"StackPop()\"", "target=\"SendEvent('rdmp.back')\"");
@@ -163,6 +165,8 @@ void PatchPauseMenu(std::string& s) {
     if (end == std::string::npos) return;
     const std::string afterList =
         "</UIList>\n"
+        // the menu's title on the front end (the list movie's page-title slot); entered on the title only
+        "    <UILabel id=\"RdmpMenuTitle\" movie=\"list\" flashObject=\"top_title\" text=\"Common_Null\"></UILabel>\n"
         "    <UILayer id=\"RdmpPauseUnused\">\n" + moved + "    </UILayer>\n"
         // Same box as the game's "return to main menu" (SG_Return2MainConf): Yes leaves the server and goes back.
         "    <UIMessageBox id=\"RdmpDisconnectConf\">\n"
@@ -316,7 +320,7 @@ std::map<std::string, std::string> g_texts = {
     {"RdmpPM_Browser", "SERVER BROWSER"},
     {"RdmpPM_Direct", "DIRECT CONNECT"},
     {"RdmpPM_Quit", "QUIT"},
-    {"PM_Options", "SETTINGS"},
+    {"RdmpMenuTitle", "RED DEAD MULTIPLAYER"},
 };
 
 // Server browser model (rows of ui/native/Browser.sc: RdmpSrv_<i> with RdmpSrvName_<i> / RdmpSrvInfo_<i>).
@@ -587,6 +591,9 @@ void UiFilesOnEvent(const char* name) {
             {"clock", frontEnd}, {"pauseMoney", frontEnd}, {"pauseMoneyValue", frontEnd}};
         for (const auto& it : kItems)
             if (const uintptr_t w = root ? find(root, it.id) : 0) setHidden(w, it.hide ? 1 : 0);
+        // RED DEAD MULTIPLAYER over the menu on the title (Enter = vt+0x160(w, 1), Exit = vt+0x160(w, 0))
+        if (const uintptr_t t = root ? find(root, "RdmpMenuTitle") : 0)
+            reinterpret_cast<void (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(t) + 0x160))(t, frontEnd ? 1 : 0);
     } else if (ev == "back") {
         PostUiEvent(GameflowWorldLoadStarted() ? "rdmp.back.ingame" : "rdmp.back.title");
     } else if (ev == "direct") {
