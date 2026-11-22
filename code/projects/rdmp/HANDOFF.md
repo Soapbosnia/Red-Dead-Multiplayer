@@ -122,8 +122,7 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
     gives the HUD back (rdmp.ingame) without a world load. Dropped by the server: rdmp.menu opens the menu (NOT
     tested yet: stop RDMPServer while joined). The game's own "return to main menu" restarts the process through
     PlayRDR.exe -restart, without the mod: never use AwaitRebootTransition.
-  Logo + "What's new" (CHANGELOG.md's first section) over the bare main list off a server: the client's web overlay
-  (ui/menu_overlay.html, fw_api v13 set_menu_overlay from uifiles.cpp each frame); hidden in views, prompts, in game.
+  Owner: native menus throughout, NO HTML/CEF overlays (an overlay logo + changelog was tried and removed).
   NEXT (owner's wishes):
   1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22): the game has no in-process
      return to the menu (it restarts the exe), so write our own level teardown (world, actors, streaming, scripts)
@@ -132,12 +131,13 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
      pause hold (no_pause_freeze presents state 3 to Game::Update). Measured + two failed fixes in re/NOTES.md
      "(open) No mouse cursor" / "(open, 2026-11-22) The same pause hold"; next: patch only the world-freeze "paused"
      tests (like the 3 render ones) and drop the state-3 hold.
-  3. Cosmetic: the nickname row shows Change arrows that do nothing (UIOption with one value); RdmpMenuTitle (list
-     movie top_title) is now unused (the overlay logo replaced it).
+  3. Native logo "RED DEAD MULTIPLAYER" and a native changelog / news panel on the main menu (owner's wish; the title
+     label RdmpMenuTitle in the list movie's top_title slot is not drawn there). Cosmetic: the nickname row shows
+     Change arrows that do nothing (UIOption with one value).
   4. Back from Options via an injected "k @UI.CANCEL*RELEASED" sometimes also reaches the scene (quit prompt); check
      with a real Esc press (the owner), it may be the injection only.
   5. Graphics options that need a restart (RestartGame) use the game's process restart too: comes up without the mod.
-  6. Logo in the game's own brush letters (optional now: the overlay shows ours): rebuild the textures (re/NOTES.md); needs a resource-load hook.
+  6. Logo in the game's own brush letters: rebuild the textures (re/NOTES.md); needs a resource-load hook.
   7. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
   Test automation: keys through computer-use (arrows with key, Enter / others with hold_key ~0.12 s) only when
   RDR.exe is in front, NEVER Esc (it stops Claude). build/bin/ui_exec.txt ([debug] ui_exec=1): "k <input event>",

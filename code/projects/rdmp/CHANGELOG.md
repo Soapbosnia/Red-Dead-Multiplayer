@@ -1,9 +1,6 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
-* **Main menu logo and "What's new":** the Red Dead Multiplayer logo (top left) and the project's latest changes (top
-  right, from this file) over the game's own main menu, shown only while the bare main list is on screen off a server
-  (client web overlay, ui/menu_overlay.html; takes no input). fw_api v13 (set_menu_overlay).
 * Fixed: after joining from inside the server browser, the in-game pause menu kept Options and Quit hidden.
 * **Native menus, each entry its own view:** Options and the server browser open as their own view in the menu column
   (OPTIONS / SERVER BROWSER with their tabs under it; the Options tabs were not visible before). The in-game menu is

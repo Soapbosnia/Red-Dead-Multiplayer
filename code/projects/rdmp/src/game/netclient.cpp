@@ -614,10 +614,6 @@ void NetShutdown() {
     Log("net: framework client shut down");
 }
 
-void NetSetMenuOverlay(bool shown) {
-    if (g_fwUp) g_api.set_menu_overlay(shown ? 1 : 0);
-}
-
 bool NetGetSettings(NetSettings* out) {
     if (!g_fwUp || !out) return false;
     fw::Settings s;

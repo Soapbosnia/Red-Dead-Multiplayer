@@ -37,8 +37,6 @@ struct NetSettings {
     int nametags, nametagDistance, chat;
 };
 bool NetGetSettings(NetSettings* out);
-// The native main list is on screen off a server: the client draws the logo and the latest changes over it.
-void NetSetMenuOverlay(bool shown);
 void NetSetSettings(const NetSettings& in);
 
 }  // namespace rdmp

@@ -506,12 +506,6 @@ std::string g_lastAddress;  // the last Direct Connect address (offered again)
 ULONGLONG g_menuAtMs = 0;   // when to open the main menu again after a Disconnect (0 = not pending)
 bool g_inView = false;      // a view (Options, server browser) is open from the main list (rdmp.view.*)
 
-// A widget is active (entered): vt+0xd8(w, 1).
-bool Active(const char* id) {
-    const uintptr_t w = Widget(id);
-    return w && reinterpret_cast<bool (*)(uintptr_t, int)>(VFunc(w, 0xd8))(w, 1);
-}
-
 uint32_t TextHash(const char* key) {
     const uint32_t h = reinterpret_cast<uint32_t (*)(const char*, int)>(GameAddr(0x1400C7510))(key, 0);
     return ((h * 9) >> 11 ^ h * 9) * 0x8001;
@@ -900,10 +894,6 @@ void UiFilesFrame(bool frontEnd) {
     if (frontEnd) NetTitleFrame();  // (with a world loaded the client is pumped by the net frame)
     PollBrowser();                  // (the browser also works in game, after a Disconnect)
     TextEntryFrame();
-    // The logo and the latest changes (client overlay) while the bare main list is on screen off a server: not in a view,
-    // not under the text entry or the quit prompt, not while joining (the scene closes).
-    const bool overlay = !NetOnServer() && Active("PauseMenu") && !g_inView && !g_entry.open && !Active("QuitGame");
-    NetSetMenuOverlay(overlay);  // (every frame: the client may come up after the menu)
     const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
     if (!root) return;
     auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
