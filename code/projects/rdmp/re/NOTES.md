@@ -705,5 +705,14 @@ components on a puppet, which other threads read playerInfo during the swap.
   rdmp.mpsettings) that reach our event hook. A plain UIPanel with movie="startscreen" draws no list: title-style
   lists must live inside RDRUIStartScreen2 (its C++ class drives the movie). Texts not in the game's string table
   are set at runtime by widget id (uifiles.cpp kTexts). Arrow keys = extended scan codes (E0 48/50).
+- (08:30) The boot goes straight to our main menu: Boot.sc benchmarkComplete -> StartScreen2 (was StartScreen1, the
+  "press Play" title), StartScreen2's Back = Enter(QuitGame) labelled Quit. Flash variables from C++ (uifiles.cpp
+  FlashSet*; [debug] ui_exec=1 runs build\bin\ui_exec.txt lines live): RDRLOGO_target_alpha 0 hides the logo.
+- Title logo = brush-letter DXT1 masks (white on black, tinted by the movie) embedded in the startscreen movie
+  resource (flash.rpf payload 0x4D8DB2A4, 10.9 MB; texture records {+0 name ptr 0x50.., +8 u16 w, +0xa u16 h, +0xc
+  fourcc, +0x34 data ptr 0x60..}, physical data = file end - 0xA00000): _brs_startscreen_z_0111 976x552 "RED",
+  _0110 1248x548 "DEAD", _0117 1476x556 "REDEM", _0116 1368x552 (presumably "PTION"). startscreen_z_0104/_0107 =
+  the Undead Nightmare logo. "RED DEAD MULTIPLAYER" = rebuild _0117/_0116 as MULTI / PLAYER from the game's own
+  letters at runtime (U, L, Y composed) and patch them into the resource as it loads (load hook not found yet).
 - Automation note: never send Esc while Claude controls the PC (any Esc stops the session). Keys: scan codes via
   SendInput only when RDR.exe is in front (DirectInput ignores virtual-key-only input).
