@@ -107,15 +107,27 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   mouse sensitivity, a graphics option, then the keep / revert prompt), the game's files keep the values after a
   restart. Unconfirmed enum labels (frame limit, anti-aliasing, motion blur, upscaler qualities): see re/NOTES.md
   "Game settings".
-* Owner wants the game's NATIVE menus (the HTML menu: Quit broken, design disliked, world visible before it) and
-  explicitly CUSTOM menus built from the game's own UI (not taking over existing tabs). Found: the menus are SCXML
-  data; ours load with them (re/NOTES.md "Native menus"). Done: [game] title_screen=1 boots to the game's title
-  (legals 8 s, no world), Play -> our main menu (ui/native/MainMenuList.sc in place of the mode list), Settings ->
-  the game's Options. Next, in order: Server Browser screen (dynamic rows filled from C++; Internet / Local /
-  Favorites / Recent), Direct Connect (text entry: the game's cheat entry box is a candidate), Multiplayer Settings
-  (UIOption rows), join -> GameflowRequestWorldLoad + connect; then make title_screen=1 the default and retire the
-  HTML menu. Test automation: keys only via scan codes when RDR.exe is in front, NEVER Esc (stops Claude).
-* Next session (owner): a custom pause menu.
+* Native menus. Owner: custom menus built from the game's own UI are fine (also new screens). The menus are SCXML
+  data; ours load with the game's (src/game/uifiles.cpp, ui/native/, re/NOTES.md "Native menus"). Working with
+  [game] title_screen=1 (build/bin/rdmp.ini; config default still 0): boot -> game legals (8 s) + loading -> our main
+  menu (title list) -> Server Browser (pause scene, Internet/Local/Favorites/Recent, real servers via fw_api v11) ->
+  Join -> the game's loading screen -> in game; pause menu = Map / Options / Disconnect; Settings = game's Options.
+  NEXT (owner's wishes, in order):
+  1. ONE menu like MTA: the pause scene's list as the main menu too (push PauseMenuScene at the title; the game
+     already hides Map while the title movie is loaded). Entries: Map (in game), Server Browser, Direct Connect,
+     Settings, Disconnect (in game), Quit; Back at the title = quit prompt (route Cancel through an rdmp.back event,
+     C++ posts rdmp.back.title / rdmp.back.ingame with XML transitions Enter(QuitGame) / StackPop()). Owner said the
+     pause menu "misses crucial stuff like settings etc." - confirm what is missing.
+  2. Settings: hide single-player rows (Gameplay: Golden Guns, Autosave), add a MULTIPLAYER tab (nickname, nametags,
+     nametag distance, chat): patch Options.sc.xml like PauseMenuScene.sc (move items into a hidden container, never
+     delete: the game's C++ finds widgets by name and falls back to the root widget).
+  3. Disconnect: verify AwaitRebootTransition returns to our menu inside our own loop (one test froze after a
+     "closeRequested" UI event of unknown origin).
+  4. Logo RED DEAD MULTIPLAYER: rebuild the brush-letter textures (re/NOTES.md); needs a resource-load hook.
+  5. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
+  Test automation: scan-code keys only when RDR.exe is in front, NEVER Esc (it stops Claude). In game use
+  build/bin/ui_exec.txt ([debug] ui_exec=1): "k @PAUSE.PAUSE*RELEASED" opens the pause menu, "a <ids>" active
+  states, "e <event>", "m <addr> [off]". Start RDMPServer.exe for the Local tab (stop it before building).
 
 ## Next (chosen: horses first)
 1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:
