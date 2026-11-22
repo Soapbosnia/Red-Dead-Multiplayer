@@ -389,5 +389,11 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
     out->browser_favorite = [](const char *host, int port, const char *name, int add) { RDMP::Frontend::BrowserFavorite(host, port, name, add != 0); };
     out->browser_connect  = [](const char *host, int port, const char *pw) { return RDMP::Frontend::BrowserConnect(host, port, pw) ? 1 : 0; };
     out->disconnect       = &Disconnect;
+    out->get_settings     = [](rdmp::fw::Settings *o) { RDMP::Frontend::GetSettings(o); };
+    out->set_settings     = [](const rdmp::fw::Settings *in) {
+        if (in) {
+            RDMP::Frontend::SetSettings(*in);
+        }
+    };
     return 1;
 }

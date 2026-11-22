@@ -24,7 +24,19 @@ void NetBrowserRefresh(const char* list);
 int NetBrowserPoll(NetServer* out, int max);
 void NetBrowserFavorite(const char* host, int port, const char* name, bool add);
 void NetBrowserJoin(const char* host, int port);
-// The pause menu's Disconnect: leave the server.
+// The pause menu's Disconnect: leave the server (the world stays, the player goes back to limbo behind the main menu).
 void NetDisconnect();
+// We joined a server from the menus and have not left it (or been dropped).
+bool NetOnServer();
+// Our game loop ended (quit or a game restart): shut the framework client down here, on the main thread, before the game
+// tears itself down; left to its static destructor at DLL unload it crashed (Framework scripting module, process exit).
+void NetShutdown();
+// Multiplayer settings (fw_api v12; rdmp.ini through the client DLL). Get returns false while the client is not up.
+struct NetSettings {
+    char nickname[32];
+    int nametags, nametagDistance, chat;
+};
+bool NetGetSettings(NetSettings* out);
+void NetSetSettings(const NetSettings& in);
 
 }  // namespace rdmp

@@ -716,3 +716,28 @@ components on a puppet, which other threads read playerInfo during the swap.
   letters at runtime (U, L, Y composed) and patch them into the resource as it loads (load hook not found yet).
 - Automation note: never send Esc while Claude controls the PC (any Esc stops the session). Keys: scan codes via
   SendInput only when RDR.exe is in front (DirectInput ignores virtual-key-only input).
+- (2026-11-22, one menu, views) Pause scene menu column (pause_main movie "menu"): the scene builds it when it opens
+  from the main list's entries shown at that moment (an entry hidden then gets no row; un-hiding later does not add
+  one, hiding does remove one). menu.elements[i] = row i; a category list with flashObject="menu.elements[i]" draws as
+  the submenu of row i (the game's Options tabs were menu.elements[5], its OPTIONS row). Our views (Options, server
+  browser) hide every other entry so theirs is row 0 and use menu.elements[0]; the column then shows "OPTIONS" with its
+  tabs under it. Disconnect closes the scene and re-opens it (rdmp.menu, posted ~0.4 s later: a push during the closing
+  transition is lost) so the main menu's entries get rows.
+- UIOption value: vt+0x410(w, 0) = index, vt+0x468(w, index, 0) sets it (FUN_140626c10 reads, FUN_1406262b0 writes);
+  setting it raises the option's onchanged. Options_Header literal text works like other labels (+0x80 = 0, +0x88).
+- Multiplayer targeting mode (ControlsOption_MPCombat_Mode): used only when *(0x142C456D0)+0x12E bit 8 (the game's own
+  online session) is set (FUN_1406262b0 / FUN_140624740); ours never sets it, the row is hidden by the game anyway.
+- Text entry = the cheat entry's mechanism (ExtrasLayer.OnKeyboardActivate FUN_140623270, frame FUN_140622a00, end
+  FUN_1406234a0): keyboard K = *(0x142AC4748)+0x68 (+0x160 initial, +0x1c0 result, +0x220/+0x224 title/description
+  hashes, +0x228 state 0 open / 1 accepted / 2 cancelled, +0x22c open, +0x230 platform keyboard vt+0 show(K+0x270) /
+  vt+8 close, +0x280/+0x2b8/+0x2f0 strings, +0x328 max length); typed text = *(*(0x142893518)+0x68): +0 std::wstring,
+  +0x20 allowed characters (the game's list includes . and :), +0x60 max length; FUN_1401fc820(wstr, wchar*, len)
+  assigns. The box text is the game's dynamic string Enter_Cheat_Dialog: FUN_1400fb250(*(0x142C45608), key, fmt, ...)
+  formats an existing dynamic entry (hash map at mgr+0x720), it cannot add keys. Typing and Backspace work on PC.
+- "Return to main menu" in the game (AwaitRebootTransition, also the graphics RestartGame) restarts the process: game
+  state 6 ends Game::Run and the game starts "PlayRDR.exe -restart" (not through RDR.exe's CreateProcessA import; the
+  Rockstar layer), which starts a fresh RDR.exe without the mod. Our Disconnect therefore stays in-process (world kept,
+  player in limbo). Leaving without an engine fade: EngineFadeToBlack brings the UI's FadeToBlack scene, which ends the
+  pause (pauseEnd) and holds the UI stack (no HUD / pause push works) until a fade-in.
+- Framework client shutdown: left to the static destructor at DLL unload (process exit) it crashed in the Framework's
+  scripting module (scripting_catalog.h:359 via instance.cpp:217); NetShutdown now runs it when our game loop ends.

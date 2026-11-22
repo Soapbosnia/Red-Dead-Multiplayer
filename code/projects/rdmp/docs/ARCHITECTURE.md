@@ -9,8 +9,10 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
           boot / sandbox  : sp_idle root script, menus + legals skipped, player created, limbo until spawned
           natives         : the game's native registry (hash → handler), NativeCall
           gameflow        : own game loop + boot; [game] title_screen=1 boots to the game's own title screen
-          uifiles         : native menus: our SCXML files (ui/native/) loaded with the game's menus, the title's
-                            mode list replaced by our main menu (see re/NOTES.md "Native menus")
+          uifiles         : native menus: our SCXML files (ui/native/) loaded with the game's menus; one menu (the
+                            pause scene's list) on the title and in game, each entry opening its own view (server
+                            browser, Options with a MULTIPLAYER tab), Direct Connect / nickname through the game's
+                            own text entry; Disconnect leaves in-process (see re/NOTES.md "Native menus")
           host            : fw::Host table (log, invoke_native, local player, fade, camera, controls, print_text)
           netclient       : per frame (main thread): FwStep() → rdmp_client.dll; puppets for remote players;
                             server actions (spawn, fade, camera, control, health); blips → the game's blip pool

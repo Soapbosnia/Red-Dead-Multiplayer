@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <deque>
@@ -108,7 +109,7 @@ void* Serve(const std::string& content, const char* name, void* a2, void* a3, vo
 
 // The multiplayer pause menu (PauseMenu list in PauseMenuScene.sc): the single-player items move out of the list
 // into a container that is never entered (the game's C++ still finds them by name - FUN_140628860 falls back to the
-// root "UserInterface" widget when one is missing, so they must exist), and DISCONNECT (with a confirmation) is added.
+// root "UserInterface" widget when one is missing, so they must exist), and our entries are added.
 void PatchPauseMenu(std::string& s) {
     const size_t list = s.find("<UIList id=\"PauseMenu\"");
     if (list == std::string::npos) {
@@ -116,7 +117,7 @@ void PatchPauseMenu(std::string& s) {
         return;
     }
     std::string moved;  // (PM_Network, PM_SocialClub and PM_Leaderboards are commented out in the game's file)
-    for (const char* id : {"PM_Weapons", "PM_Outfits", "PM_Journal", "PM_Stats", "PM_Load"}) {
+    for (const char* id : {"PM_Map", "PM_Weapons", "PM_Outfits", "PM_Journal", "PM_Stats", "PM_Load"}) {
         const std::string open = std::string("<UILabel id=\"") + id + "\"";
         const size_t a = s.find(open, list);
         const size_t b = a == std::string::npos ? a : s.find("</UILabel>", a);
@@ -124,9 +125,10 @@ void PatchPauseMenu(std::string& s) {
         moved += "      " + s.substr(a, b + std::strlen("</UILabel>") - a) + "\n";
         s.erase(a, b + std::strlen("</UILabel>") - a);
     }
-    // The one menu (MTA-style, title and pause): Map (in game), Server Browser, Direct Connect, Settings (the game's
-    // Options), Disconnect (in game), Quit. Which ones show is set on rdmp.pause (UiFilesOnEvent) before the list is
-    // entered; Back goes through rdmp.back (quit prompt on the title, close in game).
+    // The one menu (MTA-style, title and pause): Resume (on a server), Server Browser, Direct Connect (off a
+    // server), Options, Disconnect (on a server), Quit. Which ones show is set on rdmp.pause (UiFilesOnEvent) before the
+    // list is entered, and again when Disconnect leaves; Back goes through rdmp.back (quit prompt off a server, close on
+    // one).
     auto item = [](const char* id, const char* actions) {
         return std::string("<UILabel id=\"") + id + "\" text=\"Common_Null\">\n"
                "        <onfocused expr=\"Enter(PauseMenu_Main_Prompts)\"></onfocused>\n"
@@ -135,16 +137,30 @@ void PatchPauseMenu(std::string& s) {
                "        </transition>\n"
                "      </UILabel>\n      ";
     };
+    // Resume first: before the first entry left in the list
+    if (const size_t first = s.find("<UILabel id=\"", list); first != std::string::npos)
+        s.insert(first, item("RdmpPM_Resume", "          <action expr=\"StackPop()\"></action>\n"));
     if (const size_t opt = s.find("<UILabel id=\"PM_Options\"", list); opt != std::string::npos) {
         s.insert(opt, item("RdmpPM_Browser",
                            "          <action expr=\"Exit(PauseMenu_Main_Prompts)\"></action>\n"
+                           "          <action expr=\"SendEvent('rdmp.view.RdmpPM_Browser')\"></action>\n"
                            "          <action expr=\"unfocus(PauseMenu)\"></action>\n"
                            "          <action expr=\"Enter(RdmpBrowser)\"></action>\n"
                            "          <action expr=\"focus(RdmpBrowser)\"></action>\n") +
-                      item("RdmpPM_Direct", "          <action expr=\"SendEvent('rdmp.direct')\"></action>\n"));
+                      item("RdmpPM_Direct", "          <action expr=\"SendEvent('rdmp.edit.direct')\"></action>\n"
+                                            "          <action expr=\"Enter(RdmpTextEntry)\"></action>\n"));
     }
+    // Each entry opens its own view: the pause scene draws a view's category list as the submenu of a row of this list
+    // (flashObject menu.elements[i]); the mod hides every other entry (rdmp.view.<entry>), so the chosen one is row 0 and
+    // heads its view, and Back shows them again (rdmp.view.main).
+    ReplaceAfter(s, "<UILabel id=\"PM_Options\"", "<action expr=\"unfocus(PauseMenu)\"></action>",
+                 "<action expr=\"SendEvent('rdmp.view.PM_Options')\"></action><action expr=\"unfocus(PauseMenu)\"></action>");
     const std::string disconnect =
-        item("RdmpPM_Disconnect", "          <action expr=\"Enter(RdmpDisconnectConf)\"></action>\n") +
+        // Disconnect leaves at once: the world stays, the player goes back to limbo and this menu becomes the main menu
+        // (the scene builds the menu column when it opens, from the entries shown then: it closes here and opens again as
+        // the main menu, rdmp.menu posted by the mod)
+        item("RdmpPM_Disconnect", "          <action expr=\"SendEvent('rdmp.disconnect')\"></action>\n"
+                                  "          <action expr=\"StackPop()\"></action>\n") +
         item("RdmpPM_Quit", "          <action expr=\"Enter(QuitGame)\"></action>\n");
     // Scene: our cue to set the entries before the list is entered, and Back / Pause through rdmp.back.
     if (const size_t e = s.find("expr=\"Enter(PauseMenu)\"></onfocused>"); e != std::string::npos) {
@@ -168,26 +184,141 @@ void PatchPauseMenu(std::string& s) {
         // the menu's title on the front end (the list movie's page-title slot); entered on the title only
         "    <UILabel id=\"RdmpMenuTitle\" movie=\"list\" flashObject=\"top_title\" text=\"Common_Null\"></UILabel>\n"
         "    <UILayer id=\"RdmpPauseUnused\">\n" + moved + "    </UILayer>\n"
-        // Same box as the game's "return to main menu" (SG_Return2MainConf): Yes leaves the server and goes back.
-        "    <UIMessageBox id=\"RdmpDisconnectConf\">\n"
-        "      <data name=\"warning\"></data>\n"
-        "      <data name=\"description\" expr=\"SG_Return2MainConf\"></data>\n"
+        // Text entry (Direct Connect address, nickname): the game's cheat entry box (popup_cheatInput). Its description
+        // is the game's dynamic text Enter_Cheat_Dialog, which the mod formats with what is typed (TextEntryFrame).
+        "    <UIMessageBox id=\"RdmpTextEntry\" movie=\"popup\">\n"
+        "      <data name=\"title\" expr=\"Common_Null\"></data>\n"
+        "      <data name=\"description\" expr=\"Enter_Cheat_Dialog\"></data>\n"
+        "      <transition event=\"@UI.ACCEPT*RELEASED\" consume=\"true\">\n"
+        "        <action expr=\"PlaySound('HUD_MENU_SELECT_MASTER')\"></action>\n"
+        "        <action expr=\"Exit(RdmpTextEntry)\"></action>\n"
+        "        <action expr=\"SendEvent('rdmp.text.ok')\"></action>\n"
+        "      </transition>\n"
+        "      <transition event=\"@UI.VKB_CANCEL*RELEASED\" consume=\"true\">\n"
+        "        <action expr=\"PlaySound('HUD_MENU_BACK_MASTER')\"></action>\n"
+        "        <action expr=\"Exit(RdmpTextEntry)\"></action>\n"
+        "        <action expr=\"SendEvent('rdmp.text.cancel')\"></action>\n"
+        "      </transition>\n"
         "      <UIPromptStrip>\n"
-        "        <UIButton text=\"Common_Yes\" icon=\"{@UI.ACCEPT}\">\n"
-        "          <transition event=\"@UI.ACCEPT*RELEASED\">\n"
-        "            <action expr=\"SendEvent('rdmp.disconnect')\"></action>\n"
-        "            <action expr=\"SendEvent('AwaitRebootTransition')\"></action>\n"
-        "            <action expr=\"FadeOut(0.5,1.0,false)\"></action>\n"
-        "            <action expr=\"Exit(RdmpDisconnectConf)\"></action>\n"
-        "          </transition>\n"
-        "        </UIButton>\n"
-        "        <UIButton text=\"Common_No\" icon=\"{@UI.CANCEL}\">\n"
-        "          <transition event=\"@UI.CANCEL*RELEASED\"><action expr=\"Exit(RdmpDisconnectConf)\"></action></transition>\n"
-        "        </UIButton>\n"
+        "        <UIButton text=\"Common_Ok\" icon=\"{@UI.ACCEPT}\"></UIButton>\n"
+        "        <UIButton text=\"Common_Cancel\" icon=\"{@UI.VKB_CANCEL}\"></UIButton>\n"
         "      </UIPromptStrip>\n"
         "    </UIMessageBox>";
     s.replace(end, std::strlen("</UIList>"), disconnect + afterList);
     Log("ui files: pause menu patched (one menu)");
+}
+
+// Nametag distances offered in the MULTIPLAYER options (metres; [client] nametag_distance, the HTML menu allowed 5..500).
+constexpr int kNametagDistances[] = {20, 40, 60, 80, 100, 150, 200, 300, 500};
+
+// The game's Options (Options.sc.xml, included by the pause scene) for multiplayer:
+//   * the single-player tabs move out of the tab list into a container that is never entered (kept, never deleted: the
+//     game's C++ finds their widgets by name). GAMEPLAY holds Golden Guns and Autosave (single player) and the
+//     multiplayer targeting mode, which the game only reads in its own online sessions (*(0x142C456D0)+0x12E bit 8,
+//     FUN_1406262b0), never in ours, and shows only there; EXTRAS is the cheats list.
+//   * a MULTIPLAYER tab (first) with nickname, nametags, nametag distance and chat ([net] name, [client] nametags /
+//     nametag_distance / chat in rdmp.ini, through the client DLL: the same settings the HTML menu had).
+//   * Back enters the main list again (it left when Options opened, PatchPauseMenu).
+void PatchOptions(std::string& s) {
+    const size_t tabs = s.find("<UIList id=\"OptionsCatagoriesTabs\"");
+    if (tabs == std::string::npos) {
+        Log("ui files: Options tab list not found - not patched");
+        return;
+    }
+    std::string moved;
+    for (const char* id : {"<UILabel id =\"OptionsTab_Controls\"", "<UILabel id=\"PM_Extras\""}) {
+        const size_t a = FindOutsideComments(s, id, tabs);
+        const size_t b = a == std::string::npos ? a : s.find("</UILabel>", a);
+        if (b == std::string::npos) {
+            Log("ui files: Options tab %s not found", id);
+            continue;
+        }
+        moved += "      " + s.substr(a, b + std::strlen("</UILabel>") - a) + "\n";
+        s.erase(a, b + std::strlen("</UILabel>") - a);
+    }
+    // The tabs are the submenu of a row of the main list: the game's OPTIONS was row 5 (menu.elements[5]); ours is row 0
+    // of its view (the other entries hidden, PatchPauseMenu).
+    ReplaceAfter(s, "<UIList id=\"OptionsCatagoriesTabs\"", "flashObject=\"menu.elements[5]\"", "flashObject=\"menu.elements[0]\"");
+    // Our list leaves when another tab shows (the game's lists exit each other in their onshow).
+    for (const char* id : {"\"OptionsTab_Gamepad\"", "\"OptionsTab_KBM\"", "\"OptionsTab_Audio\"", "\"OptionsTab_Display\"",
+                           "\"OptionsTab_Graphics\"", "\"OptionsTab_Legal\""}) {
+        const size_t a = s.find(id, tabs);
+        const size_t gt = a == std::string::npos ? a : s.find('>', a);
+        if (gt != std::string::npos) s.insert(gt + 1, "\n          <onfocused expr=\"Exit(RdmpOptionsList_MP)\"></onfocused>");
+    }
+    const std::string ourTab =
+        "\n        <UILabel id=\"RdmpOptionsTab_MP\" text=\"Common_Null\">\n"
+        "          <onfocused expr=\"SendEvent('rdmp.opt.load')\"></onfocused>\n"
+        "          <onfocused expr=\"Include(omp_action)\"></onfocused>\n"
+        "          <onfocused expr=\"Exclude(omp_enter)\"></onfocused>\n"
+        "          <onfocused expr=\"activate(RdmpOptionsList_MP)\"></onfocused>\n"
+        "          <onfocused expr=\"activate(Options_arrows)\"></onfocused>\n"
+        "          <onfocused expr=\"show(Options_arrows)\"></onfocused>\n"
+        "          <onfocused expr=\"show(RdmpOptionsList_MP)\"></onfocused>\n"
+        "          <onunfocused expr=\"Exit(Options_Main_Prompts)\"></onunfocused>\n"
+        "          <onfocused expr=\"Enter(Options_Main_Prompts)\"></onfocused>\n"
+        "          <transition event=\"@UI.ACCEPT*RELEASED\" consume=\"true\">\n"
+        "            <action expr=\"focus(RdmpOptionsList_MP)\"></action>\n"
+        "            <action expr=\"Unfocus(OptionsCatagoriesTabs)\"></action>\n"
+        "            <action expr=\"Exit(Options_Main_Prompts)\"></action>\n"
+        "            <action expr=\"Enter(Options_Prompts)\"></action>\n"
+        "            <action expr=\"SendEvent('AUDIO_StartMenuItemSelected')\"></action>\n"
+        "          </transition>\n"
+        "        </UILabel>\n";
+    if (const size_t gt = s.find('>', s.find("<UIList id=\"OptionsCatagoriesTabs\"")); gt != std::string::npos) s.insert(gt + 1, ourTab);
+    // the never-entered container, after the tab list
+    if (const size_t end = FindOutsideComments(s, "</UIList>", s.find("<UIList id=\"OptionsCatagoriesTabs\"")); end != std::string::npos)
+        s.insert(end + std::strlen("</UIList>"), "\n    <UILayer id=\"RdmpOptionsUnused\">\n" + moved + "    </UILayer>");
+    // The MULTIPLAYER rows: a label and a UIOption each, like the game's rows. Labels and values without a string-table
+    // key are set by id (g_texts); values are read and written by the mod on rdmp.opt.load / rdmp.opt.changed.
+    auto option = [](const char* id, const std::string& values) {
+        return std::string("      <UIList horizontal=\"true\" scrollable=\"false\" allowInput=\"false\">\n"
+                           "        <onfocused expr=\"focus(") + id + ")\"></onfocused>\n"
+               "        <UILabel id=\"" + id + "_Label\" text=\"Common_Null\"></UILabel>\n"
+               "        <UIOption id=\"" + id + "\" allowWrap=\"true\">\n"
+               "          <onchanged expr=\"SendEvent('rdmp.opt.changed')\"></onchanged>\n" + values +
+               "        </UIOption>\n"
+               "      </UIList>\n";
+    };
+    const std::string offOn = "          <UILabel text=\"Common_Off\"></UILabel>\n          <UILabel text=\"Common_On\"></UILabel>\n";
+    std::string distances;
+    for (int i = 0; i < static_cast<int>(std::size(kNametagDistances)); ++i)
+        distances += "          <UILabel id=\"RdmpOpt_Distance_" + std::to_string(i) + "\" text=\"Common_Null\"></UILabel>\n";
+    std::string list =
+        "<UIScrollableList id=\"RdmpOptionsList_MP\" MaxHeight=\"13\" vertical=\"true\" scrollable=\"true\" movie=\"list\" consume=\"true\" allowScrollbar=\"true\" allowMouseAutoSelect=\"true\">\n";
+    for (const char* other : {"OptionsList_Controls", "OptionsList_Audio", "OptionsList_Display", "OptionsList_Graphics", "OptionsList_Legal",
+                              "OptionsList_Gamepad", "OptionsList_KBM", "ExtrasLayer"})
+        list += std::string("      <onshow expr=\"Exit(") + other + ")\"></onshow>\n";
+    list +=
+        "      <transition event=\"@UI.CANCEL*RELEASED\" consume=\"true\">\n"
+        "        <action expr=\"PlaySound('HUD_MENU_BACK_MASTER')\"></action>\n"
+        "        <action expr=\"unfocus(RdmpOptionsList_MP)\"></action>\n"
+        "        <action expr=\"Focus(OptionsCatagoriesTabs)\"></action>\n"
+        "        <action expr=\"Enter(Options_Main_Prompts)\"></action>\n"
+        "        <action expr=\"Exit(Options_Prompts)\"></action>\n"
+        "      </transition>\n"
+        // Nickname: Accept opens the text entry
+        "      <UIList horizontal=\"true\" scrollable=\"false\" allowInput=\"false\">\n"
+        "        <onfocused expr=\"focus(RdmpOpt_Nick)\"></onfocused>\n"
+        "        <UILabel id=\"RdmpOpt_Nick_Label\" text=\"Common_Null\"></UILabel>\n"
+        "        <UIOption id=\"RdmpOpt_Nick\" allowWrap=\"false\">\n"
+        "          <transition event=\"@UI.ACCEPT*RELEASED\" consume=\"true\">\n"
+        "            <action expr=\"PlaySound('HUD_MENU_SELECT_MASTER')\"></action>\n"
+        "            <action expr=\"SendEvent('rdmp.edit.nick')\"></action>\n"
+        "            <action expr=\"Enter(RdmpTextEntry)\"></action>\n"
+        "          </transition>\n"
+        "          <UILabel id=\"RdmpOpt_Nick_Value\" text=\"Common_Null\"></UILabel>\n"
+        "        </UIOption>\n"
+        "      </UIList>\n" +
+        option("RdmpOpt_Nametags", offOn) + option("RdmpOpt_Distance", distances) + option("RdmpOpt_Chat", offOn) +
+        "    </UIScrollableList>\n    ";
+    s.insert(s.find("<UIList id=\"OptionsCatagoriesTabs\""), list);
+    // Options' own Back and focus loss
+    ReplaceAfter(s, "<rdrOptionsLayer id=\"OptionsLayer\">", "<action expr=\"focus(PauseMenu)\"></action>",
+                 "<action expr=\"SendEvent('rdmp.view.main')\"></action><action expr=\"focus(PauseMenu)\"></action>");
+    ReplaceAfter(s, "<rdrOptionsLayer id=\"OptionsLayer\">", "<onunfocused expr=\"Unfocus(ExtrasLayer)\"></onunfocused>",
+                 "<onunfocused expr=\"Unfocus(ExtrasLayer)\"></onunfocused>\n    <onunfocused expr=\"Unfocus(RdmpOptionsList_MP)\"></onunfocused>");
+    Log("ui files: Options patched (MULTIPLAYER tab, single-player tabs out)");
 }
 
 void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
@@ -216,7 +347,8 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
             s.insert(at + std::strlen(inc), "\n    <include src=\"rdmp/Browser.sc\"></include>");
             s.insert(t,
                      "<transition event=\"rdmp.openBrowser\" consume=\"true\">"
-                     "<action expr=\"Exit(PauseMenu_Main_Prompts)\"></action><action expr=\"unfocus(PauseMenu)\"></action>"
+                     "<action expr=\"Exit(PauseMenu_Main_Prompts)\"></action><action expr=\"SendEvent('rdmp.view.RdmpPM_Browser')\"></action>"
+                     "<action expr=\"unfocus(PauseMenu)\"></action>"
                      "<action expr=\"Enter(RdmpBrowser)\"></action><action expr=\"focus(RdmpBrowser)\"></action></transition>\n       "
                      // joining: our menus close, the world load takes over
                      "<transition event=\"rdmp.joining\" consume=\"true\"><action expr=\"Exit(RdmpBrowser)\"></action>"
@@ -224,6 +356,11 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
             Log("ui files: PauseMenuScene.sc patched (server browser)");
         }
         PatchPauseMenu(s);
+        return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
+    }
+    if (_stricmp(name, "Options.sc.xml") == 0) {
+        std::string s = ReadStream(g_open(name, a2, a3, a4));
+        PatchOptions(s);
         return s.empty() ? nullptr : Serve(s, name, a2, a3, a4);
     }
     if (_stricmp(name, "UserInterface.sc") == 0) {
@@ -248,7 +385,9 @@ void* OpenHook(const char* name, void* a2, void* a3, void* a4) {
                      "<action expr=\"Exit(logo)\"></action><action expr=\"Exit(background)\"></action>"
                      "<action expr=\"Exit(Startup)\"></action><action expr=\"UnstreamMovie('startscreen')\"></action>"
                      "<action expr=\"ClearStack()\"></action>"
-                     "<action expr=\"StackPush_NoTransition(HudSceneOffline)\"></action></transition>");
+                     "<action expr=\"StackPush_NoTransition(HudSceneOffline)\"></action></transition>"
+                     // rdmp.menu (dropped by the server): the main menu opens over the world, as the pause key does
+                     "\n    <transition event=\"rdmp.menu\"><action expr=\"StackPush(PauseMenuScene)\"></action></transition>");
         }
         Log("ui files: UserInterface.sc patched (rdmp/Main.sc included%s)", r != std::string::npos ? ", global transitions" : "");
         return Serve(s, name, a2, a3, a4);
@@ -319,9 +458,184 @@ std::map<std::string, std::string> g_texts = {
     {"RdmpPM_Disconnect", "DISCONNECT"},
     {"RdmpPM_Browser", "SERVER BROWSER"},
     {"RdmpPM_Direct", "DIRECT CONNECT"},
+    {"RdmpPM_Resume", "RESUME"},
     {"RdmpPM_Quit", "QUIT"},
     {"RdmpMenuTitle", "RED DEAD MULTIPLAYER"},
+    {"RdmpOptionsTab_MP", "MULTIPLAYER"},
+    {"RdmpOpt_Nick_Label", "Nickname"},
+    {"RdmpOpt_Nametags_Label", "Nametags"},
+    {"RdmpOpt_Distance_Label", "Nametag Distance"},
+    {"RdmpOpt_Chat_Label", "Chat"},
 };
+
+// A widget by id (FUN_1400ef100 on the UI root), 0 when the UI or the widget is not there.
+uintptr_t Widget(const char* id) {
+    const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
+    return root ? reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100))(root, id) : 0;
+}
+uintptr_t VFunc(uintptr_t object, size_t offset) {
+    return *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(object) + offset);
+}
+// UIOption value (what the game's Options read and write: vt+0x410(w, 0) = current index, vt+0x468(w, index, 0) sets it;
+// FUN_140626c10 / FUN_1406262b0).
+int OptionValue(const char* id) {
+    const uintptr_t w = Widget(id);
+    return w ? reinterpret_cast<int (*)(uintptr_t, int)>(VFunc(w, 0x410))(w, 0) : 0;
+}
+void SetOptionValue(const char* id, int value) {
+    if (const uintptr_t w = Widget(id)) reinterpret_cast<void (*)(uintptr_t, int, int)>(VFunc(w, 0x468))(w, value, 0);
+}
+
+// ---- Text entry: the game's own keyboard text input (the Extras tab's "enter cheat" path) ----
+// FUN_140623270 (ExtrasLayer.OnKeyboardActivate) starts it, FUN_140622a00 (per frame) shows the text, FUN_1406234a0
+// (UI_CheatEntered / UI_CheatCancelled) ends it:
+//   * virtual keyboard K = *(0x142AC4748) + 0x68: +0x160 initial text (wchar), +0x1c0 result (wchar), +0x220 / +0x224
+//     title / description text hashes, +0x228 state (0 open, 1 accepted, 2 cancelled), +0x22c open, +0x230 platform
+//     keyboard (vt+0 show(K + 0x270), vt+8 close), +0x280 / +0x2b8 / +0x2f0 title / initial / description strings
+//     (FUN_140eab570 assign, FUN_140ebd6b0 finish), +0x328 maximum length.
+//   * typed text T = *(*(0x142893518) + 0x68) (the input manager's text buffer): +0 std::wstring text, +0x20 allowed
+//     characters, +0x40 (cleared), +0x60 maximum length; wstring assign = FUN_1401fc820(str, wchar*, length).
+//   * the box shows the game's dynamic text Enter_Cheat_Dialog, formatted with FUN_1400fb250(textMgr, key, fmt, ...).
+struct TextEntry {
+    std::string purpose;  // "nick", "direct"
+    std::string label;
+    std::string shown;    // the text last put in the box
+    bool open = false;
+} g_entry;
+std::string g_lastAddress;  // the last Direct Connect address (offered again)
+ULONGLONG g_menuAtMs = 0;   // when to open the main menu again after a Disconnect (0 = not pending)
+
+uint32_t TextHash(const char* key) {
+    const uint32_t h = reinterpret_cast<uint32_t (*)(const char*, int)>(GameAddr(0x1400C7510))(key, 0);
+    return ((h * 9) >> 11 ^ h * 9) * 0x8001;
+}
+uintptr_t Keyboard() {
+    const uintptr_t sys = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AC4748));
+    return sys ? sys + 0x68 : 0;
+}
+uintptr_t TypedText() {
+    const uintptr_t input = *reinterpret_cast<uintptr_t*>(GameAddr(0x142893518));
+    return input ? *reinterpret_cast<uintptr_t*>(input + 0x68) : 0;
+}
+std::string ReadTyped() {
+    const uintptr_t t = TypedText();
+    if (!t) return {};
+    const size_t size = *reinterpret_cast<size_t*>(t + 0x10);
+    const size_t cap = *reinterpret_cast<size_t*>(t + 0x18);
+    const wchar_t* w = cap >= 8 ? *reinterpret_cast<const wchar_t**>(t) : reinterpret_cast<const wchar_t*>(t);
+    if (!size || !w) return {};
+    char utf8[256];
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w, static_cast<int>((std::min)(size, size_t{100})), utf8, sizeof(utf8) - 1, nullptr, nullptr);
+    return std::string(utf8, n > 0 ? n : 0);
+}
+void ShowTyped(const std::string& text) {
+    g_entry.shown = text;
+    const uintptr_t mgr = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45608));
+    if (!mgr) return;
+    reinterpret_cast<void (*)(uintptr_t, const char*, const char*, ...)>(GameAddr(0x1400FB250))(
+        mgr, "Enter_Cheat_Dialog", "%s:\n<0xffff00>%s</0x>_", g_entry.label.c_str(), text.c_str());
+    if (const uintptr_t box = Widget("RdmpTextEntry")) reinterpret_cast<void (*)(uintptr_t)>(VFunc(box, 0x3d0))(box);
+}
+
+bool TextEntryBegin(const char* purpose, const char* label, const std::string& initial, int maxLength) {
+    const uintptr_t k = Keyboard(), t = TypedText();
+    const uintptr_t mgr = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45608));
+    if (!k || !t || !mgr) {
+        Log("ui: text entry not available (keyboard %p, text %p)", reinterpret_cast<void*>(k), reinterpret_cast<void*>(t));
+        return false;
+    }
+    g_entry.purpose = purpose;
+    g_entry.label = label;
+    if (!*reinterpret_cast<uint8_t*>(k + 0x22c)) {  // (what FUN_140623270 does; skipped while one is open)
+        auto text = reinterpret_cast<uintptr_t (*)(uintptr_t, uint32_t)>(GameAddr(0x1400FB020));
+        auto assign = reinterpret_cast<void (*)(uintptr_t, uintptr_t)>(GameAddr(0x140EAB570));
+        auto finish = reinterpret_cast<void (*)(uintptr_t)>(GameAddr(0x140EBD6B0));
+        *reinterpret_cast<uint16_t*>(k + 0x160) = 0;
+        *reinterpret_cast<uint32_t*>(k + 0x220) = TextHash("Common_Null");
+        *reinterpret_cast<uint32_t*>(k + 0x224) = TextHash("Common_Null");
+        *reinterpret_cast<uint16_t*>(k + 0x1c0) = 0;
+        *reinterpret_cast<uint32_t*>(k + 0x228) = 0;
+        assign(k + 0x280, text(mgr, *reinterpret_cast<uint32_t*>(k + 0x220)));
+        finish(k + 0x280);
+        assign(k + 0x2b8, k + 0x160);
+        finish(k + 0x2b8);
+        assign(k + 0x2f0, text(mgr, *reinterpret_cast<uint32_t*>(k + 0x224)));
+        finish(k + 0x2f0);
+        *reinterpret_cast<uint32_t*>(k + 0x328) = static_cast<uint32_t>(maxLength);
+        const uintptr_t platform = *reinterpret_cast<uintptr_t*>(k + 0x230);
+        reinterpret_cast<void (*)(uintptr_t, uintptr_t)>(VFunc(platform, 0))(platform, k + 0x270);
+        *reinterpret_cast<uint8_t*>(k + 0x22c) = 1;
+    }
+    auto wassign = reinterpret_cast<void (*)(uintptr_t, const wchar_t*, size_t)>(GameAddr(0x1401FC820));
+    static const wchar_t kAllowed[] = L"0123456789 abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ`!\"$%^&*()-_=+[];:'@#~,./\\?|";
+    wchar_t w[128] = L"";
+    MultiByteToWideChar(CP_UTF8, 0, initial.c_str(), -1, w, 127);
+    wassign(t, w, wcslen(w));
+    *reinterpret_cast<int32_t*>(t + 0x60) = maxLength;
+    wassign(t + 0x40, L"", 0);
+    wassign(t + 0x20, kAllowed, wcslen(kAllowed));
+    g_entry.open = true;
+    ShowTyped(initial);
+    Log("ui: text entry \"%s\" opened", label);
+    return true;
+}
+
+// Closes the text entry (accepted or not, FUN_1406234a0); returns what was typed.
+std::string TextEntryEnd(bool accepted) {
+    const std::string typed = ReadTyped();
+    g_entry.open = false;
+    if (const uintptr_t k = Keyboard(); k && *reinterpret_cast<uint8_t*>(k + 0x22c)) {
+        *reinterpret_cast<uint32_t*>(k + 0x228) = accepted ? 1 : 2;
+        *reinterpret_cast<uint8_t*>(k + 0x22c) = 0;
+        const uintptr_t platform = *reinterpret_cast<uintptr_t*>(k + 0x230);
+        reinterpret_cast<void (*)(uintptr_t)>(VFunc(platform, 8))(platform);
+    }
+    return typed;
+}
+
+void TextEntryFrame() {
+    if (!g_entry.open) return;
+    const std::string typed = ReadTyped();
+    if (typed != g_entry.shown) ShowTyped(typed);
+}
+
+// MULTIPLAYER options: the values from the client DLL into the rows, and back.
+NetSettings g_settings{};
+bool g_loadingMpOptions = false;  // setting a UIOption raises its onchanged (rdmp.opt.changed): not a change by the player
+std::string g_mpHeader = "MULTIPLAYER";
+void LoadMpOptions() {
+    // Options' header (Options_Header, a text widget the game's tabs set by key with SetTextCB): our literal text.
+    if (const uintptr_t h = Widget("Options_Header")) {
+        *reinterpret_cast<uint8_t*>(h + 0x80) = 0;
+        *reinterpret_cast<const char**>(h + 0x88) = g_mpHeader.c_str();
+        reinterpret_cast<void (*)(uintptr_t)>(VFunc(h, 0x3d0))(h);
+    }
+    if (!NetGetSettings(&g_settings)) {
+        Log("ui: multiplayer settings not available (client not up)");
+        return;
+    }
+    g_loadingMpOptions = true;
+    g_texts["RdmpOpt_Nick_Value"] = g_settings.nickname;
+    SetOptionValue("RdmpOpt_Nametags", g_settings.nametags ? 1 : 0);
+    int best = 0;
+    for (int i = 0; i < static_cast<int>(std::size(kNametagDistances)); ++i)
+        if (std::abs(kNametagDistances[i] - g_settings.nametagDistance) < std::abs(kNametagDistances[best] - g_settings.nametagDistance)) best = i;
+    SetOptionValue("RdmpOpt_Distance", best);
+    SetOptionValue("RdmpOpt_Chat", g_settings.chat ? 1 : 0);
+    g_loadingMpOptions = false;
+}
+void SaveMpOptions() {
+    if (g_loadingMpOptions) return;
+    g_settings.nametags = OptionValue("RdmpOpt_Nametags") ? 1 : 0;
+    const int d = OptionValue("RdmpOpt_Distance");
+    g_settings.nametagDistance = kNametagDistances[(std::clamp)(d, 0, static_cast<int>(std::size(kNametagDistances)) - 1)];
+    g_settings.chat = OptionValue("RdmpOpt_Chat") ? 1 : 0;
+    NetSetSettings(g_settings);
+    NetGetSettings(&g_settings);  // (the nickname as cleaned)
+    g_texts["RdmpOpt_Nick_Value"] = g_settings.nickname;
+    Log("ui: multiplayer settings saved (name \"%s\", nametags %d at %d m, chat %d)", g_settings.nickname, g_settings.nametags,
+        g_settings.nametagDistance, g_settings.chat);
+}
 
 // Server browser model (rows of ui/native/Browser.sc: RdmpSrv_<i> with RdmpSrvName_<i> / RdmpSrvInfo_<i>).
 constexpr int kBrowserRows = 24;
@@ -511,8 +825,14 @@ void ExecFile() {
                 Log("ui exec: mem %s %s -> %s", movie, var, p ? (std::to_string(*reinterpret_cast<uint8_t*>(p)) + " / " + std::to_string(*reinterpret_cast<uint32_t*>(p))).c_str() : "null");
                 continue;
             }
+            case 'h': {  // h <widget> <0|1>: show / hide it (FUN_1400fe810)
+                if (const uintptr_t w = Widget(movie))
+                    reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810))(w, atoi(var) ? 1 : 0);
+                break;
+            }
             case 'a':    // a <widget>...: is each one active (vt+0xd8(w, 1))
-            case 'n': {  // n <widget>: Enter it (vt+0x160(w, 1), the Enter action)
+            case 'n':    // n <widget>: Enter it (vt+0x160(w, 1), the Enter action)
+            case 'x': {  // x <widget>: Exit it (vt+0x160(w, 0))
                 const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
                 auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
                 std::string names = std::string(movie) + " " + var + " " + rest;
@@ -526,11 +846,12 @@ void ExecFile() {
                     const uintptr_t w = root ? find(root, id.c_str()) : 0;
                     if (!w) { strcat_s(report, (id + "=? ").c_str()); continue; }
                     const uintptr_t vt = *reinterpret_cast<uintptr_t*>(w);
-                    if (kind == 'n') reinterpret_cast<void (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(vt + 0x160))(w, 1);
+                    if (kind == 'n' || kind == 'x') reinterpret_cast<void (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(vt + 0x160))(w, kind == 'n' ? 1 : 0);
                     const bool on = reinterpret_cast<bool (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(vt + 0xd8))(w, 1);
-                    strcat_s(report, (id + (on ? "=on " : "=off ")).c_str());
+                    const bool hidden = (*reinterpret_cast<uint16_t*>(w + 0x28) & 0x800) != 0;  // FUN_1400fe810's flag
+                    strcat_s(report, (id + (on ? "=on" : "=off") + (hidden ? "(hidden) " : " ")).c_str());
                 }
-                Log("ui exec: %s -> %s", kind == 'n' ? "enter" : "active", report);
+                Log("ui exec: %s -> %s", kind == 'n' ? "enter" : kind == 'x' ? "exit" : "active", report);
                 continue;
             }
             default: continue;
@@ -545,10 +866,13 @@ void ExecFile() {
 void UiFilesFrame(bool frontEnd) {
     if (!g_open) return;
     if (g_exec) ExecFile();
-    if (frontEnd) {
-        NetTitleFrame();
-        PollBrowser();
+    if (g_menuAtMs && GetTickCount64() >= g_menuAtMs) {
+        g_menuAtMs = 0;
+        PostUiEvent("rdmp.menu");
     }
+    if (frontEnd) NetTitleFrame();  // (with a world loaded the client is pumped by the net frame)
+    PollBrowser();                  // (the browser also works in game, after a Disconnect)
+    TextEntryFrame();
     const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
     if (!root) return;
     auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
@@ -566,6 +890,31 @@ void UiFilesFrame(bool frontEnd) {
     ApplyBrowserRows();
 }
 
+namespace {
+// The main list's entries for where we are: on a server (Resume, Options, Disconnect, Quit) or not (Server Browser,
+// Direct Connect, Options, Quit), also with a world loaded behind the menu after a Disconnect. FUN_1400fe810(widget, hide).
+void ApplyMainEntries() {
+    const bool onServer = NetOnServer();
+    auto setHidden = reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810));
+    const struct { const char* id; bool show; } kItems[] = {
+        {"RdmpPM_Resume", onServer}, {"RdmpPM_Browser", !onServer}, {"RdmpPM_Direct", !onServer},
+        {"RdmpPM_Disconnect", onServer},
+        // the pause screen's pocket watch and money mean nothing off a server
+        {"clock", onServer}, {"pauseMoney", onServer}, {"pauseMoneyValue", onServer}};
+    for (const auto& it : kItems)
+        if (const uintptr_t w = Widget(it.id)) setHidden(w, it.show ? 0 : 1);
+    // RED DEAD MULTIPLAYER over the menu off a server (Enter = vt+0x160(w, 1), Exit = vt+0x160(w, 0))
+    if (const uintptr_t t = Widget("RdmpMenuTitle")) reinterpret_cast<void (*)(uintptr_t, int)>(VFunc(t, 0x160))(t, onServer ? 0 : 1);
+}
+
+// A join started from the menus: they close (rdmp.joining, PauseMenuScene.sc patch). With the world still loaded (after a
+// Disconnect) no world load follows, so the HUD takes the UI stack now (rdmp.ingame, as when a world load finishes).
+void JoinStarted() {
+    PostUiEvent("rdmp.joining");
+    if (GameflowWorldLoadStarted()) PostUiEvent("rdmp.ingame");
+}
+}  // namespace
+
 void UiFilesOnEvent(const char* name) {
     if (!g_open || !name || std::strncmp(name, "rdmp.", 5) != 0) return;
     const std::string ev = name + 5;
@@ -578,28 +927,75 @@ void UiFilesOnEvent(const char* name) {
         if (i < 0 || i >= static_cast<int>(g_rows.size()) || g_rows[i].host.empty()) return;
         Log("ui: join %s:%d (%s)", g_rows[i].host.c_str(), g_rows[i].port, g_rows[i].name.c_str());
         NetBrowserJoin(g_rows[i].host.c_str(), g_rows[i].port);
-        PostUiEvent("rdmp.joining");  // our menus close (PauseMenuScene.sc patch), the world load takes over
+        JoinStarted();  // our menus close (PauseMenuScene.sc patch), the world load takes over
     } else if (ev == "pause") {
-        // The one menu opens (title or pause): show the entries that fit, before the list is entered.
-        const bool frontEnd = !GameflowWorldLoadStarted();
-        const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
-        auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
+        ApplyMainEntries();  // the one menu opens (title or pause): the entries that fit, before the list is entered
+    } else if (ev.rfind("view.", 0) == 0) {
+        // A view opens from the main list (rdmp.view.<entry id>) or closes (rdmp.view.main). The pause scene draws a
+        // view's category list as the submenu of a row of the main list (menu.elements[0]): while it is open, every other
+        // entry is hidden, so its own entry is row 0 and heads the view. Closing restores what was shown (hidden = widget
+        // +0x28 flag 0x800).
+        static const char* const kEntries[] = {"RdmpPM_Resume", "RdmpPM_Browser", "RdmpPM_Direct", "PM_Options", "RdmpPM_Disconnect", "RdmpPM_Quit"};
+        static bool shown[std::size(kEntries)] = {};
+        static bool inView = false;
         auto setHidden = reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810));
-        const struct { const char* id; bool hide; } kItems[] = {
-            {"RdmpPM_Browser", !frontEnd}, {"RdmpPM_Direct", !frontEnd}, {"RdmpPM_Disconnect", frontEnd},
-            // the pause screen's pocket watch and money mean nothing on the title
-            {"clock", frontEnd}, {"pauseMoney", frontEnd}, {"pauseMoneyValue", frontEnd}};
-        for (const auto& it : kItems)
-            if (const uintptr_t w = root ? find(root, it.id) : 0) setHidden(w, it.hide ? 1 : 0);
-        // RED DEAD MULTIPLAYER over the menu on the title (Enter = vt+0x160(w, 1), Exit = vt+0x160(w, 0))
-        if (const uintptr_t t = root ? find(root, "RdmpMenuTitle") : 0)
-            reinterpret_cast<void (*)(uintptr_t, int)>(*reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(t) + 0x160))(t, frontEnd ? 1 : 0);
+        const std::string entry = ev.substr(5);
+        if (entry != "main" && !inView) {
+            for (size_t i = 0; i < std::size(kEntries); ++i) {
+                const uintptr_t w = Widget(kEntries[i]);
+                shown[i] = w && !(*reinterpret_cast<uint16_t*>(w + 0x28) & 0x800);
+                if (w && entry != kEntries[i]) setHidden(w, 1);
+            }
+            inView = true;
+        } else if (entry == "main" && inView) {
+            for (size_t i = 0; i < std::size(kEntries); ++i)
+                if (const uintptr_t w = Widget(kEntries[i])) setHidden(w, shown[i] ? 0 : 1);
+            inView = false;
+        }
     } else if (ev == "back") {
-        PostUiEvent(GameflowWorldLoadStarted() ? "rdmp.back.ingame" : "rdmp.back.title");
-    } else if (ev == "direct") {
-        Log("ui: direct connect (not built yet)");
+        PostUiEvent(NetOnServer() ? "rdmp.back.ingame" : "rdmp.back.title");
+    } else if (ev == "edit.direct") {
+        TextEntryBegin("direct", "Server address (host:port)", g_lastAddress, 63);
+    } else if (ev == "edit.nick") {
+        TextEntryBegin("nick", "Nickname", g_settings.nickname, 22);
+    } else if (ev == "text.ok" || ev == "text.cancel") {
+        if (!g_entry.open) return;
+        const bool ok = ev == "text.ok";
+        std::string text = TextEntryEnd(ok);
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        while (!text.empty() && text.front() == ' ') text.erase(0, 1);
+        if (!ok || text.empty()) return;
+        if (g_entry.purpose == "nick") {
+            strncpy_s(g_settings.nickname, text.c_str(), _TRUNCATE);
+            SaveMpOptions();
+        } else if (g_entry.purpose == "direct") {
+            // host[:port] (the port defaults to the server's default 27015); joins like the browser (saved under Recent)
+            std::string host = text;
+            int port = 27015;
+            if (const size_t colon = text.rfind(':'); colon != std::string::npos) {
+                host = text.substr(0, colon);
+                port = atoi(text.c_str() + colon + 1);
+            }
+            if (host.empty() || port <= 0 || port > 65535) {
+                Log("ui: direct connect: \"%s\" is not host:port", text.c_str());
+                return;
+            }
+            g_lastAddress = text;
+            Log("ui: direct connect %s:%d", host.c_str(), port);
+            NetBrowserJoin(host.c_str(), port);
+            JoinStarted();
+        }
+    } else if (ev == "opt.load") {
+        LoadMpOptions();
+    } else if (ev == "opt.changed") {
+        SaveMpOptions();
     } else if (ev == "disconnect") {
+        // Leave the server and stay in this menu, now the main menu: the world stays loaded behind it and the player waits
+        // in limbo for the next server (netclient, sandbox ScriptLeaveSession). The pause scene builds its menu column
+        // when it opens, from the entries shown then (entries shown later get no row): the Disconnect entry closes it and
+        // it opens again with the main menu's entries (rdmp.menu, queued after the entry's actions).
         NetDisconnect();
+        g_menuAtMs = GetTickCount64() + 400;  // (posted while the scene is still closing, the push is lost)
     } else if (ev.rfind("favorite.", 0) == 0) {
         const int i = atoi(ev.c_str() + 9);
         if (i < 0 || i >= static_cast<int>(g_rows.size()) || g_rows[i].host.empty()) return;
@@ -615,6 +1011,8 @@ void InstallUiFiles(const wchar_t* iniPath) {
     g_exec = GetPrivateProfileIntW(L"debug", L"ui_exec", 0, iniPath) != 0;
     wcscpy_s(g_execPath, iniPath);
     if (wchar_t* slash = wcsrchr(g_execPath, L'\\')) wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - g_execPath), L"ui_exec.txt");
+    for (int i = 0; i < static_cast<int>(std::size(kNametagDistances)); ++i)
+        g_texts["RdmpOpt_Distance_" + std::to_string(i)] = std::to_string(kNametagDistances[i]) + " m";
     wcscpy_s(g_dir, iniPath);
     if (wchar_t* slash = wcsrchr(g_dir, L'\\')) wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - g_dir), L"ui\\native\\");
     Log("ui files: %s (our menus from %S)", InstallOpenHook() ? "hook installed" : "hook FAILED (bytes mismatch)", g_dir);

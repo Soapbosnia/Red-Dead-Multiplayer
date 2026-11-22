@@ -16,6 +16,7 @@ namespace RDMP {
 namespace rdmp::fw {
     struct Host;
     struct BrowserServer;
+    struct Settings;
 }
 
 namespace RDMP::Frontend {
@@ -31,4 +32,8 @@ namespace RDMP::Frontend {
     int BrowserPoll(rdmp::fw::BrowserServer *out, int max);
     void BrowserFavorite(const char *host, int port, const char *name, bool add);
     bool BrowserConnect(const char *host, int port, const char *password);
+
+    // Multiplayer settings for the native menus (fw_api v12): the HTML menu's settings, same keys.
+    void GetSettings(rdmp::fw::Settings *out);
+    void SetSettings(const rdmp::fw::Settings &in);
 } // namespace RDMP::Frontend

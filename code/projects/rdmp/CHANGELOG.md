@@ -1,6 +1,19 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Native menus, each entry its own view:** Options and the server browser open as their own view in the menu column
+  (OPTIONS / SERVER BROWSER with their tabs under it; the Options tabs were not visible before). The in-game menu is
+  Resume, Options, Disconnect, Quit (Map left the list); off a server: Server Browser, Direct Connect, Options, Quit.
+* **Options for multiplayer:** the single-player tabs (Gameplay: Golden Guns, Autosave; Extras: cheats) are gone; a
+  MULTIPLAYER tab (first) sets nickname, nametags, nametag distance and chat ([net] name, [client] nametags /
+  nametag_distance / chat in rdmp.ini, applied at once). fw_api v12 (get_settings / set_settings).
+* **Direct Connect** (host:port, port 27015 if left out) and the nickname use the game's own text entry box (the cheat
+  entry); a direct join is remembered under Recent like a browser join.
+* **Disconnect** leaves at once (no prompt, no game restart): the world stays loaded, the player waits in limbo and
+  the menu becomes the main menu; joining again gives the HUD back without a world load. Dropped by the server: the
+  main menu opens.
+* Fixed: quitting / ending the game loop crashed in rdmp_client.dll (the Framework client was first torn down by its
+  static destructor at process exit); it is shut down when our game loop ends.
 * **One native menu (MTA-style), title and pause:** Map (in game), Server Browser, Direct Connect, Settings (the
   game's Options), Disconnect (in game, with confirmation), Quit; Back on the title asks to quit, in game it closes.
   Server browser in the game's Options style: Internet / Local / Favorites / Recent, players and ping, Join /

@@ -503,4 +503,24 @@ namespace RDMP::Frontend {
         Connect(host, port, password ? password : "");
         return !g_pendingAddress.empty();
     }
+
+    void GetSettings(rdmp::fw::Settings *out) {
+        if (!out) {
+            return;
+        }
+        *out = {};
+        strncpy_s(out->nickname, CleanNickname(IniString(L"net", L"name", L"player")).c_str(), _TRUNCATE);
+        out->nametags        = IniInt(L"client", L"nametags", 1) != 0 ? 1 : 0;
+        out->nametagDistance = IniInt(L"client", L"nametag_distance", 60);
+        out->chat            = IniInt(L"client", L"chat", 1) != 0 ? 1 : 0;
+    }
+
+    void SetSettings(const rdmp::fw::Settings &in) {
+        std::string nickname(in.nickname, strnlen(in.nickname, sizeof(in.nickname)));
+        IniWrite(L"net", L"name", CleanNickname(nickname));
+        IniWrite(L"client", L"nametags", in.nametags ? "1" : "0");
+        IniWrite(L"client", L"nametag_distance", std::to_string(std::clamp(static_cast<int>(in.nametagDistance), 5, 500)));
+        IniWrite(L"client", L"chat", in.chat ? "1" : "0");
+        ApplySettings();
+    }
 } // namespace RDMP::Frontend

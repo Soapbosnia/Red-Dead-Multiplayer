@@ -2130,9 +2130,9 @@ void SetUiInputLock(bool locked) {
 
 // The session ended (disconnected / kicked): black screen and no control until a script spawns the player again on the
 // next server, like a player who just joined.
-void ScriptLeaveSession() {
-    RunOnMainThread([] {
-        EngineFadeToBlack(0.5f, "left the server");
+void ScriptLeaveSession(bool fadeToBlack) {
+    RunOnMainThread([fadeToBlack] {
+        if (fadeToBlack) EngineFadeToBlack(0.5f, "left the server");
         g_scriptControl = false;
         g_limbo         = true; // the next server's spawnPlayer leaves limbo and gives control back
         ApplyPlayerControl("left the server");

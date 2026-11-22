@@ -37,6 +37,7 @@
 
 #include "events.h"
 #include "log.h"
+#include "netclient.h"
 #include "uifiles.h"
 #include "patch.h"
 #include "sandbox.h"
@@ -582,6 +583,7 @@ void OurRun(uintptr_t game) {
         if (exitAfter) break;
     }
     Log("gameflow: our game loop exiting");
+    NetShutdown();
     int32_t us = 100000;
     F<void (*)(int32_t*)>(0x140EB9160)(&us);
     const uintptr_t sysApp = At<uintptr_t>(G<uintptr_t>(0x142893448), 0x48);

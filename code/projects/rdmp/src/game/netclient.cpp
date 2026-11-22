@@ -29,6 +29,7 @@
 #include "remote_timeline.h"
 #include "vehicles.h"
 #include "gameflow.h"
+#include "events.h"
 #include "log.h"
 #include "mainthread.h"
 #include "sandbox.h"
@@ -103,6 +104,8 @@ std::map<uint16_t, Puppet> g_puppetsById;
 fw::Api g_api{};
 bool g_fwUp = false;
 fw::Conn g_conn = fw::Conn::Connecting;
+// We joined a server from the native menus and have not left it (the menus show the in-game entries).
+bool g_session = false;
 ULONGLONG g_nextStats = 0, g_nextRetry = 0;
 // rdmp.ini [net] autoconnect: 1 = connect to [net] server at start and keep retrying (development); 0 (default) = the
 // client's main menu (server browser) decides where to connect.
@@ -157,7 +160,11 @@ void FwStep() {
     if (conn != g_conn) {
         Log("net: connection %s", conn == fw::Conn::Connected ? "established" : conn == fw::Conn::Connecting ? "connecting" : "closed");
         if (g_conn == fw::Conn::Connected && conn != fw::Conn::Connected) {
-            ScriptLeaveSession();  // back to limbo behind the main menu
+            // back to limbo behind the main menu; with the native menus without a fade (sandbox.h)
+            ScriptLeaveSession(!GameflowTitleMode());
+            // Dropped by the server (not our Disconnect, whose menu is still open): the main menu opens (uifiles.cpp).
+            if (GameflowTitleMode() && g_session) PostUiEvent("rdmp.menu");
+            g_session = false;
         }
         g_conn = conn;
     }
@@ -590,12 +597,42 @@ void NetBrowserFavorite(const char* host, int port, const char* name, bool add) 
 }
 
 void NetDisconnect() {
+    g_session = false;
+    g_joinHost[0] = 0;
     if (!g_fwUp) return;
     Log("net: disconnecting (pause menu)");
     g_api.disconnect();
 }
 
+bool NetOnServer() { return g_session; }
+
+void NetShutdown() {
+    if (!g_fwUp) return;
+    g_fwUp = false;
+    Log("net: shutting the framework client down (game loop ended)");
+    g_api.shutdown();
+    Log("net: framework client shut down");
+}
+
+bool NetGetSettings(NetSettings* out) {
+    if (!g_fwUp || !out) return false;
+    fw::Settings s;
+    g_api.get_settings(&s);
+    strcpy_s(out->nickname, s.nickname);
+    out->nametags = s.nametags, out->nametagDistance = s.nametagDistance, out->chat = s.chat;
+    return true;
+}
+
+void NetSetSettings(const NetSettings& in) {
+    if (!g_fwUp) return;
+    fw::Settings s;
+    strcpy_s(s.nickname, in.nickname);
+    s.nametags = in.nametags, s.nametagDistance = in.nametagDistance, s.chat = in.chat;
+    g_api.set_settings(&s);
+}
+
 void NetBrowserJoin(const char* host, int port) {
+    g_session = true;
     strcpy_s(g_joinHost, host);
     g_joinPort = port;
     GameflowRequestWorldLoad();

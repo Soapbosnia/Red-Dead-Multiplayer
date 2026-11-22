@@ -77,8 +77,11 @@ void ScriptSetPlayerControl(bool enabled);
 void ScriptSetPlayerHealth(float health);
 // Main thread: our UI (chat input) holds the keyboard; player control stays off until released.
 void SetUiInputLock(bool locked);
-// The connection to the server ended: fade to black, no control (the main menu takes over).
-void ScriptLeaveSession();
+// The connection to the server ended: limbo (no control, invulnerable) until the next spawnPlayer, the main menu takes
+// over; fadeToBlack fades the screen out first (HTML menu).
+// fadeToBlack = false (native menus): no engine fade - it brings the UI's FadeToBlack scene, which ends the pause (the
+// menu the player left from) and holds the UI stack until a fade-in; the player stays where it is, in limbo behind the menu.
+void ScriptLeaveSession(bool fadeToBlack);
 
 // Sets the loader's "finish loading" request bit (the frame update acts on it once the world is ready).
 void RequestFinishLoading(const char* why);

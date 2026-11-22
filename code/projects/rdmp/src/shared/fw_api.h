@@ -21,7 +21,8 @@ namespace rdmp::fw {
 // v10: Host get_game_options / set_game_options (the game's own settings, shared/game_options.h).
 // v11: server browser for the native menus (browser_refresh / browser_poll / browser_favorite / browser_connect);
 //      disconnect.
-constexpr uint32_t kApiVersion = 11;
+// v12: multiplayer settings for the native menus (get_settings / set_settings).
+constexpr uint32_t kApiVersion = 12;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -127,6 +128,14 @@ struct BrowserServer {
     int32_t favorite = 0;  // in the favourites list
 };
 
+// The player's multiplayer settings (rdmp.ini [net] name, [client] nametags / nametag_distance / chat).
+struct Settings {
+    char nickname[32] = {};
+    int32_t nametags = 1;          // 1 = draw other players' names
+    int32_t nametagDistance = 60;  // metres
+    int32_t chat = 1;              // 1 = chat box shown
+};
+
 using LogFn = void (*)(const char* line);
 
 // What rdmp.dll offers the client DLL. Every function runs synchronously on the caller's thread, which is the game's
@@ -190,6 +199,10 @@ struct Api {
     void (*browser_favorite)(const char* host, int port, const char* name, int add);
     int (*browser_connect)(const char* host, int port, const char* password);
     void (*disconnect)();  // leave the server (the pause menu's Disconnect)
+    // Multiplayer settings: read them; save them to rdmp.ini and apply them at once (the nickname is cleaned the way the
+    // server accepts it and used from the next connection).
+    void (*get_settings)(Settings* out);
+    void (*set_settings)(const Settings* in);
 };
 
 }  // namespace rdmp::fw
