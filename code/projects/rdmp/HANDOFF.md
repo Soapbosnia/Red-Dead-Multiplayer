@@ -66,7 +66,7 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   registration is skipped), `host.cpp` = the `fw::Host` table for the client DLL, `netclient.cpp` = loads
   `rdmp_client.dll` and pumps it once per frame on the game's main thread (actions, puppets for remote players,
   blips).
-* `src/shared/fw_api.h` (v6): the C ABI between the two DLLs. Bump the version on any change; rebuild both.
+* `src/shared/fw_api.h` (v12): the C ABI between the two DLLs. Bump the version on any change; rebuild both.
 * `rdmp_client.dll` (src/client): `fw_client.h` (Framework client instance), `overlay.cpp` (D3D12 Present /
   ExecuteCommandLists hooks, DirectInput hooks so typing never reaches the game; borrows the game's swapchain and
   queue, never AddRefs them - the game checks), `hud.cpp` (dx* queue, nametags, chat box), `frontend.cpp` +
@@ -109,27 +109,33 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   "Game settings".
 * Native menus. Owner: custom menus built from the game's own UI are fine (also new screens). The menus are SCXML
   data; ours load with the game's (src/game/uifiles.cpp, ui/native/, re/NOTES.md "Native menus"). Working with
-  [game] title_screen=1 (build/bin/rdmp.ini; config default still 0): boot -> game legals (8 s) + loading -> our main
-  menu (title list) -> Server Browser (pause scene, Internet/Local/Favorites/Recent, real servers via fw_api v11) ->
-  Join -> the game's loading screen -> in game; pause menu = Map / Options / Disconnect; Settings = game's Options.
-  NEXT (owner's wishes, in order):
-  1. DONE (3a083d09): ONE menu like MTA: the pause scene's list as the main menu too (push PauseMenuScene at the title; the game
-     already hides Map while the title movie is loaded). Entries: Map (in game), Server Browser, Direct Connect,
-     Settings, Disconnect (in game), Quit; Back at the title = quit prompt (route Cancel through an rdmp.back event,
-     C++ posts rdmp.back.title / rdmp.back.ingame with XML transitions Enter(QuitGame) / StackPop()). Owner said the
-     pause menu "misses crucial stuff like settings etc." - confirm what is missing.
-  1b. Menu title "RED DEAD MULTIPLAYER": RdmpMenuTitle (list movie top_title) is entered on the title but NOT drawn
-     there (that slot belongs to list pages); try another text slot (pause_main) or the logo work.
-  2. Settings: hide single-player rows (Gameplay: Golden Guns, Autosave), add a MULTIPLAYER tab (nickname, nametags,
-     nametag distance, chat): patch Options.sc.xml like PauseMenuScene.sc (move items into a hidden container, never
-     delete: the game's C++ finds widgets by name and falls back to the root widget).
-  3. Disconnect: verify AwaitRebootTransition returns to our menu inside our own loop (one test froze after a
-     "closeRequested" UI event of unknown origin).
-  4. Logo RED DEAD MULTIPLAYER: rebuild the brush-letter textures (re/NOTES.md); needs a resource-load hook.
-  5. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
-  Test automation: scan-code keys only when RDR.exe is in front, NEVER Esc (it stops Claude). In game use
-  build/bin/ui_exec.txt ([debug] ui_exec=1): "k @PAUSE.PAUSE*RELEASED" opens the pause menu, "a <ids>" active
-  states, "e <event>", "m <addr> [off]". Start RDMPServer.exe for the Local tab (stop it before building).
+  [game] title_screen=1 (build/bin/rdmp.ini; config default still 0), all checked in game (2026-11-22):
+  boot -> game legals (8 s) + loading -> ONE menu (the pause scene's list), off a server: Server Browser, Direct
+  Connect, Options, Quit; on a server: Resume, Options, Disconnect, Quit (Map left the list on the owner's wish).
+  Each entry opens its own view: the column shows the entry as heading with its tabs under it (the scene draws a
+  category list as the submenu of a row; we hide the other entries so ours is row 0, menu.elements[0]).
+  - Options: single-player tabs out (Gameplay, Extras), MULTIPLAYER tab first: nickname (text entry), nametags,
+    nametag distance (20..500 m), chat; saved to rdmp.ini through the client DLL (fw_api v12), applied at once.
+  - Direct Connect: the game's own text entry (the cheat entry box), host[:port], joins like the browser (Recent).
+  - Disconnect: leaves in-process, no prompt: world stays, player in limbo (no fade: the engine fade's FadeToBlack UI
+    scene kills the pause and locks the UI stack), the scene closes and re-opens as the main menu; joining again
+    gives the HUD back (rdmp.ingame) without a world load. Dropped by the server: rdmp.menu opens the menu (NOT
+    tested yet: stop RDMPServer while joined). The game's own "return to main menu" restarts the process through
+    PlayRDR.exe -restart, without the mod: never use AwaitRebootTransition.
+  NEXT (owner's wishes):
+  1. Title text "RED DEAD MULTIPLAYER": RdmpMenuTitle (list movie top_title) is entered off a server but NOT drawn
+     (that slot belongs to list pages); try another text slot (pause_main) or the logo work.
+  2. Cosmetic: in game the menu column clips long entries (SERVER BROWSER / DIRECT CONNECT after a Disconnect) at the
+     left edge; the nickname row shows Change arrows that do nothing (UIOption with one value).
+  3. Back from Options via an injected "k @UI.CANCEL*RELEASED" sometimes also reaches the scene (quit prompt); check
+     with a real Esc press (the owner), it may be the injection only.
+  4. Graphics options that need a restart (RestartGame) use the game's process restart too: comes up without the mod.
+  5. Logo RED DEAD MULTIPLAYER: rebuild the brush-letter textures (re/NOTES.md); needs a resource-load hook.
+  6. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
+  Test automation: keys through computer-use (arrows with key, Enter / others with hold_key ~0.12 s) only when
+  RDR.exe is in front, NEVER Esc (it stops Claude). build/bin/ui_exec.txt ([debug] ui_exec=1): "k <input event>",
+  "e <ui event>", "a <ids>" (active / hidden), "n|x <id>" Enter / Exit, "h <id> 0|1" show / hide, "m <addr> [off]".
+  Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop it before building).
 
 ## Next (chosen: horses first)
 1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:
