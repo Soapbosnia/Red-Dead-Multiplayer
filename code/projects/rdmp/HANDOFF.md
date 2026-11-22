@@ -107,6 +107,14 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
   mouse sensitivity, a graphics option, then the keep / revert prompt), the game's files keep the values after a
   restart. Unconfirmed enum labels (frame limit, anti-aliasing, motion blur, upscaler qualities): see re/NOTES.md
   "Game settings".
+* Owner wants the game's NATIVE menus (the HTML menu: Quit broken, design disliked, world visible before it) and
+  explicitly CUSTOM menus built from the game's own UI (not taking over existing tabs). Found: the menus are SCXML
+  data; ours load with them (re/NOTES.md "Native menus"). Done: [game] title_screen=1 boots to the game's title
+  (legals 8 s, no world), Play -> our main menu (ui/native/MainMenuList.sc in place of the mode list), Settings ->
+  the game's Options. Next, in order: Server Browser screen (dynamic rows filled from C++; Internet / Local /
+  Favorites / Recent), Direct Connect (text entry: the game's cheat entry box is a candidate), Multiplayer Settings
+  (UIOption rows), join -> GameflowRequestWorldLoad + connect; then make title_screen=1 the default and retire the
+  HTML menu. Test automation: keys only via scan codes when RDR.exe is in front, NEVER Esc (stops Claude).
 * Next session (owner): a custom pause menu.
 
 ## Next (chosen: horses first)

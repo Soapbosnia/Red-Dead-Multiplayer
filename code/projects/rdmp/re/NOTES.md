@@ -660,3 +660,50 @@ components on a puppet, which other threads read playerInfo during the swap.
 - UI option ids (Scaleform): DisplayOption_*, ControlsOption_*, KBM_*, AudioOption_* (list in this file's history).
   The meaning of some enum values (FrameRateLimit, aaAntiAliasing, MotionBlurStyle, upscaler qualities) is not
   confirmed yet: the menu labels them, keeps unknown values as "Custom (n)", and offers a 15 s revert for graphics.
+
+## Native menus (2026-11-22, WIP: [game] title_screen=1, [debug] ui_widget_dump / ui_open)
+- Title mode boots the game's own front end inside our loop: Game::Init keeps the legals/logo controller, the original
+  loading frame FUN_1405f4390 runs, the "loading"/"startscreen" movies are not stubbed, OurRun starts PressStart
+  (t = FUN_1401e9c30(); FUN_140205900(t, "$/content/PressStart", 0x600, 0, 0); FUN_1402060b0(t, 0, 0, 0, 0);
+  game+0x144 = t+0x374) and BootStep does not open the boot gate nor start the world load until
+  GameflowRequestWorldLoad. With skip_videos=1 the title is up ~10 s after our loop starts (8 s legal pages).
+  Enter = Play -> the mode list (Normal / Hardcore / Undead Nightmare); the Settings key is layout-dependent (on a
+  QWERTZ keyboard the key labelled Y = scan code 0x2C) and opens the game's options (OptionsLayer) natively.
+- Widget registry (FUN_1400ef100): root = *(uiMgr+0xa0); +8 buckets, +0x10 u16 count; node {+0 name, +8 u16 len,
+  +0x10 widget, +0x18 next}. Widget +0x28 u16 flags (0x800 hidden; FUN_1400fe810(w, hide) toggles it and relayouts
+  the parent: vt+0x218 parent, parent vt+0x2b8). Text widgets vt 0x141C61950 (key hash +0x88, vt+0x420 SetKeyByName).
+- Class factories (name -> C++ ctor, FUN_1400f6e90 into *(0x142AAC8C0)+0x40): FUN_14063b5f0 (rdrOptionsLayer,
+  rdrLobbyLayer, rdrPauseMenuScene, ...), FUN_140483cd0 (rdr2NetUI, rdrNetworkingMenu, NetMenu, NetPlaylistItem,
+  UIFriendList, NetInvitesList, ...).
+- Screen stack: FUN_1400f2d50(*(uiMgr+0x90), widget, 1) pushes (array +0x5a0, count +0x6a0) and calls widget
+  vt+0x188 (activate); used e.g. by FUN_1404d97e0 for OL_NetworkingMenu.
+- The ORIGINAL RDR1 MULTIPLAYER MENU is loaded (2660 widgets on the title; dump: build\bin\ui_widgets.txt):
+  NetworkingLayerOffline (in PauseMenuScene, next to OptionsLayer): NetTabs {NetTab_Online, _Private, _Party, _LAN,
+  _Invite, _Exit}, NetOfflineTabs, Net_ContentLayer.s1 {NetContent_Public, _Private, _LAN, _Party (list class
+  vt 0x141C65420), OnlineInbox}, MPProfile (rank panel), NetLayer_Prompts. OL_NetworkingMenu (lobby, under
+  UserInterface): LobbyTabs {NetTab_Games, NetTab_Players}, NetLobby_Prompts. Pause menu MP tabs exist hidden
+  (PM_Network, PM_Leaderboards, PM_SocialClub, GameTab_ExitMp2Main; FUN_14061f8f0 hides them in single player).
+- Pushing NetworkingLayerOffline with FUN_1400f2d50 on the title opened the pause scene shell (red tint, clock,
+  "OPTIONS" header, prompts) but no networking content. Next: how PauseMenuScene selects its layer (the title's
+  Settings path: "AUDIO_StartMenuItemSelected" / "PauseBrush3Begin"), then fill NetContent_* rows.
+- (07:40, superseded) Filling the title Options' CHEATS rows from C++ worked, but taking over existing tabs was
+  dropped for real custom menus (below). Row layout for reference: row = extras+0x98+i*0x3f0, +0x178 label,
+  +0x218 value widget. Literal text on a text widget: +0x80 = 0, +0x88 = char*, vt+0x3d0.
+- THE MENUS ARE DATA: SCXML files in content.rpf (extract: re/tools/rpf6.py, needs pycryptodome + zstandard from
+  D:\Development\Tools\pylibs). Root "UserInterface.sc" <include>s every screen (Boot.sc = legals/title/mode list,
+  pausemenu/PauseMenuScene.sc, Options.sc.xml, Net/OfflineMenu.sc, ...). Elements: UILayer, UIPanel, UIScrollableList,
+  UIList, UILabel, UIOption, UIProgressBar, UIPromptStrip, UIButton (icon="{@UI.ACCEPT}"), class layers (rdrOptionsLayer
+  ...); <transition event=...> with actions Enter/Exit/Focus/StackPush/SendEvent/SendDelayedEvent/PlaySound/
+  SetFlashInt/StreamMovie and C++ calls ("HDRLayer.OnHDRStyleChanged()"); <ifdef expr="ULTIMATE"> build flags.
+- Loader: FUN_1400ec440(name, ...) opens every .sc (cache table *0x142ABC0C0 {hash, data, size}, served as
+  "memory:$%p,%d,%d:%s"; a name containing ':' is an absolute path). src/game/uifiles.cpp detours it (custom
+  trampoline: the prologue's 2nd instruction is mov r15,[rip]) and serves: UserInterface.sc + <include
+  src="rdmp/Main.sc">, Boot.sc with SinglePlayerList replaced by ui/native/MainMenuList.sc, rdmp/* from
+  build/bin/ui/native. Reading a game stream: device vt+0x70 size, FUN_1400c7c20 read, FUN_1400c7e90 close.
+- WORKS (08:10): title -> Play -> OUR main menu in the game's own style (Server Browser, Direct Connect, Multiplayer
+  Settings, Settings, Quit). Settings opens the game's Options; our items raise UI events (rdmp.browser, rdmp.direct,
+  rdmp.mpsettings) that reach our event hook. A plain UIPanel with movie="startscreen" draws no list: title-style
+  lists must live inside RDRUIStartScreen2 (its C++ class drives the movie). Texts not in the game's string table
+  are set at runtime by widget id (uifiles.cpp kTexts). Arrow keys = extended scan codes (E0 48/50).
+- Automation note: never send Esc while Claude controls the PC (any Esc stops the session). Keys: scan codes via
+  SendInput only when RDR.exe is in front (DirectInput ignores virtual-key-only input).

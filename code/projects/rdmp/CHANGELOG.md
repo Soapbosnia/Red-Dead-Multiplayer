@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Native menus (in progress, `[game] title_screen=1`, off by default):** the game boots through its own legal pages
+  and title screen (~10 s, the logo video skipped) with no world loaded; Settings and Quit are the game's own. Our
+  menus are written in the game's own UI language (SCXML, like its menus in content.rpf) and loaded with them
+  in-process (src/game/uifiles.cpp, files in ui/native/): Play opens the Red Dead Multiplayer main menu (Server
+  Browser, Direct Connect, Multiplayer Settings, Settings, Quit) in the title's style. Server browser, direct
+  connect, multiplayer settings and joining from it are next. `[debug] ui_widget_dump` / `ui_file_log` map menus.
 * **New main menu** (ui/): an original Red Dead Multiplayer logo and icon set, a Play page (server browser with
   Internet / Local / Favorites / Recent, search, hide empty / locked, sortable columns, player bars, ping dots, a
   details card for the selected server, direct connect, password prompt) and a Settings page with Multiplayer plus

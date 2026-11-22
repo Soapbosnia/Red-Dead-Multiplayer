@@ -415,7 +415,7 @@ namespace RDMP::Frontend {
             g_pendingAddress.clear();
         }
         g_wasConnected = connected;
-        SetVisible(!connected);
+        SetVisible(!connected && IniInt(L"client", L"html_menu", 1) != 0);
 
         for (const auto &info : ServerQuery::Poll()) {
             Send("server", {{"list", info.list}, {"host", info.host}, {"port", info.port}, {"online", info.online}, {"name", info.name},

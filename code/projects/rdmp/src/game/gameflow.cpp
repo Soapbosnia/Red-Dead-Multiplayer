@@ -37,6 +37,7 @@
 
 #include "events.h"
 #include "log.h"
+#include "uifiles.h"
 #include "patch.h"
 #include "sandbox.h"
 
@@ -80,6 +81,10 @@ int g_gateFrames = 0;                // frames since the boot gate opened
 ULONGLONG g_phaseStartMs = 0;        // start of the current boot phase
 ULONGLONG g_streamMs = 8000;         // ini [game] stream_ms: world streaming time before finishing the load
 ULONGLONG g_finishLaterLoadAt = 0;   // later loads (story/missions): when to request the finish (0 = none pending)
+// ini [game] title_screen=1: boot to the game's own title screen (PressStart front-end script + "startscreen" movie);
+// the world load waits for GameflowRequestWorldLoad (joining a server) instead of starting at the boot gate.
+bool g_titleMode = false;
+volatile long g_worldLoadRequested = 0;
 
 uintptr_t Device() { return At<uintptr_t>(G<uintptr_t>(kDeviceHolder), 0x530); }
 
@@ -248,16 +253,19 @@ void MapTrace() {
 
 // Our boot sequence, run once per frame before Game::Update.
 void BootStep() {
+    if (g_titleMode && g_bootPhase < 2) UiFilesFrame();
     if (g_mapTrace && g_bootPhase >= 5) MapTrace();
     if (g_bootPhase == 0 && SignedIn()) {
         // The boot gate in Game::Update (FUN_1401f5820): (legals controller == 0 || done) && uiMgr+0x78. With no
         // controller only uiMgr+0x78 is left - the flag the logo video's end used to set.
         const uintptr_t ui = G<uintptr_t>(kUiMgr);
         if (!ui) return;
-        _InterlockedExchange8(reinterpret_cast<volatile char*>(ui + 0x78), 1);
+        // Title mode keeps the game's legals/logo controller, whose logo end opens the gate itself.
+        if (!g_titleMode) _InterlockedExchange8(reinterpret_cast<volatile char*>(ui + 0x78), 1);
         g_bootPhase = 1;
         Log("gameflow: signed in after %llu ms of our loop -> boot gate open", GetTickCount64() - g_runStartMs);
     }
+    if (g_bootPhase == 1 && g_titleMode && !g_worldLoadRequested) return;  // title screen: wait for a join
     if (g_bootPhase == 1 && ++g_gateFrames >= 2) {
         // What the PressStart front-end script + title + menus used to lead to: start the world load directly.
         g_bootPhase = 2;
@@ -419,8 +427,16 @@ void OurRun(uintptr_t game) {
     }
     At<int32_t>(At<uintptr_t>(game, 8), 0) = 0;
     if (G<uintptr_t>(0x142B0E440) != 0) At<int32_t>(At<uintptr_t>(game, 8), 0) = 5;
-    // (Game::Run starts the front-end script "$/content/PressStart" here and keeps its thread id at game+0x144: not us.)
+    // Game::Run starts the front-end script "$/content/PressStart" here (title screen and its menus) and keeps its
+    // thread id at game+0x144: t = FUN_1401e9c30(); FUN_140205900(t, path, 0x600, 0, 0); FUN_1402060b0(t, 0, 0, 0, 0).
     At<int32_t>(game, 0x144) = 0;
+    if (g_titleMode) {
+        const uintptr_t t = F<uintptr_t (*)()>(0x1401E9C30)();
+        F<void (*)(uintptr_t, const char*, int, uint64_t, int)>(0x140205900)(t, "$/content/PressStart", 0x600, 0, 0);
+        F<void (*)(uintptr_t, uint64_t, uint64_t, uint64_t, uint64_t)>(0x1402060B0)(t, 0, 0, 0, 0);
+        At<int32_t>(game, 0x144) = At<int32_t>(t, 0x374);
+        Log("gameflow: front-end script PressStart started (thread %d)", At<int32_t>(game, 0x144));
+    }
 
     // FUN_1400B70D0 keeps the previous frame time in its argument (Game::Run passes the same stack slot every frame).
     alignas(16) uint8_t frameTimer[16] = {};
@@ -575,6 +591,11 @@ void OurRun(uintptr_t game) {
 
 bool OwnGameLoopActive() { return g_installed; }
 bool OwnBootGateOpen() { return g_bootPhase >= 1; }
+bool GameflowTitleMode() { return g_titleMode; }
+bool GameflowWorldLoadStarted() { return g_bootPhase >= 2; }
+void GameflowRequestWorldLoad() {
+    if (_InterlockedExchange(&g_worldLoadRequested, 1) == 0) Log("gameflow: world load requested");
+}
 void GameflowOnUiEvent(const char* name) {
     if (!g_installed || g_bootPhase < 5) return;
     if (_stricmp(name, "loadStart") == 0 && !g_finishLaterLoadAt) {
@@ -598,14 +619,16 @@ void InstallGameFlow(const wchar_t* ini) {
     }
     if (!GetPrivateProfileIntW(L"game", L"own_loop", 0, ini)) return;
     g_streamMs = GetPrivateProfileIntW(L"game", L"stream_ms", 8000, ini);
+    g_titleMode = GetPrivateProfileIntW(L"game", L"title_screen", 0, ini) != 0;
     g_radarZoomM = static_cast<float>(GetPrivateProfileIntW(L"sandbox", L"radar_zoom", 150, ini));
     g_mapTrace = GetPrivateProfileIntW(L"debug", L"map_trace", 0, ini) != 0;
     g_noPauseFreeze = GetPrivateProfileIntW(L"sandbox", L"no_pause_freeze", 1, ini) != 0;
     g_pauseTrace = GetPrivateProfileIntW(L"debug", L"pause_trace", 0, ini) != 0;
     bool ok = true;
-    // 1. Game::Init: skip the legals/logo controller (alloc 0x38 + ctor FUN_1405f4690 + start/free, 0x1401EF9D7 ..
+    // 1. Game::Init: skip the legals/logo controller (not in title mode: the game's own boot runs - legal pages,
+    //    logo, loading screen, title) (alloc 0x38 + ctor FUN_1405f4690 + start/free, 0x1401EF9D7 ..
     //    0x1401EFA21). The UI renderer setup just before it (FUN_14011a220 at 0x1401EF9D2) must still run.
-    {
+    if (!g_titleMode) {
         const uint8_t expect[5] = {0xE8, 0x94, 0x03, 0xE9, 0xFF};  // CALL FUN_14007fd70 (allocator)
         const uint8_t jmp[2] = {0xEB, 0x48};                       // JMP 0x1401EFA21
         const bool match = std::memcmp(reinterpret_cast<void*>(GameAddr(0x1401EF9D7)), expect, sizeof(expect)) == 0;
@@ -613,7 +636,7 @@ void InstallGameFlow(const wchar_t* ini) {
         Log("gameflow: init without legals/logo controller: %s", match ? "ok" : "bytes mismatch");
     }
     // 2. Loading-mode frame.
-    if (GetPrivateProfileIntW(L"game", L"replace_loading_frame", 1, ini)) {
+    if (GetPrivateProfileIntW(L"game", L"replace_loading_frame", g_titleMode ? 0 : 1, ini)) {
         const uint8_t expect[7] = {0x48, 0x81, 0xEC, 0xB8, 0x04, 0x00, 0x00};
         const bool match = std::memcmp(reinterpret_cast<void*>(GameAddr(0x1405F4390)), expect, sizeof(expect)) == 0;
         ok &= match && ReplaceFunction(GameAddr(0x1405F4390), reinterpret_cast<void*>(&OurLoadingFrame));
@@ -634,6 +657,7 @@ void InstallGameFlow(const wchar_t* ini) {
     static const uintptr_t kVts[] = {0x141CE4118, 0x141CE5318};
     static const uintptr_t kSlots[] = {0x18, 0x28};
     for (const uintptr_t vt : kVts) {
+        if (g_titleMode) break;  // title mode: the loading screen and title screen are the game's own
         for (const uintptr_t slot : kSlots) {
             auto* p = reinterpret_cast<uintptr_t*>(GameAddr(vt + slot));
             const uintptr_t expect = GameAddr(slot == 0x18 ? 0x140115660 : 0x1401157D0);
@@ -642,7 +666,7 @@ void InstallGameFlow(const wchar_t* ini) {
             ok &= match && WriteCode(reinterpret_cast<uintptr_t>(p), &stub, sizeof(stub));
         }
     }
-    Log("gameflow: loading/title screen movies disabled");
+    if (!g_titleMode) Log("gameflow: loading/title screen movies disabled");
     // 5. No pause freeze (see OurRun): the render thread's "paused" tests use the MP rule too
     //    (state == 4 && (!net+0x1634 || DAT_142b0ebc8)) - make each one take its "not paused" branch (JNZ -> JMP).
     if (g_noPauseFreeze) {

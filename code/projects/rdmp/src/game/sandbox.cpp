@@ -27,6 +27,8 @@
 #include "locomotion.h"
 #include "bootvideo.h"
 #include "gameflow.h"
+#include "uidump.h"
+#include "uifiles.h"
 #include "splash.h"
 #include "watch.h"
 
@@ -1632,6 +1634,8 @@ void LoadSandboxConfig(const wchar_t* ini) {
     }
     InstallBootVideoHook(ini);
     InstallGameFlow(ini);
+    InstallUiDump(ini);
+    InstallUiFiles(ini);
     wcsncpy_s(g_iniPath, ini, _TRUNCATE);
     g_enabled = GetPrivateProfileIntW(L"sandbox", L"enabled", 0, ini) != 0;
     if (g_enabled && GetPrivateProfileIntW(L"sandbox", L"loading_overlay", 1, ini)) StartLoadingOverlay();
@@ -1972,6 +1976,7 @@ void SkipMenus(const char* name) {
 
 void SandboxOnUiEvent(const char* name) {
     GameflowOnUiEvent(name);
+    UiDumpOnEvent(name);
     if (!g_enabled) return;
     if (g_skipMenus) SkipMenus(name);
     if (g_inSinglePlayer && strcmp(name, "InTransitionComplete") == 0) {  // debug: [debug] hide_scene=<UI scene name>
