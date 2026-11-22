@@ -88,6 +88,8 @@ fw_stage_runtime(rdmp_bot CLIENT)
 add_custom_target(rdmp_data ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/resources" "${CMAKE_BINARY_DIR}/bin/resources"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/ui" "${CMAKE_BINARY_DIR}/bin/ui"
+    # the main menu's "What's new" panel reads it (ui/menu_overlay.html, src/client/frontend.cpp)
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_LIST_DIR}/CHANGELOG.md" "${CMAKE_BINARY_DIR}/bin/ui/changelog.md"
     COMMAND ${CMAKE_COMMAND} "-DSRC=${CMAKE_CURRENT_LIST_DIR}/config/rdmp.ini" "-DDST=${CMAKE_BINARY_DIR}/bin/rdmp.ini"
             -P "${CMAKE_CURRENT_LIST_DIR}/cmake/CopyIfMissing.cmake"
     COMMENT "Staging resources and rdmp.ini"

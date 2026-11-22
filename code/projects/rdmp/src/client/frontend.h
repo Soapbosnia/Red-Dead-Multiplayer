@@ -36,4 +36,6 @@ namespace RDMP::Frontend {
     // Multiplayer settings for the native menus (fw_api v12): the HTML menu's settings, same keys.
     void GetSettings(rdmp::fw::Settings *out);
     void SetSettings(const rdmp::fw::Settings &in);
+    // Native menus (fw_api v13): logo and latest changes over the game's main menu while it is on screen.
+    void SetMenuOverlay(bool shown);
 } // namespace RDMP::Frontend

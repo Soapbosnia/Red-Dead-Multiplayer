@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  Drawn over the game's own main menu (native menus, [client] html_menu=0): the Red Dead Multiplayer logo and the
+  project's latest changes. Shown only while the main list is on screen off a server (rdmp.dll tells the client,
+  fw_api set_menu_overlay); it takes no input. The client sends the changes from CHANGELOG.md ("news").
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --ink: #efe6d2; --ink-2: #c9bda3; --ink-3: #8f836c; --red-hi: #d6382c; --brass: #c9a15a;
+    --serif: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    --sans: Bahnschrift, "Segoe UI", Tahoma, sans-serif;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; pointer-events: none; }
+  .logo { position: absolute; left: 3.2vw; top: 4.5vh; width: 30vw; max-width: 620px; filter: drop-shadow(0 4px 14px rgba(0,0,0,.7)); }
+  .news {
+    position: absolute; right: 3.2vw; top: 5vh; width: 25vw; min-width: 300px; max-height: 58vh; overflow: hidden;
+    padding: 18px 22px 20px; color: var(--ink);
+    background: linear-gradient(180deg, rgba(14, 10, 7, 0.82), rgba(14, 10, 7, 0.62));
+    border-left: 3px solid var(--red-hi); box-shadow: 0 10px 30px rgba(0,0,0,.45);
+    font: 14px/1.45 var(--sans);
+  }
+  .news h2 { margin: 0 0 2px; font: 600 22px var(--serif); letter-spacing: .06em; text-transform: uppercase; }
+  .news .sub { margin: 0 0 12px; color: var(--brass); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+  .news ul { margin: 0; padding: 0; list-style: none; }
+  .news li { position: relative; margin: 0 0 9px; padding-left: 16px; color: var(--ink-2); }
+  .news li::before { content: ""; position: absolute; left: 0; top: .6em; width: 6px; height: 6px; background: var(--red-hi); transform: rotate(45deg); }
+  .news li b { color: var(--ink); font-weight: 600; }
+  .news .fade { position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(transparent, rgba(14,10,7,.9)); }
+</style>
+</head>
+<body>
+  <img class="logo" src="assets/logo.svg" alt="Red Dead Multiplayer">
+  <section class="news" id="news" hidden>
+    <h2>What's new</h2>
+    <p class="sub" id="news-sub"></p>
+    <ul id="news-list"></ul>
+    <div class="fade"></div>
+  </section>
+<script>
+  function send(name, data) {
+    if (typeof callEvent === "function") callEvent("rdmp:" + name, JSON.stringify(data || {}));
+  }
+  // "**bold** rest" -> <b>bold</b> rest (the changelog's own emphasis), text escaped.
+  function render(text) {
+    const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return esc.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "$1");
+  }
+  window.rdmp = {
+    receive({ type, data }) {
+      if (type !== "news") return;
+      document.getElementById("news-sub").textContent = data.title || "";
+      const list = document.getElementById("news-list");
+      list.innerHTML = "";
+      for (const entry of data.entries || []) {
+        const li = document.createElement("li");
+        li.innerHTML = render(entry);
+        list.appendChild(li);
+      }
+      document.getElementById("news").hidden = !(data.entries || []).length;
+    },
+  };
+  send("ready");
+</script>
+</body>
+</html>

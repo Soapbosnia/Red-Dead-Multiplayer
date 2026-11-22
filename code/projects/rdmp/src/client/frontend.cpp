@@ -23,6 +23,7 @@
 #include <set>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 #include <imgui.h>
 
 namespace RDMP::Frontend {
@@ -35,6 +36,8 @@ namespace RDMP::Frontend {
         int g_viewId                 = 0;
         bool g_pageReady             = false;
         bool g_visible               = false;
+        bool g_nativeMenu            = false; // [client] html_menu=0: the overlay page over the game's own menus
+        bool g_overlayWanted         = false; // native: rdmp.dll says the main list is on screen off a server
         float g_viewW = 0, g_viewH = 0;
 
         std::filesystem::path g_binDir;
@@ -273,8 +276,68 @@ namespace RDMP::Frontend {
             Send("lists", g_servers);
         }
 
+        // The latest changes for the native main menu's panel: the first section of CHANGELOG.md (shipped as
+        // ui/changelog.md), six entries, one per bullet, cut to its first sentence or ~120 characters (they run long).
+        json News() {
+            std::ifstream in(g_binDir / "ui" / "changelog.md");
+            std::string line, title, current;
+            std::vector<std::string> entries;
+            auto flush = [&] {
+                if (current.empty()) {
+                    return;
+                }
+                size_t end = current.find(". ");
+                if (end != std::string::npos && end < 120) {
+                    current = current.substr(0, end + 1);
+                }
+                else if (current.size() > 120) {
+                    current = current.substr(0, current.rfind(' ', 117)) + "...";
+                }
+                if (std::count(current.begin(), current.end(), '*') % 4 != 0) {
+                    current += "**"; // (the cut fell inside the bold title)
+                }
+                entries.push_back(current);
+                current.clear();
+            };
+            while (std::getline(in, line)) {
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                if (line.rfind("## ", 0) == 0) {
+                    if (!title.empty()) {
+                        break;
+                    }
+                    title = line.substr(3);
+                    continue;
+                }
+                if (title.empty()) {
+                    continue;
+                }
+                if (line.rfind("* ", 0) == 0) {
+                    flush();
+                    if (entries.size() >= 6) {
+                        break;
+                    }
+                    current = line.substr(2);
+                }
+                else if (!current.empty() && line.rfind("  ", 0) == 0) {
+                    current += " " + line.substr(line.find_first_not_of(' '));
+                }
+            }
+            flush();
+            if (title.rfind("Unreleased", 0) == 0) {
+                title = "In development";
+            }
+            return {{"title", title}, {"entries", entries}};
+        }
+
         void OnPageEvent(const std::string &name, const std::string &payload) {
             const json data = json::parse(payload.empty() ? "{}" : payload, nullptr, false);
+            if (name == "ready" && g_nativeMenu) {
+                g_pageReady = true;
+                Send("news", News());
+                return;
+            }
             if (name == "ready") {
                 g_pageReady = true;
                 Send("settings", Settings());
@@ -346,7 +409,7 @@ namespace RDMP::Frontend {
                 return;
             }
             web->RegisterResourceDirectory("rdmp", g_binDir / "ui");
-            g_viewId = web->CreateView(Framework::GUI::Manager::ResourceURL("rdmp", "index.html"), 0, 0);
+            g_viewId = web->CreateView(Framework::GUI::Manager::ResourceURL("rdmp", g_nativeMenu ? "menu_overlay.html" : "index.html"), 0, 0);
             auto *view = web->GetView(g_viewId);
             if (!view) {
                 g_failed = true;
@@ -372,8 +435,10 @@ namespace RDMP::Frontend {
             }
             g_visible = visible;
             view->Display(visible);
-            view->Focus(visible);
-            Overlay::ShowCursor(visible);
+            if (!g_nativeMenu) { // the overlay page takes no input: the game's own menu keeps keyboard and mouse
+                view->Focus(visible);
+                Overlay::ShowCursor(visible);
+            }
         }
     } // namespace
 
@@ -393,7 +458,8 @@ namespace RDMP::Frontend {
         // [client] html_menu=0: the game's own front end shows our menus (native); no web view, the server browser
         // answers go to BrowserPoll only.
         const bool html = IniInt(L"client", L"html_menu", 1) != 0;
-        if (html) {
+        g_nativeMenu    = !html;
+        {
             if (!Overlay::Ready()) {
                 return;
             }
@@ -425,9 +491,7 @@ namespace RDMP::Frontend {
             g_pendingAddress.clear();
         }
         g_wasConnected = connected;
-        if (html) {
-            SetVisible(!connected);
-        }
+        SetVisible(html ? !connected : g_overlayWanted && !connected);
 
         for (const auto &info : ServerQuery::Poll()) {
             if (g_native.size() < 1024) {
@@ -513,6 +577,10 @@ namespace RDMP::Frontend {
         out->nametags        = IniInt(L"client", L"nametags", 1) != 0 ? 1 : 0;
         out->nametagDistance = IniInt(L"client", L"nametag_distance", 60);
         out->chat            = IniInt(L"client", L"chat", 1) != 0 ? 1 : 0;
+    }
+
+    void SetMenuOverlay(bool shown) {
+        g_overlayWanted = shown;
     }
 
     void SetSettings(const rdmp::fw::Settings &in) {

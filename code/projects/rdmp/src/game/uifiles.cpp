@@ -504,6 +504,13 @@ struct TextEntry {
 } g_entry;
 std::string g_lastAddress;  // the last Direct Connect address (offered again)
 ULONGLONG g_menuAtMs = 0;   // when to open the main menu again after a Disconnect (0 = not pending)
+bool g_inView = false;      // a view (Options, server browser) is open from the main list (rdmp.view.*)
+
+// A widget is active (entered): vt+0xd8(w, 1).
+bool Active(const char* id) {
+    const uintptr_t w = Widget(id);
+    return w && reinterpret_cast<bool (*)(uintptr_t, int)>(VFunc(w, 0xd8))(w, 1);
+}
 
 uint32_t TextHash(const char* key) {
     const uint32_t h = reinterpret_cast<uint32_t (*)(const char*, int)>(GameAddr(0x1400C7510))(key, 0);
@@ -825,6 +832,26 @@ void ExecFile() {
                 Log("ui exec: mem %s %s -> %s", movie, var, p ? (std::to_string(*reinterpret_cast<uint8_t*>(p)) + " / " + std::to_string(*reinterpret_cast<uint32_t*>(p))).c_str() : "null");
                 continue;
             }
+            case 'q': {  // q <ghidra address> [off]...: follow a pointer chain (*addr, then *(p+off) per offset), log each
+                uintptr_t p = *reinterpret_cast<uintptr_t*>(GameAddr(strtoull(movie, nullptr, 16)));
+                std::string out = std::to_string(p);
+                char hex[32];
+                sprintf_s(hex, "%llx", static_cast<unsigned long long>(p));
+                out = hex;
+                std::string offs = std::string(var) + " " + rest;
+                size_t at = 0;
+                while (p && at < offs.size()) {
+                    const size_t end = offs.find(' ', at);
+                    const std::string o = offs.substr(at, end == std::string::npos ? std::string::npos : end - at);
+                    at = end == std::string::npos ? offs.size() : end + 1;
+                    if (o.empty()) continue;
+                    p = *reinterpret_cast<uintptr_t*>(p + strtoull(o.c_str(), nullptr, 16));
+                    sprintf_s(hex, " -[+%s]-> %llx", o.c_str(), static_cast<unsigned long long>(p));
+                    out += hex;
+                }
+                Log("ui exec: chain %s: %s", movie, out.c_str());
+                continue;
+            }
             case 'h': {  // h <widget> <0|1>: show / hide it (FUN_1400fe810)
                 if (const uintptr_t w = Widget(movie))
                     reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810))(w, atoi(var) ? 1 : 0);
@@ -873,6 +900,10 @@ void UiFilesFrame(bool frontEnd) {
     if (frontEnd) NetTitleFrame();  // (with a world loaded the client is pumped by the net frame)
     PollBrowser();                  // (the browser also works in game, after a Disconnect)
     TextEntryFrame();
+    // The logo and the latest changes (client overlay) while the bare main list is on screen off a server: not in a view,
+    // not under the text entry or the quit prompt, not while joining (the scene closes).
+    const bool overlay = !NetOnServer() && Active("PauseMenu") && !g_inView && !g_entry.open && !Active("QuitGame");
+    NetSetMenuOverlay(overlay);  // (every frame: the client may come up after the menu)
     const uintptr_t root = *reinterpret_cast<uintptr_t*>(GameAddr(0x142AAC8C0));
     if (!root) return;
     auto find = reinterpret_cast<uintptr_t (*)(uintptr_t, const char*)>(GameAddr(0x1400EF100));
@@ -898,11 +929,12 @@ void ApplyMainEntries() {
     auto setHidden = reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810));
     const struct { const char* id; bool show; } kItems[] = {
         {"RdmpPM_Resume", onServer}, {"RdmpPM_Browser", !onServer}, {"RdmpPM_Direct", !onServer},
-        {"RdmpPM_Disconnect", onServer},
+        {"RdmpPM_Disconnect", onServer}, {"PM_Options", true}, {"RdmpPM_Quit", true},
         // the pause screen's pocket watch and money mean nothing off a server
         {"clock", onServer}, {"pauseMoney", onServer}, {"pauseMoneyValue", onServer}};
     for (const auto& it : kItems)
         if (const uintptr_t w = Widget(it.id)) setHidden(w, it.show ? 0 : 1);
+    g_inView = false;  // (a join from inside a view leaves without rdmp.view.main)
     // RED DEAD MULTIPLAYER over the menu off a server (Enter = vt+0x160(w, 1), Exit = vt+0x160(w, 0))
     if (const uintptr_t t = Widget("RdmpMenuTitle")) reinterpret_cast<void (*)(uintptr_t, int)>(VFunc(t, 0x160))(t, onServer ? 0 : 1);
 }
@@ -937,20 +969,19 @@ void UiFilesOnEvent(const char* name) {
         // +0x28 flag 0x800).
         static const char* const kEntries[] = {"RdmpPM_Resume", "RdmpPM_Browser", "RdmpPM_Direct", "PM_Options", "RdmpPM_Disconnect", "RdmpPM_Quit"};
         static bool shown[std::size(kEntries)] = {};
-        static bool inView = false;
         auto setHidden = reinterpret_cast<char (*)(uintptr_t, char)>(GameAddr(0x1400FE810));
         const std::string entry = ev.substr(5);
-        if (entry != "main" && !inView) {
+        if (entry != "main" && !g_inView) {
             for (size_t i = 0; i < std::size(kEntries); ++i) {
                 const uintptr_t w = Widget(kEntries[i]);
                 shown[i] = w && !(*reinterpret_cast<uint16_t*>(w + 0x28) & 0x800);
                 if (w && entry != kEntries[i]) setHidden(w, 1);
             }
-            inView = true;
-        } else if (entry == "main" && inView) {
+            g_inView = true;
+        } else if (entry == "main" && g_inView) {
             for (size_t i = 0; i < std::size(kEntries); ++i)
                 if (const uintptr_t w = Widget(kEntries[i])) setHidden(w, shown[i] ? 0 : 1);
-            inView = false;
+            g_inView = false;
         }
     } else if (ev == "back") {
         PostUiEvent(NetOnServer() ? "rdmp.back.ingame" : "rdmp.back.title");

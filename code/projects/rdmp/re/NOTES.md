@@ -741,3 +741,11 @@ components on a puppet, which other threads read playerInfo during the swap.
   pause (pauseEnd) and holds the UI stack (no HUD / pause push works) until a fade-in.
 - Framework client shutdown: left to the static destructor at DLL unload (process exit) it crashed in the Framework's
   scripting module (scripting_catalog.h:359 via instance.cpp:217); NetShutdown now runs it when our game loop ends.
+- (open) No mouse cursor in the in-game pause menu. The window's message pump (vt+0 of the window object, vtable
+  0x14105A448; cursor part FUN_140ec4bb0) shows the OS cursor when the input manager *(0x142AAC8D8) has +0x290 set and
+  the 1911.dll interface at +0x60 says so (vt+0x10, "cursor mode"; 1911.dll is the port's obfuscated layer, unreadable);
+  else it hides it (ShowCursor loop, flag window+0xa8). Measured with GetCursorInfo: title = shown; in game = hidden,
+  also in the pause menu with [sandbox] no_pause_freeze=1; with no_pause_freeze=0 the pause menu shows it. So
+  something in Game::Update that runs when it sees state 3 (our pause hold, gameflow OurRun) keeps the mouse captured.
+  Next: bisect what in Game::Update / the masked game-clock call (FUN_1405c5220) re-captures it (e.g. take the clock
+  call out of the hold first), then give that part the real state 4.

@@ -395,5 +395,6 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
             RDMP::Frontend::SetSettings(*in);
         }
     };
+    out->set_menu_overlay = [](int shown) { RDMP::Frontend::SetMenuOverlay(shown != 0); };
     return 1;
 }

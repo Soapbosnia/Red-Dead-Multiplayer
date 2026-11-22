@@ -22,7 +22,8 @@ namespace rdmp::fw {
 // v11: server browser for the native menus (browser_refresh / browser_poll / browser_favorite / browser_connect);
 //      disconnect.
 // v12: multiplayer settings for the native menus (get_settings / set_settings).
-constexpr uint32_t kApiVersion = 12;
+// v13: set_menu_overlay (logo and "What's new" over the native main menu).
+constexpr uint32_t kApiVersion = 13;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -203,6 +204,9 @@ struct Api {
     // server accepts it and used from the next connection).
     void (*get_settings)(Settings* out);
     void (*set_settings)(const Settings* in);
+    // Native menus: the main list is on screen off a server (1) or not (0): the client shows the logo and the latest
+    // changes over it (ui/menu_overlay.html; no input).
+    void (*set_menu_overlay)(int shown);
 };
 
 }  // namespace rdmp::fw
