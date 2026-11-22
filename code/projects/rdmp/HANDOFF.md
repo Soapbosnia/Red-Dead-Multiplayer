@@ -122,19 +122,25 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
     gives the HUD back (rdmp.ingame) without a world load. Dropped by the server: rdmp.menu opens the menu (NOT
     tested yet: stop RDMPServer while joined). The game's own "return to main menu" restarts the process through
     PlayRDR.exe -restart, without the mod: never use AwaitRebootTransition.
+  Logo + "What's new" (CHANGELOG.md's first section) over the bare main list off a server: the client's web overlay
+  (ui/menu_overlay.html, fw_api v13 set_menu_overlay from uifiles.cpp each frame); hidden in views, prompts, in game.
   NEXT (owner's wishes):
-  1. Title text "RED DEAD MULTIPLAYER": RdmpMenuTitle (list movie top_title) is entered off a server but NOT drawn
-     (that slot belongs to list pages); try another text slot (pause_main) or the logo work.
-  2. Cosmetic: in game the menu column clips long entries (SERVER BROWSER / DIRECT CONNECT after a Disconnect) at the
-     left edge; the nickname row shows Change arrows that do nothing (UIOption with one value).
-  3. Back from Options via an injected "k @UI.CANCEL*RELEASED" sometimes also reaches the scene (quit prompt); check
+  1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22): the game has no in-process
+     return to the menu (it restarts the exe), so write our own level teardown (world, actors, streaming, scripts)
+     mirroring our boot (gameflow.cpp), then the title front end again. Today the world stays behind the menu.
+  2. No mouse cursor in the in-game pause menu: caused by our pause hold (no_pause_freeze presents state 3 to
+     Game::Update); measured, cause in re/NOTES.md "(open) No mouse cursor"; bisect what re-captures the mouse.
+  3. Cosmetic: the nickname row shows Change arrows that do nothing (UIOption with one value); RdmpMenuTitle (list
+     movie top_title) is now unused (the overlay logo replaced it).
+  4. Back from Options via an injected "k @UI.CANCEL*RELEASED" sometimes also reaches the scene (quit prompt); check
      with a real Esc press (the owner), it may be the injection only.
-  4. Graphics options that need a restart (RestartGame) use the game's process restart too: comes up without the mod.
-  5. Logo RED DEAD MULTIPLAYER: rebuild the brush-letter textures (re/NOTES.md); needs a resource-load hook.
-  6. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
+  5. Graphics options that need a restart (RestartGame) use the game's process restart too: comes up without the mod.
+  6. Logo in the game's own brush letters (optional now: the overlay shows ours): rebuild the textures (re/NOTES.md); needs a resource-load hook.
+  7. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
   Test automation: keys through computer-use (arrows with key, Enter / others with hold_key ~0.12 s) only when
   RDR.exe is in front, NEVER Esc (it stops Claude). build/bin/ui_exec.txt ([debug] ui_exec=1): "k <input event>",
-  "e <ui event>", "a <ids>" (active / hidden), "n|x <id>" Enter / Exit, "h <id> 0|1" show / hide, "m <addr> [off]".
+  "e <ui event>", "a <ids>" (active / hidden), "n|x <id>" Enter / Exit, "h <id> 0|1" show / hide, "m <addr> [off]",
+  "q <addr> <off>..." pointer chain. Cursor shown or not: GetCursorInfo (screenshots do not show the cursor).
   Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop it before building).
 
 ## Next (chosen: horses first)
