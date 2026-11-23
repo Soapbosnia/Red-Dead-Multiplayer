@@ -148,9 +148,8 @@ Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop th
 ## Weapons and damage (in progress, 2026-11-23; owner's plan: weapons + damage, then element functions)
 * Done: script API (docs/SCRIPTING.md "Weapons"), weapon in hand + ammo synced (Player::weapon / ammo, owner
   fields), puppets armed and invulnerable locally; aim (input 0x19) and fire (0x09 / 0x0d) are among the 30 synced
-  controls. Sidearms (pistols, revolvers) give / draw / fire fine. re/NOTES.md "Weapons".
-* Next: (1) long guns: given but not drawable (ACTOR_PUT_WEAPON_IN_HAND fails, aiming draws nothing): probably the
-  model must be streamed (REQUEST_ASSET with GET_WEAPON_FRAGMENT_NAME) or the item differs; (2) aim direction: a
+  controls. Sidearms and long guns give / draw (long guns needed their equip slots enabled). re/NOTES.md "Weapons".
+* Next: (1) done: long guns; (2) aim direction: a
   puppet aims with the camera its player-info copy points at (the local one): sync the remote's camera yaw / pitch
   and swap it in the puppet's context; (3) damage: local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON /
   GET_LAST_HIT_ZONE (now resolvable, scriptnatives.cpp) -> client `clientPlayerDamage` (cancellable: restore health;

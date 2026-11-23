@@ -858,8 +858,11 @@ components on a puppet, which other threads read playerInfo during the swap.
 * GIVE_WEAPON_TO_ACTOR(actor, weapon, n, notify, hidden): with n = 0 the weapon is in the wheel but
   ACTOR_PUT_WEAPON_IN_HAND refuses it; with n = 1 a sidearm goes in hand at once. ACTOR_PUT_WEAPON_IN_HAND (handler
   0x1403BDDB0 -> 0x1403BBBF0 -> FUN_1403bb9f0 -> FUN_140340240(inventory, item, 1, inHand)) fails while the inventory
-  is busy (FUN_140341e00) or the item is not found (FUN_14033d150). Long guns (repeater, shotgun) fail and aiming draws
-  nothing: open (model streaming?). GET_WEAPON_IN_HAND is -1 once the game holsters (a few seconds without aiming).
+  is busy (FUN_140341e00) or the item is not found (FUN_14033d150); FUN_140341210 then refuses an item whose equip
+  slot (item+0x38 vtable +0x30, 0..6) is not set in the bitmask at inventory +0x48e. The story state leaves the long-gun
+  slots off, so repeaters / rifles / shotguns were given but never drawn (aiming drew nothing either):
+  SET_EQUIP_SLOT_ENABLED(actor, slot, true) for 0..6 before the give fixes it (weapons.cpp EnableSlots; tested carbine
+  and pump shotgun, local). GET_WEAPON_IN_HAND is -1 once the game holsters (a few seconds without aiming).
 * Ammo: the reserve is per ammo type (GET_AMMOENUM_FOR_WEAPONENUM: Cattleman 7, carbine 8): ACTOR_SET_INV_AMMO /
   ACTOR_GET_INV_AMMO; ACTOR_SET_WEAPON_AMMO alone leaves the HUD at 0/0. These and the damage natives
   (GET_LAST_ATTACKER, GET_LAST_HIT_*, SET_ACTOR_INVULNERABILITY) are not registered in retail: called through

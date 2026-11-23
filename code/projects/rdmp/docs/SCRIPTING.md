@@ -113,9 +113,8 @@ revolver, 7 LeMat, 8 carbine repeater, 9 Winchester repeater, 10 Henry repeater,
 rifle, 13 bolt-action rifle, 14 Buffalo rifle, 15 sawed-off shotgun, 16 double-barrel shotgun, 17 pump-action
 shotgun, 18 semi-auto shotgun, 19 rolling block rifle, 20 Carcano rifle, 21 lasso, 22 knife, 23 fire bottle, 24
 dynamite, 25 throwing knife, 26 Gatling gun, 27 Browning gun, 28 cannon, 29 tomahawk, 30 bow, 31 antitank rifle.
-Other players see the weapon in your hand and you using it (aim and fire come with your controls). In progress:
-long guns (repeaters, rifles, shotguns) are given but cannot be drawn yet; the direction a remote player aims is not
-synced yet; damage events are next.
+Other players see the weapon in your hand and you using it (aim and fire come with your controls). In progress: the
+direction a remote player aims is not synced yet; damage events are next.
 
 ### Console
 `players`, `tp <name> x y z`, `help`, plus the Framework's `start` / `stop` / `restart` / `refresh <resource>`, `status`.

@@ -57,7 +57,19 @@ void SetAmmo(uint32_t actor, int weapon, float ammo) {
     }
 }
 
+// The inventory refuses to draw a weapon whose equip slot (0..6) is disabled (the bitmask at inventory +0x48e,
+// FUN_140341210), and the story state leaves the long-gun slots off: enable them all with every give.
+void EnableSlots(uint32_t actor) {
+    for (int slot = 0; slot <= 6; ++slot) {
+        NativeCall e;
+        e.Uint(actor).Int(slot).Bool(true);
+        const bool ok = e.Call(NativeHash("SET_EQUIP_SLOT_ENABLED"));
+        if (g_probe) Log("weapon probe: equip slot %d enable %s", slot, ok ? "ok" : "failed");
+    }
+}
+
 void Give(uint32_t actor, int weapon, float ammo) {
+    EnableSlots(actor);
     NativeCall g;
     g.Uint(actor).Int(weapon).Int(1).Bool(false).Bool(false);
     g.Call(NativeHash("GIVE_WEAPON_TO_ACTOR"));
