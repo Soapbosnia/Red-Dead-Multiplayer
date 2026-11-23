@@ -874,3 +874,24 @@ components on a puppet, which other threads read playerInfo during the swap.
   +0x3d8 (Dead Eye's time scale, SET_DEADEYE_TIMESCALE); while the wheel is open playerInfo+0x104 gains 0x20000,
   +0x224 grows, +0x43c byte 0x01. Open.
 
+## Aiming (2026-11-23, puppet_player.cpp / weapons.cpp)
+* Aim point = the reticle target point (GET_RETICLE_TARGET_POINT, handler 0x140359640): actor +0xb8 component (a player
+  component) +0x3810 (x, y, z, w), copies at +0x3800 / +0x3820. The camera position + 200 m along its forward, or the
+  hit under the crosshair. Written for the local player only, every frame: game loop 0x1401F83CA -> FUN_140348600(info)
+  -> FUN_140393f22 (0x14039400d; 0x14039cb1a while aiming). Read by the weapon code (0x14037db90 chain), AI/anim
+  (0x140d16b34) and others. Synced as the Player transform aim point (PlayerState aimX/Y/Z, fw_api v16).
+* Camera: gameplay camera = *(*(0x142C45738)+8): matrix +0x1d0 right, +0x1e0 up, +0x1f0 back (-forward), +0x200
+  position. The control update FUN_1403726f0 -> FUN_1403d9320(info+0x10) copies -back into playerInfo +0x30 (camera
+  forward) unless the byte at playerInfo +0x50 is set (cleared again at its end), and turns +0x30 / +0x38 into control
+  +0x100 (stick + camera heading). +0x104 (desired heading) is only set while the stick is pressed.
+* Aiming code never reads the camera matrix or playerInfo +0x30 directly (read/write watches, watch.cpp
+  ArmAccessWatch): it works from copies / the reticle point.
+* A puppet with the aim input held stays in the "weapon ready" pose: the local player's aim mode comes from per-frame
+  steps a puppet does not run (game loop 0x1401F8344: FUN_14034a6d0(info), FUN_140392f00(component), FUN_140348600).
+  Running those in the puppet's context did not help. What works: SET_FORCE_PLAYER_AIM_MODE's flag, playerInfo +0x3bc
+  bit 0x02 (handler 0x140AD8600), on the puppet's player-info while the remote holds aim -> full aim pose.
+* In aim mode the player code does not turn the puppet from the control heading (+0x100 / +0x104 right, body still):
+  SET_ACTOR_HEADING towards the aim point each frame does (heading h: the actor faces (-sin h, -cos h)). Verified with
+  two copies, the aim point put to either side of the remote: the puppet aims at it.
+* playerInfo +0x3e4 bit 0 / +0x3e0 are set by the native next to it (0x140AD8640, a zoom / aim-camera toggle).
+

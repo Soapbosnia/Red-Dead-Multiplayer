@@ -25,7 +25,8 @@ namespace rdmp::fw {
 // v13: Host inflate (the game's own decompressor, for reading the game's archives: fonts and art for the menu).
 // v14: Host quit, get_bindings / set_binding (the game's key bindings, for the menu's Binds settings).
 // v15: weapons: PlayerState weapon / ammo, weapon actions.
-constexpr uint32_t kApiVersion = 15;
+// v16: PlayerState aim point (aimX / aimY / aimZ).
+constexpr uint32_t kApiVersion = 16;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };

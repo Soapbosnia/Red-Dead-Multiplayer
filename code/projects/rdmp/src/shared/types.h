@@ -42,6 +42,9 @@ struct PlayerState {
     // The weapon in hand (shared/weapons.h; -1 = none / holstered) and its ammo.
     int8_t weapon = -1;
     uint16_t ammo = 0;
+    // Where the player's crosshair points: the world point their camera aims at (the game's reticle target point,
+    // camera position + 200 m along its forward or the hit under the crosshair). Puppets aim their weapon at it.
+    float aimX = 0, aimY = 0, aimZ = 0;
 };
 
 }  // namespace rdmp::net

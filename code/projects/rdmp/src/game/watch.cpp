@@ -23,6 +23,8 @@ std::atomic<int> g_hits{0};
 std::atomic<bool> g_exec{false};  // execute breakpoint instead of write watch
 std::atomic<bool> g_chain{false};  // after hitting the slot, re-arm on (pointer just written + offset)
 std::atomic<uintptr_t> g_chainOffset{0};
+std::atomic<bool> g_access{false};  // read/write watch: each distinct accessing rip logged once
+std::atomic<uintptr_t> g_accessRips[128];
 std::atomic<bool> g_multi{false};  // up to 4 execute breakpoints (DR0-DR3), each hit logged with its index
 uintptr_t g_multiAddr[4] = {};
 std::atomic<int> g_multiHits[4];
@@ -52,6 +54,33 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* ep) {
     }
     if ((c->Dr6 & 1) == 0) return EXCEPTION_CONTINUE_SEARCH;  // not our DR0 hit
     c->Dr6 = 0;
+    if (g_access.load()) {  // data breakpoints trap after the access: Rip is the next instruction
+        for (auto& slot : g_accessRips) {
+            uintptr_t seen = slot.load();
+            if (seen == c->Rip) return EXCEPTION_CONTINUE_EXECUTION;
+            if (seen == 0 && slot.compare_exchange_strong(seen, c->Rip)) break;
+            if (seen == c->Rip) return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        CONTEXT ctx = *c;
+        char line[256];
+        int len = sprintf_s(line, "access[%s]: thread %lu next rip %p via", g_label, GetCurrentThreadId(), reinterpret_cast<void*>(c->Rip));
+        const uintptr_t lo = GameStart(), hi = GameEnd();
+        for (int frame = 0; frame < 5 && ctx.Rip && len > 0 && len < 200; ++frame) {
+            DWORD64 imageBase = 0;
+            PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+            if (!fn) {
+                ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+                ctx.Rsp += 8;
+            } else {
+                PVOID handlerData = nullptr;
+                DWORD64 establisher = 0;
+                RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, nullptr);
+            }
+            if (ctx.Rip >= lo && ctx.Rip < hi) len += sprintf_s(line + len, sizeof(line) - len, " %p", reinterpret_cast<void*>(ctx.Rip));
+        }
+        Log("%s", line);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
 
     // This thread's DR0 type (RW0 bits 16-17): 00 = execute. A stale execute breakpoint (thread not yet re-armed
     // after switching to a write watch) must be resumed with RF and not counted.
@@ -143,8 +172,10 @@ void ApplyToThread(DWORD tid, uintptr_t addr) {
             SetThreadContext(th, &c);
         } else if (GetThreadContext(th, &c)) {
             c.Dr0 = addr;
-            // L0=1 (bit 0); write watch: RW0=01 (bits 16-17), LEN0=11 4 bytes (bits 18-19); execute: RW0=00, LEN0=00
-            c.Dr7 = (c.Dr7 & ~0xF0003ULL) | 1ULL | (g_exec.load() ? 0ULL : ((1ULL << 16) | (3ULL << 18)));
+            // L0=1 (bit 0); write watch: RW0=01 (bits 16-17), LEN0=11 4 bytes (bits 18-19); execute: RW0=00, LEN0=00;
+            // access watch: RW0=11
+            c.Dr7 = (c.Dr7 & ~0xF0003ULL) | 1ULL |
+                    (g_exec.load() ? 0ULL : (((g_access.load() ? 3ULL : 1ULL) << 16) | (3ULL << 18)));
             SetThreadContext(th, &c);
         }
         ResumeThread(th);
@@ -201,6 +232,7 @@ void ArmWriteWatch(uintptr_t address, const char* label) {
     if (!g_veh) g_veh = AddVectoredExceptionHandler(1, &WatchHandler);
     strcpy_s(g_label, label);
     g_exec = false;
+    g_access = false;
     g_watchAddr = address;
     g_hits = 0;
     HANDLE t = CreateThread(nullptr, 0, &ArmThread, nullptr, 0, nullptr);
@@ -211,6 +243,7 @@ void ArmExecWatch(uintptr_t address, const char* label) {
     if (!g_veh) g_veh = AddVectoredExceptionHandler(1, &WatchHandler);
     strcpy_s(g_label, label);
     g_exec = true;
+    g_access = false;
     g_watchAddr = address;
     g_hits = 0;
     HANDLE t = CreateThread(nullptr, 0, &ArmThread, nullptr, 0, nullptr);
@@ -218,6 +251,19 @@ void ArmExecWatch(uintptr_t address, const char* label) {
 }
 
 int WatchHitCount() { return g_hits.load(); }
+
+void ArmAccessWatch(uintptr_t address, const char* label) {
+    if (!g_veh) g_veh = AddVectoredExceptionHandler(1, &WatchHandler);
+    strcpy_s(g_label, label);
+    for (auto& r : g_accessRips) r.store(0);
+    g_exec = false;
+    g_multi = false;
+    g_access = true;
+    g_watchAddr = address & ~static_cast<uintptr_t>(3);
+    g_hits = 0;
+    HANDLE t = CreateThread(nullptr, 0, &ArmThread, nullptr, 0, nullptr);
+    if (t) CloseHandle(t);
+}
 
 void ArmExecBreakpoints(const uintptr_t* addrs, int n, const char* label) {
     if (!g_veh) g_veh = AddVectoredExceptionHandler(1, &WatchHandler);

@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <map>
 
@@ -67,6 +68,9 @@ struct Context {
     uint8_t lastValue[kInputCount] = {};
     uint32_t heldMs[kInputCount] = {};
     ULONGLONG lastMs = 0;
+    float aimTarget[3] = {}, aim[3] = {};  // the remote's aim point / the eased one written into the puppet
+    float aimFrom[3] = {};                 // where the remote stands
+    bool haveAim = false, aimStarted = false;
 };
 
 std::map<uint32_t, Context*> g_byGoh;
@@ -78,6 +82,7 @@ bool g_localOverride = false;
 PlayerControls g_localControls;
 PlayerControlFn g_playerControlOrig = nullptr;
 std::atomic<int> g_switched{0};
+
 
 // The puppet's input records from its controller state, the way the game's mapper keeps them: [2] new value,
 // [3] the previous one, [1] a timer (frames held, in the game's own ~4/frame steps).
@@ -246,6 +251,16 @@ void DetachPlayerControl(uint32_t goh) {
 
 bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 
+void SetPlayerAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ) {
+    const auto it = g_byGoh.find(goh);
+    if (it == g_byGoh.end()) return;
+    Context& c = *it->second;
+    c.aimTarget[0] = x, c.aimTarget[1] = y, c.aimTarget[2] = z;
+    c.aimFrom[0] = fromX, c.aimFrom[1] = fromY, c.aimFrom[2] = fromZ;
+    c.haveAim = x != 0.0f || y != 0.0f || z != 0.0f;
+}
+
+
 void SetPlayerControls(uint32_t goh, const PlayerControls& controls) {
     const auto it = g_byGoh.find(goh);
     if (it != g_byGoh.end()) it->second->controls = controls;
@@ -285,23 +300,52 @@ void PuppetPlayerFrame() {
         At<uint64_t>(ctrl, 0x124) = 0;
         At<uint32_t>(ctrl, 0x120) = 0;
         At<uint32_t>(ctrl, 0x1a0) = 0;
+        const bool aiming = c->controls.valid && c->controls.value[0x19] > 0x7f && c->haveAim;
+        const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
+        // The aim input alone does not put a puppet in aim mode (the local player's aim mode comes from its camera and
+        // per-frame player steps a puppet does not run): SET_FORCE_PLAYER_AIM_MODE's flag (playerInfo +0x3bc bit 0x02)
+        // does, while the remote holds aim (input 0x19).
+        uint8_t& mode = At<uint8_t>(pi, 0x3bc);
+        mode = aiming ? (mode | 2) : (mode & ~2);
+        // The camera forward the control update turns into the desired heading (FUN_1403d9320 copies the gameplay
+        // camera's into playerInfo +0x30 unless the byte at +0x50 is set): from the remote towards their aim point.
+        if (aiming) {
+            float d[3] = {c->aimTarget[0] - c->aimFrom[0], c->aimTarget[1] - (c->aimFrom[1] + 1.5f), c->aimTarget[2] - c->aimFrom[2]};
+            const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            if (len > 0.5f) {
+                for (int i = 0; i < 3; ++i) At<float>(pi, 0x30 + i * 4) = d[i] / len;
+                At<uint8_t>(pi, 0x50) = 1;
+            }
+        }
         InContext(*c, [&] {
             using Fn = void (*)(uintptr_t);
             if (g_controlUpdateOrig) g_controlUpdateOrig(ctrl);
             else reinterpret_cast<Fn>(GameAddr(kControlUpdate))(ctrl);
             // The stick is camera-relative: the puppet has no camera of the remote's, so its desired heading is the
             // remote's own (captured after the remote's camera turned it into a world heading).
-            if (c->controls.valid) {
+            if (c->controls.valid && !aiming) {
                 At<float>(ctrl, 0x104) = c->controls.heading;
                 At<float>(ctrl, 0x100) = c->controls.heading;
+            } else if (aiming && At<float>(ctrl, 0x104) == 0.0f) {
+                At<float>(ctrl, 0x104) = At<float>(ctrl, 0x100);  // standing: face where the aim camera looks
             }
             reinterpret_cast<Fn>(Ptr(Ptr(ctrl) + 0x28))(ctrl);
         });
+        // The remote's aim point, eased (it arrives at the send rate): the puppet's reticle target point.
+        const uintptr_t comp = Ptr(c->actor + 0xb8);
+        if (c->haveAim && comp && IsReadable(comp + 0x3800, 0x30)) {
+            if (!c->aimStarted) std::memcpy(c->aim, c->aimTarget, sizeof(c->aim)), c->aimStarted = true;
+            for (int i = 0; i < 3; ++i) c->aim[i] += (c->aimTarget[i] - c->aim[i]) * 0.35f;
+            for (const size_t off : {size_t(0x3800), size_t(0x3810), size_t(0x3820)}) std::memcpy(reinterpret_cast<void*>(comp + off), c->aim, sizeof(c->aim));
+        }
     }
     static ULONGLONG nextLog = 0;
     if (!g_byGoh.empty() && now > nextLog) {
         nextLog = now + 10000;
         Log("puppet player: %zu puppet(s) under player control, %d context switches", g_byGoh.size(), g_switched.load());
+        for (auto& [goh, c] : g_byGoh)
+            Log("puppet player: goh 0x%08x aim input %u, aim point (%.1f, %.1f, %.1f), aim mode %02x", goh, c->controls.value[0x19],
+                c->aim[0], c->aim[1], c->aim[2], At<uint8_t>(reinterpret_cast<uintptr_t>(c->info), 0x3bc));
     }
 }
 

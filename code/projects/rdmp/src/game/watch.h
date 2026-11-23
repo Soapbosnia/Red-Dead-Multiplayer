@@ -16,6 +16,9 @@ void ArmWriteWatchInline(uintptr_t address, const char* label, uintptr_t chainOf
 // 1024th. Replaces any armed write watch.
 void ArmExecWatch(uintptr_t address, const char* label);
 int WatchHitCount();
+// Hardware read/write watch (DR0, RW=11) on a 4-byte value: logs every distinct accessing instruction once, with a
+// short call stack (debug: which code reads a field). Replaces any armed watch.
+void ArmAccessWatch(uintptr_t address, const char* label);
 // Up to 4 execute breakpoints (DR0-DR3) at once; each hit is logged with its index (first 8 per breakpoint).
 void ArmExecBreakpoints(const uintptr_t* addrs, int n, const char* label);
 // Up to 4 distinct rcx values (first argument) seen by the execute breakpoint (0 = none).

@@ -39,6 +39,10 @@ bool CaptureLocalControls(PlayerControls& out);
 // Debug (autopilot): the local player's input records and control heading come from `controls` instead of the
 // keyboard (nullptr = back to the keyboard).
 void SetLocalControlsOverride(const PlayerControls* controls);
+// The world point the remote's crosshair is on and where they stand. While the remote aims, the puppet's camera forward
+// (player-info +0x30) points from them to it, so the player code turns the puppet that way (aim yaw), and the point is
+// its reticle target point (its +0xb8 component +0x3800 / +0x3810 / +0x3820), written after its update (eased).
+void SetPlayerAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ);
 // Main thread, once per frame: runs every attached puppet's control update.
 void PuppetPlayerFrame();
 

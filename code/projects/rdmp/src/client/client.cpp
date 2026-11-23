@@ -167,6 +167,7 @@ namespace {
                     me->localVehicle = g_local.vehicle;
                     me->weapon       = g_local.weapon;
                     me->ammo         = g_local.ammo;
+                    me->aimX = g_local.aimX, me->aimY = g_local.aimY, me->aimZ = g_local.aimZ;
                 }
             }
 
@@ -240,6 +241,7 @@ namespace {
             remote.s.vehicle = player->vehicle;
             remote.s.weapon  = player->weapon;
             remote.s.ammo    = player->ammo;
+            remote.s.aimX = player->aimX, remote.s.aimY = player->aimY, remote.s.aimZ = player->aimZ;
         });
         return n;
     }

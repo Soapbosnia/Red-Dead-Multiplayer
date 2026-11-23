@@ -58,6 +58,8 @@ namespace RDMP::Shared {
         // Controller state (shared/types.h PlayerState::controls): every on-foot input, 8 bits each.
         static constexpr int kControls = 30;
         uint8_t controls[kControls] = {};
+        // The world point the player's crosshair is on (shared/types.h PlayerState::aimX): remote puppets aim at it.
+        float aimX = 0.0f, aimY = 0.0f, aimZ = 0.0f;
 
         // --- reliable delta fields -----------------------------------------
         uint8_t flags  = kAlive; // server field
@@ -121,6 +123,9 @@ namespace RDMP::Shared {
             for (uint8_t &c : controls) {
                 fields.BitsRange<uint8_t>(c, 0, 255);
             }
+            fields.FloatBits(aimX, kWorldMin, kWorldMax, kPosBits);
+            fields.FloatBits(aimY, kWorldMin, kWorldMax, kPosBits);
+            fields.FloatBits(aimZ, kWorldMin, kWorldMax, kPosBits);
         }
 
         void SerializeFields(FieldSerializer &fields) override {

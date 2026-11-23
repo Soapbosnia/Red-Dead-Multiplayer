@@ -8,6 +8,7 @@
 
 #include <windows.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -18,6 +19,7 @@
 #include "memcheck.h"
 #include "patch.h"
 #include "puppet_player.h"
+#include "sandbox.h"
 #include "scriptnatives.h"
 #include "shared/weapons.h"
 
@@ -25,6 +27,8 @@ namespace rdmp {
 namespace {
 
 bool g_probe = false;
+int g_aimHold = 0;      // [debug] aim_hold: the game copy (InstanceId) that sends the aim input held (two-copy tests)
+int g_aimHoldSide = 1;  // [debug] aim_hold_side: 1 / -1, the side of its camera the held aim point is on
 
 uint32_t LocalActor() {
     NativeCall c;
@@ -142,6 +146,8 @@ void ProbeFrame(uint32_t actor) {
 
 void InitWeapons(const wchar_t* iniPath) {
     g_probe = GetPrivateProfileIntW(L"debug", L"weapon_probe", 0, iniPath) != 0;
+    g_aimHold = GetPrivateProfileIntW(L"debug", L"aim_hold", 0, iniPath);
+    g_aimHoldSide = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_side", 1, iniPath));
 }
 
 void WeaponsFrame() {
@@ -254,6 +260,39 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
 
 void ForgetPuppetWeapon(uint32_t goh) {
     g_puppets.erase(goh);
+}
+
+// The aim point is the reticle target point GET_RETICLE_TARGET_POINT reads: the actor's +0xb8 component (one of the two
+// player components; puppets get theirs in AttachPlayerControl) at +0x3810 (x, y, z, w), copies at +0x3800 / +0x3820.
+// The local player's update writes it every frame (FUN_140393f22, from FUN_140348600) and the weapon code reads it.
+// A puppet gets the remote's (puppet_player.cpp SetPlayerAim), plus aim mode and a heading towards it (below).
+namespace {
+uintptr_t AimComponent(uint32_t goh) {
+    const uintptr_t actor = goh ? ActorFromGohHandle(goh) : 0;
+    const uintptr_t comp = actor && IsReadable(actor + 0xb8, 8) ? *reinterpret_cast<uintptr_t*>(actor + 0xb8) : 0;
+    return comp && IsReadable(comp + 0x3810, 0x20) ? comp : 0;
+}
+}  // namespace
+
+float AimHoldSide() { return g_aimHoldSide < 0 ? -1.0f : 1.0f; }
+bool AimHoldDebug() { return g_aimHold != 0 && g_aimHold == InstanceId(); }
+
+void LocalAim(float& x, float& y, float& z) {
+    if (const uintptr_t comp = AimComponent(LocalActor())) {
+        const float* p = reinterpret_cast<const float*>(comp + 0x3810);
+        x = p[0], y = p[1], z = p[2];
+    }
+}
+
+void SyncPuppetAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ, bool aiming) {
+    SetPlayerAim(goh, x, y, z, fromX, fromY, fromZ);
+    // While aiming the player code does not turn the puppet (the local player's aim turn comes from its camera): face it
+    // towards the aim point (engine heading: the actor faces (-sin h, -cos h)).
+    const float dx = x - fromX, dz = z - fromZ;
+    if (!aiming || !HasPlayerControl(goh) || dx * dx + dz * dz < 0.25f) return;
+    NativeCall h;
+    h.Uint(goh).Float(std::atan2(-dx, -dz) * 57.29578f).Bool(false);
+    h.Call(NativeHash("SET_ACTOR_HEADING"));
 }
 
 }  // namespace rdmp

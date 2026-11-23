@@ -6,8 +6,9 @@
   `getWeaponIDFromName`, event `playerWeaponSwitch`; client `getPedWeapon` / `getPedTotalAmmo`. The weapon in hand and
   its ammo are synced: other players see it, armed with it (unlimited ammo on their side), and aim / fire with your
   controls; locally remote players cannot be killed by your shots (their own game decides their damage, MTA-style).
-  Every weapon type can be drawn (the story's disabled long-gun equip slots are enabled on give); aim direction
-  and damage events are next. devtools:
+  Every weapon type can be drawn (the story's disabled long-gun equip slots are enabled on give). Aiming is
+  synced: a remote player aims (aim pose, facing) at the world point under their crosshair (Player transform aim point,
+  fw_api v16). Damage events are next. devtools:
   `/weapon name [ammo]`, `/weapons`, `/disarm`. fw_api v15. Player entity gains weapon / ammo (netcode: MAJOR).
 * **New chat box and nametags** (drawn by the mod, hud.cpp): chat top-left with outlined text that fades when idle,
   a dark panel with a red edge and a "Say:" line while typing (Up / Down history, Esc cancels; "chatSend" still lets
