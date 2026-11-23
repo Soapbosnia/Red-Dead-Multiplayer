@@ -52,6 +52,12 @@ namespace RDMP::Frontend {
         // The game's bindings as it loaded them (before ours from [game_binds]), taken once its table is up.
         std::vector<rdmp::fw::GameBinding> g_gameDefaults;
         bool g_gameBindsApplied = false;
+        // The game's settings as it loaded them (before ours from [game_options]); the game cannot save its own files
+        // here, so changes made in the menu are kept in rdmp.ini and applied over the game's at every launch.
+        Model::GameBlocks g_optionDefaults;
+        bool g_optionsApplied = false;
+
+        std::string FieldText(const rdmp::opt::Field &f, const Model::GameBlocks &blocks);
 
         // What the menu is doing with the connection.
         std::string g_pendingAddress; // "host:port" while connecting / connected from the menu
@@ -256,6 +262,18 @@ namespace RDMP::Frontend {
             }
             if (loadedChanged || graphicsChanged) {
                 g_host->set_game_options(loadedChanged ? after.loaded : nullptr, graphicsChanged ? after.graphics : nullptr);
+            }
+            // Kept in rdmp.ini [game_options]: every setting that differs from the game's own (the rest removed).
+            if (g_optionsApplied) {
+                for (const auto &f : opt::kFields) {
+                    const std::wstring key(f.key, f.key + std::strlen(f.key));
+                    if (GetField(f, after) != GetField(f, g_optionDefaults)) {
+                        IniWrite(L"game_options", key.c_str(), FieldText(f, after));
+                    }
+                    else {
+                        WritePrivateProfileStringW(L"game_options", key.c_str(), nullptr, g_ini.c_str());
+                    }
+                }
             }
             return true;
         }
@@ -557,6 +575,19 @@ namespace RDMP::Frontend {
         }
     } // namespace Model
 
+    namespace {
+        std::string FieldText(const rdmp::opt::Field &f, const Model::GameBlocks &blocks) {
+            char text[48];
+            if (f.type == rdmp::opt::Type::F32) {
+                std::snprintf(text, sizeof(text), "%.6g", Model::GetField(f, blocks));
+            }
+            else {
+                std::snprintf(text, sizeof(text), "%d", static_cast<int>(Model::GetField(f, blocks)));
+            }
+            return text;
+        }
+    } // namespace
+
     // =================================================================================================================
     // Flow
     // =================================================================================================================
@@ -599,6 +630,29 @@ namespace RDMP::Frontend {
             g_pendingAddress.clear();
         }
         g_wasConnected = connected;
+
+        // Our game settings over the game's own, once they can be read (MTA-style: the mod's config, applied at launch).
+        if (!g_optionsApplied && g_host && g_host->get_game_options && g_host->set_game_options) {
+            Model::GameBlocks current;
+            if (Model::ReadGame(current)) {
+                g_optionDefaults     = current;
+                Model::GameBlocks ours = current;
+                int count              = 0;
+                for (const auto &f : rdmp::opt::kFields) {
+                    const std::wstring key(f.key, f.key + std::strlen(f.key));
+                    wchar_t value[64] {};
+                    GetPrivateProfileStringW(L"game_options", key.c_str(), L"", value, 64, g_ini.c_str());
+                    if (*value) {
+                        Model::SetField(f, ours, std::wcstod(value, nullptr));
+                        ++count;
+                    }
+                }
+                bool l = false, g = false;
+                Model::ApplyGame(current, ours, l, g); // persists nothing yet (g_optionsApplied is still false)
+                g_optionsApplied = true;
+                Log()->info("menu: {} game setting(s) from rdmp.ini [game_options]{}{}", count, l ? ", options applied" : "", g ? ", graphics applied" : "");
+            }
+        }
 
         // Our game binds over the game's own, once its table is up (MTA-style: the mod's config is applied at launch).
         if (!g_gameBindsApplied && g_host && g_host->get_bindings && g_host->set_binding) {

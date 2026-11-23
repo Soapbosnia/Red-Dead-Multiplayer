@@ -120,8 +120,9 @@ Owner's call (2026-11-22): the native menus took too long, ImGui instead, themed
 * Settings > Binds (MTA-style): chat key, resource binds (client `bindKey` with a description; overrides in rdmp.ini
   [resource_binds]), the game's controls by category, primary / secondary (live through the game's own commit, kept in
   rdmp.ini [game_binds], reapplied at launch; gabindings.xml untouched). re/NOTES.md "Key bindings".
-* Open: the game's own saves fail here (gabindings.xml and options.xml unchanged since 2026-11-03): the game settings
-  applied from Settings likely do not survive a restart either; same remedy (keep them in rdmp.ini, apply at launch).
+* The game's own saves fail here (gabindings.xml and options.xml unchanged since 2026-11-03; why is open), so game
+  settings changed in Settings are kept in rdmp.ini [game_options] (the ones that differ from the game's) and applied
+  at launch like the binds. Verified: Radar off survives a relaunch, turning it back on removes the line.
 * In a session Esc opens the in-game menu over the darkened world: Resume, Settings, Disconnect (no prompt), Quit.
   While the menu is up: cursor shown, the game gets no keyboard / mouse (DirectInput + window hooks) and
   set_input_lock holds the player (checked: W does not move him). Esc never reaches the game (WM_KEYDOWN, raw input,

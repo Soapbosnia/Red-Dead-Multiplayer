@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Game settings survive a restart:** the game's own save fails here (options.xml unchanged since 2026-11-03), so the
+  settings changed in Settings (display, graphics, audio, controls, interface) are kept in rdmp.ini [game_options] (only
+  the ones that differ from the game's) and applied over the game's at every launch, like the binds.
+* Fixed: percentage sliders showed "100" instead of "100%".
 * **Settings > Binds** (MTA-style): multiplayer controls (the chat key), resource binds (every bind a server script made
   with a description, per resource) and the game's own controls by category with primary / secondary keys; click a key,
   press the new one (Backspace / Delete unbinds, Esc cancels), * marks changes, Reset game controls. Game controls go

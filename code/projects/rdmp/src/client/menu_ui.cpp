@@ -855,7 +855,11 @@ namespace RDMP::MenuUi {
         // A slider over [min, max] snapped to `step`, its value shown in the item's format.
         bool Slider(const Item &item, double &value, float width) {
             float v                  = static_cast<float>(value);
-            const std::string format = FormatValue(item, v);
+            std::string format; // the shown value, as an ImGui format string (its % doubled)
+            for (char c : FormatValue(item, v)) {
+                format += c;
+                if (c == '%') format += '%';
+            }
             ImGui::SetNextItemWidth(width);
             ImGui::PushID(item.key);
             const bool changed = ImGui::SliderFloat("##v", &v, item.min, item.max, format.c_str(), ImGuiSliderFlags_NoInput);

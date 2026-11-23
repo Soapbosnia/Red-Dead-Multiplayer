@@ -846,6 +846,8 @@ components on a puppet, which other threads read playerInfo during the swap.
   not read by the input system). The keybind menu closes with commit + save (FUN_140E49A10, "isInKeybindMenu").
   Our rebind: working = live, edit the working node, commit. Verified: Jump on J works at once and after a relaunch
   (reapplied from rdmp.ini [game_binds]).
+* The options save fails the same way (options.xml unchanged too): the menu keeps changed game settings in rdmp.ini
+  [game_options] and applies them at launch (frontend.cpp, once get_game_options succeeds).
 * Quit: the game's own Quit calls ExitProcess with the level loaded; the engine shutdown after our loop waits forever
   with a world loaded, so the menu's Quit ends our loop, shuts the network client down, then ExitProcess(0).
 
