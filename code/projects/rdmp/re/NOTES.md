@@ -832,7 +832,7 @@ components on a puppet, which other threads read playerInfo during the swap.
   physical = the last 0xA00000 bytes).
 
 ## Key bindings (2026-11-23, src/game/bindings.cpp)
-* The game's own files (never written by us): %APPDATA%\.1911\Red Dead Redemption	itle\gabindings.xml
+* The game's own files (never written by us): %APPDATA%\.1911\Red Dead Redemption\title\gabindings.xml
   (GameActionBindings / DigitalActions / DigitalGameAction ActionName="@FOOT.JUMP" with MKb_Primary / MKb_Secondary
   {BindingType, Input}; KeyboardButton inputs are DirectInput scan codes).
 * Manager *(0x142AAC8D0): +0x98 live std::map<std::string, action>, +0xE8 the working copy the game's keybind menu
