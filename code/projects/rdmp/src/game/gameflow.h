@@ -6,6 +6,8 @@ namespace rdmp {
 // (rdmp.ini [game] own_loop=1). Call at DLL load, before the game initialises.
 void InstallGameFlow(const wchar_t* iniPath);
 bool OwnGameLoopActive();
+// The menu's Quit: our game loop ends after this frame and the game shuts down as on its own exit. Main thread.
+void GameflowRequestQuit();
 bool OwnBootGateOpen();
 // [game] title_screen=1: the game boots to its own title screen and loads the world only once this is called (joining a
 // server). Thread-safe.

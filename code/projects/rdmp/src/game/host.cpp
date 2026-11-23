@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstring>
 
+#include "bindings.h"
+#include "gameflow.h"
 #include "gamesettings.h"
 #include "log.h"
 #include "netclient.h"
@@ -202,10 +204,21 @@ int HostInflate(const void* src, uint64_t srcLen, void* dst, uint64_t dstCap, ui
     return 0;
 }
 
+void HostQuit() {
+    if (OwnGameLoopActive()) {
+        GameflowRequestQuit();
+    } else {
+        ExitProcess(0);
+    }
+}
+int HostGetBindings(fw::GameBinding* out, int max) { return ReadGameBindings(out, max); }
+int HostSetBinding(const char* action, int slot, int32_t type, int32_t input) { return SetGameBinding(action, slot, type, input) ? 1 : 0; }
+
 const fw::Host g_host = {
     fw::kApiVersion, &HostLog,     &HostInvokeNative, &HostGetLocalPlayer, &HostTeleport,  &HostFade,
     &HostSetControl, &HostCamera,  &HostSetHealth,    &HostFocus,          &HostShowText,  &HostKillLocal,
     &HostGetCamera,  &HostInputLock,    &HostRemotePosition, &HostGetGameOptions, &HostSetGameOptions, &HostInflate,
+    &HostQuit,       &HostGetBindings,  &HostSetBinding,
 };
 
 }  // namespace

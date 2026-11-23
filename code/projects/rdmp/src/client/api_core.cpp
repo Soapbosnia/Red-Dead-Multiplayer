@@ -115,6 +115,7 @@ namespace ClientNatives {
                 continue;
             }
             state[k.vk & 0xff] = down;
+            RDMP::ClientApi::DispatchBinds(k.name, down);
             Emit("clientKey", [&](v8::Isolate *isolate) {
                 return std::vector<v8::Local<v8::Value>> {RDMP::ScriptApi::JsString(isolate, k.name), v8::Boolean::New(isolate, down)};
             });

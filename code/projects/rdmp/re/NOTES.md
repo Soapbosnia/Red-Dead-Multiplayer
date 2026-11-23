@@ -831,3 +831,21 @@ components on a puppet, which other threads read playerInfo during the swap.
   _0127 / startscreen_z_0104 / _0107 Undead Nightmare. Texture records as above (name ptr 0x5.., data ptr 0x6..,
   physical = the last 0xA00000 bytes).
 
+## Key bindings (2026-11-23, src/game/bindings.cpp)
+* The game's own files (never written by us): %APPDATA%\.1911\Red Dead Redemption	itle\gabindings.xml
+  (GameActionBindings / DigitalActions / DigitalGameAction ActionName="@FOOT.JUMP" with MKb_Primary / MKb_Secondary
+  {BindingType, Input}; KeyboardButton inputs are DirectInput scan codes).
+* Manager *(0x142AAC8D0): +0x98 live std::map<std::string, action>, +0xE8 the working copy the game's keybind menu
+  edits. Node: +0x19 is-nil, +0x20 key, +0x48 rebindable (saved), +0x50 std::string action name, +0x80 primary
+  {i32 type, i32 input}, +0x88 secondary. Types as stored: -1 None, 2 KeyboardButton (MouseButton etc. read from known
+  actions at runtime). Defaults: the table at 0x142B01250.
+* FUN_14013AF90 = std::map assignment (dst, src). Load FUN_140138AE0: map = defaults, override from the XML, validate,
+  save. Save FUN_140138510(manager) (also at the end of the options save FUN_14061F410); its fopen("w") through
+  FUN_140EFE4B0 fails in our setup (gabindings.xml and options.xml both unchanged since 2026-11-03).
+* Commit FUN_140138A70(manager): live = working, then FUN_1401388B0 rebuilds the input mapping (the live table alone is
+  not read by the input system). The keybind menu closes with commit + save (FUN_140E49A10, "isInKeybindMenu").
+  Our rebind: working = live, edit the working node, commit. Verified: Jump on J works at once and after a relaunch
+  (reapplied from rdmp.ini [game_binds]).
+* Quit: the game's own Quit calls ExitProcess with the level loaded; the engine shutdown after our loop waits forever
+  with a world loaded, so the menu's Quit ends our loop, shuts the network client down, then ExitProcess(0).
+

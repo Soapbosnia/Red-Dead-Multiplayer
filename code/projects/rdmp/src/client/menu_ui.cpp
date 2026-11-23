@@ -16,6 +16,7 @@
 #include "client/menu_model.h"
 #include "client/menu_ui.h"
 #include "client/rdr_assets.h"
+#include "client/script_binds.h"
 #include "shared/fw_api.h"
 
 #include <algorithm>
@@ -23,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -992,6 +994,351 @@ namespace RDMP::MenuUi {
             M::Notify(false, "Display settings reverted.");
         }
 
+        // ---- Binds (MTA-style: game controls, multiplayer controls, resource binds) ----
+        struct Capture {
+            enum class Kind { None, Game, Chat, Resource } kind = Kind::None;
+            std::string action; // game: action name; resource: resource
+            std::string description;
+            int slot = 0;
+            bool armed = false; // every key released since the capture started
+        };
+        Capture g_capture;
+        std::vector<rdmp::fw::GameBinding> g_gameBinds;
+        uint64_t g_gameBindsAt = 0;
+        bool g_showMinigames   = false;
+
+        // The game's binding types, as it stores them, learned from bindings whose kind is known (FOOT.CROUCH is a key,
+        // ARM_WRESTLING.WRESTLE a mouse button, any input -1 is None); rage's order otherwise.
+        struct BindTypes {
+            int none = 0, keyboard = 1, mouse = 2;
+        };
+        BindTypes Types() {
+            BindTypes t;
+            for (const auto &b : g_gameBinds) {
+                if (!std::strcmp(b.action, "@FOOT.CROUCH")) t.keyboard = b.type[0];
+                if (!std::strcmp(b.action, "@ARM_WRESTLING.WRESTLE")) t.mouse = b.type[0];
+                for (int s = 0; s < 2; ++s) {
+                    if (b.input[s] == -1) t.none = b.type[s];
+                }
+            }
+            return t;
+        }
+
+        std::string KeyLabelVk(int vk) {
+            switch (vk) {
+            case VK_LBUTTON: return "Mouse 1";
+            case VK_RBUTTON: return "Mouse 2";
+            case VK_MBUTTON: return "Mouse 3";
+            case VK_XBUTTON1: return "Mouse 4";
+            case VK_XBUTTON2: return "Mouse 5";
+            default: break;
+            }
+            const UINT scan = MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC_EX);
+            wchar_t name[64] {};
+            LONG lparam = static_cast<LONG>((scan & 0xFF) << 16);
+            if (scan & 0xFF00) lparam |= 1 << 24;
+            if (!GetKeyNameTextW(lparam, name, 64)) {
+                return "?";
+            }
+            char utf8[128];
+            WideCharToMultiByte(CP_UTF8, 0, name, -1, utf8, sizeof(utf8), nullptr, nullptr);
+            return utf8;
+        }
+
+        std::string GameKeyLabel(int type, int input, const BindTypes &t) {
+            if (input < 0 || type == t.none) {
+                return "-";
+            }
+            if (type == t.mouse) {
+                return "Mouse " + std::to_string(input + 1);
+            }
+            if (type == t.keyboard) {
+                wchar_t name[64] {};
+                LONG lparam = static_cast<LONG>((input & 0x7F) << 16);
+                if (input & 0x80) lparam |= 1 << 24;
+                if (GetKeyNameTextW(lparam, name, 64)) {
+                    char utf8[128];
+                    WideCharToMultiByte(CP_UTF8, 0, name, -1, utf8, sizeof(utf8), nullptr, nullptr);
+                    return utf8;
+                }
+                return "Key " + std::to_string(input);
+            }
+            return "Mouse axis"; // movement / wheel: shown, not rebindable here
+        }
+
+        // "@FOOT.CROUCH" -> "Crouch"; a few get their in-game wording.
+        std::string ActionLabel(const std::string &action) {
+            static const std::pair<const char *, const char *> kNames[] = {
+                {"@GENERIC.MOVE_FORWARD", "Move forward"}, {"@GENERIC.MOVE_BACK", "Move back"}, {"@GENERIC.MOVE_LEFT", "Move left"},
+                {"@GENERIC.MOVE_RIGHT", "Move right"}, {"@GENERIC.FIRE", "Fire"}, {"@GENERIC.TARGET", "Aim"}, {"@GENERIC.RELOAD", "Reload"},
+                {"@GENERIC.USE", "Use / Enter"}, {"@GENERIC.USE2", "Use (secondary)"}, {"@GENERIC.DEADEYE", "Dead Eye"},
+                {"@GENERIC.DEADEYE_PAINT", "Dead Eye: mark target"}, {"@GENERIC.LOOK_AT", "Look at"}, {"@GENERIC.ZOOM_RADAR", "Zoom radar"},
+                {"@GENERIC.WHISTLE", "Whistle for horse"}, {"@GENERIC.INVENTORY", "Inventory"}, {"@GENERIC.BRAKE", "Brake"},
+                {"@FOOT.SPRINT", "Sprint"}, {"@FOOT.JUMP", "Jump / Climb"}, {"@FOOT.CROUCH", "Crouch"}, {"@FOOT.COVER", "Take cover"},
+                {"@FOOT.INTERACT", "Interact"}, {"@FOOT.MELEE_BLOCK", "Melee block"}, {"@FOOT.MELEE_SPECIAL", "Melee special"},
+                {"@HORSE.SPUR", "Spur horse"}, {"@HORSE.JUMP", "Horse jump"}, {"@CAMERA.LOOK_BACK", "Look behind"},
+                {"@CAMERA.SWITCH_LEFT", "Switch shoulder"}, {"@MAP.OPEN", "Map"}, {"@RADIAL_MENU.SHOW_HIDE", "Weapon wheel"},
+                {"@WAGON.SWITCH_SEAT", "Switch seat"},
+            };
+            for (const auto &[key, name] : kNames) {
+                if (action == key) return name;
+            }
+            std::string s = action.substr(action.find('.') == std::string::npos ? 0 : action.find('.') + 1);
+            bool start    = true;
+            for (auto &c : s) {
+                if (c == '_') {
+                    c     = ' ';
+                    start = false;
+                    continue;
+                }
+                c     = start ? static_cast<char>(std::toupper(static_cast<unsigned char>(c))) : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                start = false;
+            }
+            return s;
+        }
+
+        // Game categories, multiplayer-relevant first; the minigames' own controls fold away.
+        const char *CategoryLabel(const std::string &cat, bool &minigame) {
+            static const std::pair<const char *, const char *> kCats[] = {
+                {"GENERIC", "General"}, {"FOOT", "On foot"}, {"HORSE", "Horse"}, {"CAMERA", "Camera"}, {"MAP", "Map"},
+                {"RADIAL_MENU", "Weapon wheel"}, {"WAGON", "Wagon"},
+            };
+            minigame = true;
+            for (const auto &[key, name] : kCats) {
+                if (cat == key) {
+                    minigame = false;
+                    return name;
+                }
+            }
+            return nullptr;
+        }
+
+        void StartCapture(Capture::Kind kind, const std::string &action, const std::string &description, int slot) {
+            g_capture             = {};
+            g_capture.kind        = kind;
+            g_capture.action      = action;
+            g_capture.description = description;
+            g_capture.slot        = slot;
+        }
+
+        // While capturing: the next key or mouse button pressed (after everything was released) is the new binding.
+        void PollCapture() {
+            if (g_capture.kind == Capture::Kind::None) {
+                return;
+            }
+            bool anyDown = false;
+            int pressed  = 0;
+            for (int vk = 1; vk < 255; ++vk) {
+                if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || vk == VK_ESCAPE) {
+                    continue; // the left / right variants are reported; Esc cancels (Back)
+                }
+                if (GetAsyncKeyState(vk) & 0x8000) {
+                    anyDown = true;
+                    if (!pressed) pressed = vk;
+                }
+            }
+            if (!g_capture.armed) {
+                g_capture.armed = !anyDown;
+                return;
+            }
+            if (!pressed) {
+                return;
+            }
+            const bool clear = pressed == VK_BACK || pressed == VK_DELETE;
+            switch (g_capture.kind) {
+            case Capture::Kind::Game: {
+                const BindTypes t = Types();
+                int type = t.none, input = -1;
+                if (!clear) {
+                    if (pressed == VK_LBUTTON || pressed == VK_RBUTTON || pressed == VK_MBUTTON || pressed == VK_XBUTTON1 || pressed == VK_XBUTTON2) {
+                        type  = t.mouse;
+                        input = pressed == VK_LBUTTON ? 0 : pressed == VK_RBUTTON ? 1 : pressed == VK_MBUTTON ? 2 : pressed == VK_XBUTTON1 ? 3 : 4;
+                    }
+                    else {
+                        const UINT scan = MapVirtualKeyW(static_cast<UINT>(pressed), MAPVK_VK_TO_VSC_EX);
+                        type            = t.keyboard;
+                        input           = static_cast<int>((scan & 0x7F) | ((scan & 0xFF00) ? 0x80 : 0));
+                    }
+                }
+                if (!M::SetGameBinding(g_capture.action, g_capture.slot, type, input)) {
+                    M::Notify(true, "The game did not take that binding.");
+                }
+                g_gameBindsAt = 0; // re-read
+            } break;
+            case Capture::Kind::Chat:
+                if (!clear) {
+                    const std::string name = ScriptBinds::KeyName(pressed);
+                    if (name.empty()) {
+                        M::Notify(true, "That key cannot open the chat.");
+                    }
+                    else {
+                        M::SetChatKey(name);
+                    }
+                }
+                break;
+            case Capture::Kind::Resource: {
+                const std::string name = clear ? std::string() : ScriptBinds::KeyName(pressed);
+                if (!clear && name.empty()) {
+                    M::Notify(true, "Scripts cannot use that key.");
+                }
+                else {
+                    ScriptBinds::SetKey(g_capture.action, g_capture.description, name);
+                }
+            } break;
+            default: break;
+            }
+            g_capture = {};
+        }
+
+        // A key cell: the binding, or "Press a key" while capturing it.
+        bool KeyCell(const char *id, const std::string &label, bool capturing, float width, bool enabled = true) {
+            std::string text = capturing ? "Press a key..." : label;
+            const bool pressed = Button(id, text.c_str(), ImVec2(width, 34.0f * S), capturing ? Tone::Primary : Tone::Secondary, 0, enabled);
+            return pressed;
+        }
+
+        void BindRow(const std::string &label, const std::function<void(float)> &cells) {
+            const float rowY = ImGui::GetCursorPosY();
+            ImGui::SetCursorPosY(rowY + 7.0f * S);
+            Label(nullptr, 17.0f, kInk, label.c_str());
+            ImGui::SetCursorPosY(rowY);
+            cells(rowY);
+            ImGui::SetCursorPosY(rowY + 44.0f * S);
+            const ImVec2 lp = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddLine(lp, ImVec2(lp.x + ImGui::GetContentRegionAvail().x, lp.y), Rgba(239, 230, 210, 0.05f), 1.0f);
+            ImGui::Dummy(ImVec2(0, 2.0f * S));
+        }
+
+        void BindsPane() {
+            PollCapture();
+            if (NowMs() - g_gameBindsAt > 2000) {
+                g_gameBinds   = M::GameBindings();
+                g_gameBindsAt = NowMs();
+            }
+            const BindTypes types = Types();
+            const float cellW     = std::min(190.0f * S, ImGui::GetContentRegionAvail().x * 0.24f);
+            const float right     = ImGui::GetWindowContentRegionMax().x;
+
+            Label(nullptr, 14.0f, kInk3, "Click a key to change it, then press the new key. Backspace or Delete unbinds it, Esc cancels. * = changed.");
+            Gap(8);
+
+            // Multiplayer controls.
+            CardTitle("Multiplayer controls");
+            BindRow("Open the chat", [&](float) {
+                ImGui::SetCursorPosX(right - cellW);
+                const bool capturing = g_capture.kind == Capture::Kind::Chat;
+                if (KeyCell("chat", KeyLabelVk(ScriptBinds::KeyCode(M::ChatKey())), capturing, cellW)) StartCapture(Capture::Kind::Chat, "", "", 0);
+            });
+            BindRow("Menu", [&](float) {
+                ImGui::SetCursorPosX(right - cellW);
+                KeyCell("menu", "Esc", false, cellW, false);
+            });
+
+            // Resource binds (bindKey with a description).
+            const auto scripts = ScriptBinds::List();
+            Gap(14);
+            CardTitle("Resource binds");
+            if (scripts.empty()) {
+                Label(nullptr, 15.0f, kInk3, "The server's scripts have not bound any keys.");
+            }
+            for (const auto &e : scripts) {
+                ImGui::PushID((e.resource + "/" + e.description).c_str());
+                BindRow(e.description + "   (" + e.resource + ")", [&](float) {
+                    const bool changed = e.key != e.defaultKey;
+                    if (changed) {
+                        ImGui::SetCursorPosX(right - cellW * 2 - 10.0f * S);
+                        if (Button("reset", "Default", ImVec2(cellW, 34.0f * S), Tone::Ghost)) {
+                            ScriptBinds::SetKey(e.resource, e.description, "");
+                        }
+                        ImGui::SameLine(0, 10.0f * S);
+                    }
+                    ImGui::SetCursorPosX(right - cellW);
+                    const bool capturing = g_capture.kind == Capture::Kind::Resource && g_capture.action == e.resource && g_capture.description == e.description;
+                    if (KeyCell("key", KeyLabelVk(ScriptBinds::KeyCode(e.key)), capturing, cellW)) {
+                        StartCapture(Capture::Kind::Resource, e.resource, e.description, 0);
+                    }
+                });
+                ImGui::PopID();
+            }
+
+            // Game controls, by category.
+            Gap(14);
+            CardTitle("Game controls");
+            if (g_gameBinds.empty()) {
+                Label(nullptr, 15.0f, kInk3, "The game's controls are not available right now.");
+                return;
+            }
+            Label(nullptr, 14.0f, kInk3, "Kept by the mod (rdmp.ini); your single-player controls file is not changed.");
+            Gap(4);
+            if (Button("resetgame", "Reset game controls", ImVec2(0, 36.0f * S), Tone::Ghost)) {
+                M::ResetGameBindings();
+                g_gameBindsAt = 0;
+            }
+            Gap(4);
+            {
+                const float y = ImGui::GetCursorPosY();
+                ImGui::SetCursorPosX(right - cellW * 2 - 10.0f * S);
+                Label(nullptr, 13.0f, kInk3, "PRIMARY");
+                ImGui::SetCursorPos(ImVec2(right - cellW, y));
+                Label(nullptr, 13.0f, kInk3, "SECONDARY");
+            }
+            auto drawCategory = [&](const std::string &cat) {
+                for (const auto &b : g_gameBinds) {
+                    const std::string action = b.action;
+                    const size_t dot         = action.find('.');
+                    if (dot == std::string::npos || action.substr(1, dot - 1) != cat) {
+                        continue;
+                    }
+                    ImGui::PushID(b.action);
+                    BindRow(ActionLabel(action), [&](float) {
+                        for (int slot = 0; slot < 2; ++slot) {
+                            ImGui::SetCursorPosX(right - cellW * (2 - slot) - (slot == 0 ? 10.0f * S : 0.0f));
+                            ImGui::PushID(slot);
+                            const bool axis      = b.input[slot] >= 0 && b.type[slot] != types.keyboard && b.type[slot] != types.mouse && b.type[slot] != types.none;
+                            const bool capturing = g_capture.kind == Capture::Kind::Game && g_capture.action == action && g_capture.slot == slot;
+                            rdmp::fw::GameBinding def {};
+                            const bool changed = M::GameBindingDefault(action, def) && (def.type[slot] != b.type[slot] || def.input[slot] != b.input[slot]);
+                            std::string label  = GameKeyLabel(b.type[slot], b.input[slot], types);
+                            if (changed) label += "  *";
+                            if (KeyCell("k", label, capturing, cellW, !axis)) {
+                                StartCapture(Capture::Kind::Game, action, "", slot);
+                            }
+                            ImGui::PopID();
+                            if (slot == 0) ImGui::SameLine(0, 10.0f * S);
+                        }
+                    });
+                    ImGui::PopID();
+                }
+            };
+            std::vector<std::string> minigames;
+            for (const char *cat : {"GENERIC", "FOOT", "HORSE", "CAMERA", "MAP", "RADIAL_MENU", "WAGON"}) {
+                bool mg = false;
+                Gap(6);
+                Label(g_title, 19.0f, kInk2, CategoryLabel(cat, mg));
+                drawCategory(cat);
+            }
+            for (const auto &b : g_gameBinds) {
+                const std::string action = b.action;
+                const size_t dot         = action.find('.');
+                if (dot == std::string::npos) continue;
+                const std::string cat = action.substr(1, dot - 1);
+                bool mg               = false;
+                CategoryLabel(cat, mg);
+                if (mg && std::find(minigames.begin(), minigames.end(), cat) == minigames.end()) minigames.push_back(cat);
+            }
+            Gap(10);
+            if (Button("minigames", g_showMinigames ? "Hide minigame controls" : "Show minigame controls", ImVec2(0, 38.0f * S), Tone::Ghost)) {
+                g_showMinigames = !g_showMinigames;
+            }
+            if (g_showMinigames) {
+                for (const auto &cat : minigames) {
+                    Gap(6);
+                    Label(g_title, 19.0f, kInk2, ActionLabel("@X." + cat).c_str());
+                    drawCategory(cat);
+                }
+            }
+        }
+
         void SettingsPage(ImVec2 avail) {
             const float listW = 230.0f * S;
             const float top   = ImGui::GetCursorPosY();
@@ -1032,6 +1379,25 @@ namespace RDMP::MenuUi {
                     Put(dl, nullptr, 13.0f, ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), Rgba(20, 15, 11), badge.c_str());
                 }
             }
+            {
+                const int i        = static_cast<int>(kSections.size()); // Binds
+                const ImVec2 p     = ImGui::GetCursorScreenPos();
+                const bool pressed = ImGui::InvisibleButton("##binds", ImVec2(listW, 42.0f * S));
+                const bool hovered = ImGui::IsItemHovered();
+                if (pressed) {
+                    g_section = i;
+                }
+                const bool on = g_section == i;
+                if (on) {
+                    dl->AddRectFilled(p, ImVec2(p.x + listW, p.y + 42.0f * S), Rgba(239, 230, 210, 0.07f), 4.0f * S);
+                    dl->AddRectFilled(p, ImVec2(p.x + 3.0f * S, p.y + 42.0f * S), kRedHi);
+                }
+                else if (hovered) {
+                    dl->AddRectFilled(p, ImVec2(p.x + listW, p.y + 42.0f * S), Rgba(239, 230, 210, 0.04f), 4.0f * S);
+                }
+                PutIcon(dl, 16.0f, ImVec2(p.x + 16.0f * S, p.y + 13.0f * S), on ? kRedHi : kInk3, 0xE92E);
+                Put(dl, nullptr, 17.0f, ImVec2(p.x + 46.0f * S, p.y + 10.0f * S), on || hovered ? kInk : kInk2, "Binds");
+            }
             if (!g_gameAvailable) {
                 Gap(8);
                 Label(nullptr, 14.0f, kInk4, "The game's own settings are not available right now.", listW);
@@ -1042,10 +1408,19 @@ namespace RDMP::MenuUi {
             ImGui::SameLine(0, 24.0f * S);
             ImGui::SetCursorPosY(top);
             const float paneW = avail.x - listW - 24.0f * S;
-            if (g_section >= static_cast<int>(kSections.size()) || (!g_gameAvailable && g_section > 0)) {
+            const int bindsSection = static_cast<int>(kSections.size());
+            if (g_section > bindsSection || (!g_gameAvailable && g_section > 0 && g_section != bindsSection)) {
                 g_section = 0;
             }
-            if (BeginCard("##settings", ImVec2(paneW, h), true)) {
+            if (g_section != bindsSection) {
+                g_capture = {};
+            }
+            if (g_section == bindsSection) {
+                if (BeginCard("##binds", ImVec2(paneW, h), true)) {
+                    BindsPane();
+                }
+            }
+            else if (BeginCard("##settings", ImVec2(paneW, h), true)) {
                 const Section &sec   = kSections[g_section];
                 const float controlW = std::min(400.0f * S, paneW * 0.48f);
                 bool firstGroup      = true;
@@ -1080,7 +1455,12 @@ namespace RDMP::MenuUi {
             }
             EndCard();
 
-            // Apply / revert.
+            // Apply / revert (binds take effect at once: no footer there).
+            if (g_section == bindsSection) {
+                ImGui::SetCursorPos(ImVec2(ImGui::GetCursorStartPos().x + listW + 24.0f * S, top + h + 26.0f * S));
+                Label(nullptr, 15.0f, kInk3, "Binds take effect at once and are kept by the mod.");
+                return;
+            }
             int changes = 0;
             for (const auto &sec : kSections) {
                 changes += SectionChanges(sec);
@@ -1229,33 +1609,6 @@ namespace RDMP::MenuUi {
             g_focusWant = true;
         }
 
-        void NewsPanel(ImVec2 ds) {
-            const auto &log = M::Changelog();
-            if (log.empty()) {
-                return;
-            }
-            const float w = 460.0f * S, h = 330.0f * S;
-            ImGui::SetCursorScreenPos(ImVec2(ds.x - w - 64.0f * S, ds.y - h - 92.0f * S));
-            if (BeginCard("##news", ImVec2(w, h), true)) {
-                CardTitle("Latest news");
-                bool first = true;
-                for (size_t i = 0; i < log.size() && i < 3; ++i) {
-                    if (!first) {
-                        Gap(10);
-                    }
-                    first = false;
-                    Label(g_title, 20.0f, kInk, log[i].heading.c_str());
-                    for (const auto &line : log[i].lines) {
-                        const ImVec2 p = ImGui::GetCursorScreenPos();
-                        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 4.0f * S, p.y + 10.0f * S), 2.5f * S, kRed, 8);
-                        ImGui::SetCursorScreenPos(ImVec2(p.x + 16.0f * S, p.y));
-                        Label(nullptr, 17.0f, kInk2, line.c_str(), ImGui::GetContentRegionAvail().x - 16.0f * S);
-                    }
-                }
-            }
-            EndCard();
-        }
-
         void TitleScreen(ImVec2 ds) {
             ImDrawList *dl = ImGui::GetWindowDrawList();
             Backdrop(dl, ds);
@@ -1288,18 +1641,12 @@ namespace RDMP::MenuUi {
                 if (item("QUIT")) M::Quit();
             }
 
-            if (!g_inSession) {
-                NewsPanel(ds);
-            }
-            else {
+            if (g_inSession) {
                 const int ping       = M::PingMs();
                 const std::string at = "Connected to " + (M::PendingAddress().empty() ? std::string("a server") : M::PendingAddress()) +
                                        (ping >= 0 ? "   ·   " + std::to_string(ping) + " ms" : "");
                 Put(dl, nullptr, 16.0f, ImVec2(x, y + 12.0f * S), kInk3, at.c_str());
             }
-            const M::MpSettings mp  = M::LoadMp();
-            const std::string who   = "Playing as " + mp.nickname;
-            Put(dl, nullptr, 16.0f, ImVec2(x, ds.y - 64.0f * S), kInk2, who.c_str());
             const std::string build = "Red Dead Multiplayer " + M::Version();
             const ImVec2 bs         = Measure(nullptr, 15.0f, build.c_str());
             Put(dl, nullptr, 15.0f, ImVec2(ds.x - bs.x - 64.0f * S, ds.y - 52.0f * S), kInk4, build.c_str());
@@ -1533,6 +1880,10 @@ namespace RDMP::MenuUi {
     }
 
     bool Back() {
+        if (g_capture.kind != Capture::Kind::None) {
+            g_capture = {};
+            return true;
+        }
         if (g_keepAsk) {
             RevertDisplay();
             return true;

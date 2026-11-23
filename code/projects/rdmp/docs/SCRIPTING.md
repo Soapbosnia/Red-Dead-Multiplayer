@@ -137,6 +137,8 @@ Client scripts run on the game's main thread every frame.
 | Function | Notes |
 |---|---|
 | `isKeyDown(key)`, `getTickCount()` | keys: `"a".."z"`, `"0".."9"`, `"f1".."f12"`, `"num_0"..`, `"enter"`, `"space"`, `"tab"`, `"lshift"`, `"mouse1"`, ... |
+| `bindKey(key, "down" \| "up" \| "both", handler(key, state) [, description])` | MTA-style key bind (same key names); with a description it is listed in the player's Settings > Binds under the resource's name, and the player can move it to another key (kept in their rdmp.ini). Removed when the resource stops. |
+| `unbindKey(key [, state [, handler]])` -> bool | this resource's binds on that key |
 | `invokeNative(nameOrHash, types, ...args)` | any game native |
 
 `invokeNative` type string: one letter per argument, `i` int, `u` unsigned, `f` float, `b` bool, `s` string,

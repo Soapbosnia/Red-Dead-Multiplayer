@@ -23,7 +23,8 @@ namespace rdmp::fw {
 //      disconnect.
 // v12: multiplayer settings for the native menus (get_settings / set_settings).
 // v13: Host inflate (the game's own decompressor, for reading the game's archives: fonts and art for the menu).
-constexpr uint32_t kApiVersion = 13;
+// v14: Host quit, get_bindings / set_binding (the game's key bindings, for the menu's Binds settings).
+constexpr uint32_t kApiVersion = 14;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -71,6 +72,15 @@ struct Action {
     float c = 0.0f;
     float d = 0.0f;
     char text[256] = {};
+};
+
+// One of the game's key bindings (gabindings.xml): action name ("@FOOT.JUMP"), primary [0] and secondary [1]. type: the
+// game's binding type (None, KeyboardButton = DirectInput scan code in input, MouseButton, ...; values as the game
+// stores them), input -1 = unbound.
+struct GameBinding {
+    char action[64];
+    int32_t type[2];
+    int32_t input[2];
 };
 
 // The active game camera (Host::get_camera): orientation rows and position in world space (Y up), and the
@@ -175,6 +185,11 @@ struct Host {
     // The game's decompressor (zlib 1.2.3's inflate; it also decodes the zstd frames the PC archives hold). Returns 1 when
     // the whole stream was decoded (*outLen bytes), 2 when dst was too small, 0 on an error.
     int (*inflate)(const void* src, uint64_t srcLen, void* dst, uint64_t dstCap, uint64_t* outLen);
+    // Ends the game the way its own exit does (our game loop stops after this frame).
+    void (*quit)();
+    // The game's player key bindings; set applies one through the game's own commit (live, not saved by the game).
+    int (*get_bindings)(GameBinding* out, int max);
+    int (*set_binding)(const char* action, int slot, int32_t type, int32_t input);
 };
 
 // Function table filled by rdmp_client_get_api (one export keeps the dll boundary small).

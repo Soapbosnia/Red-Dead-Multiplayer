@@ -60,6 +60,7 @@ namespace RDMP::Overlay {
         std::atomic_bool g_menu {false};         // the main menu is up
         std::atomic_bool g_captureEscape {false};
         std::atomic_bool g_escape {false};       // an Esc press for PollEscape
+        std::atomic_int g_chatKey {'T'};
         std::atomic<float> g_width {0.0f};
         std::atomic<float> g_height {0.0f};
 
@@ -227,9 +228,9 @@ namespace RDMP::Overlay {
                     }
                 }
                 const bool typing = KeyboardBlocked();
-                // T opens the chat (the character that follows is swallowed so it is not typed).
+                // The chat key (T) opens the chat (the character that follows is swallowed so it is not typed).
                 static bool swallowChar = false;
-                if (msg == WM_KEYDOWN && !typing && chat.IsSessionActive() && wParam == 'T' && !(lParam & (1 << 30))) {
+                if (msg == WM_KEYDOWN && !typing && chat.IsSessionActive() && static_cast<int>(wParam) == g_chatKey.load() && !(lParam & (1 << 30))) {
                     chat.OpenInput();
                     swallowChar = true;
                     return 0;
@@ -434,6 +435,10 @@ namespace RDMP::Overlay {
 
     void CaptureEscape(bool capture) {
         g_captureEscape = capture;
+    }
+
+    void SetChatKey(int vk) {
+        g_chatKey = vk > 0 ? vk : 'T';
     }
 
     bool PollEscape() {

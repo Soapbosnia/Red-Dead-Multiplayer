@@ -1,10 +1,16 @@
-// scoreboard (client): hold Tab to see who is on the server. An example of the dx* drawing API.
+// scoreboard (client): hold Tab to see who is on the server. An example of the dx* drawing API and bindKey.
 
 const ROW = 26;
 const WIDTH = 420;
 
+// Bound with a description, so players see it in Settings > Binds and can move it to another key.
+let showing = false;
+bindKey("tab", "both", (key, state) => {
+    showing = state === "down";
+}, "Show the scoreboard");
+
 Events.on("clientRender", () => {
-    if (!isKeyDown("tab") || isChatInputActive()) return;
+    if (!showing || isChatInputActive()) return;
     const screen = guiGetScreenSize();
     const players = getElementsByType("player");
     const height = 56 + players.length * ROW;

@@ -44,6 +44,8 @@ namespace RDMP::Overlay {
     // Esc never reaches the game (its pause menu does not open); each press is reported once through PollEscape.
     void CaptureEscape(bool capture);
     bool PollEscape();
+    // The key that opens the chat input (virtual-key code; T by default, [binds] chat in rdmp.ini).
+    void SetChatKey(int vk);
     // The game window (HWND), null until Ready().
     void *Window();
 

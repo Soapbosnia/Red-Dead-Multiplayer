@@ -38,6 +38,8 @@ namespace RDMP::ClientApi {
         const char *name;
     };
     const std::vector<KeyName> &Keys();
+    // bindKey handlers for a key that went down / up (api_input.cpp); main thread, outside any engine scope.
+    void DispatchBinds(const char *key, bool down);
 
     void RegisterPlayerApi(const ScriptApi::Publisher &publish);
     void RegisterHudApi(const ScriptApi::Publisher &publish);

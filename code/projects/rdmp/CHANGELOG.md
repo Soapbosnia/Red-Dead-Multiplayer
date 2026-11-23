@@ -1,6 +1,16 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Settings > Binds** (MTA-style): multiplayer controls (the chat key), resource binds (every bind a server script made
+  with a description, per resource) and the game's own controls by category with primary / secondary keys; click a key,
+  press the new one (Backspace / Delete unbinds, Esc cancels), * marks changes, Reset game controls. Game controls go
+  live through the game's own commit (its keybind menu's path) and are kept in rdmp.ini [game_binds], applied over the
+  game's at every launch: the single-player gabindings.xml is never changed. fw_api v14 (quit, get_bindings,
+  set_binding).
+* **Client scripting: `bindKey(key, state, handler [, description])` / `unbindKey`** (scripting layer: MINOR). The
+  scoreboard resource binds Tab with it, so players can move it.
+* Fixed: Quit only made the game beep (a WM_CLOSE to its window); it now ends the game like its own Quit.
+* The title screen no longer shows the news panel or "Playing as".
 * **The game's own fonts and logo art in the menu**, read at runtime from the player's game files (nothing extracted is
   shipped): the slab serif, small serif and condensed faces from fonts.rpf (served to ImGui through a custom font
   loader, so every widget, the chat and nametags use them) and the title movie's brush letters for a RED DEAD

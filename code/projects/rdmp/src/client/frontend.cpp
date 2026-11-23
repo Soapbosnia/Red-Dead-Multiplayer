@@ -13,11 +13,13 @@
 #include "client/menu_model.h"
 #include "client/menu_ui.h"
 #include "client/overlay.h"
+#include "client/script_binds.h"
 #include "client/server_query.h"
 #include "shared/fw_api.h"
 #include "shared/game_options.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -44,10 +46,12 @@ namespace RDMP::Frontend {
         std::map<std::string, std::vector<Model::Server>> g_lists;
         std::map<std::string, uint64_t> g_refreshAt;
         std::map<std::string, std::string> g_listErrors;
-        std::vector<Model::ChangelogEntry> g_changelog;
         std::vector<std::pair<int, int>> g_resolutions;
         std::vector<int> g_rates;
         Model::Notice g_notice;
+        // The game's bindings as it loaded them (before ours from [game_binds]), taken once its table is up.
+        std::vector<rdmp::fw::GameBinding> g_gameDefaults;
+        bool g_gameBindsApplied = false;
 
         // What the menu is doing with the connection.
         std::string g_pendingAddress; // "host:port" while connecting / connected from the menu
@@ -174,22 +178,6 @@ namespace RDMP::Frontend {
                 }
                 if (changed) {
                     SaveServers();
-                }
-            }
-        }
-
-        void LoadChangelog() {
-            std::ifstream file(g_binDir / "ui" / "changelog.txt");
-            std::string line;
-            while (std::getline(file, line)) {
-                if (!line.empty() && line.back() == '\r') {
-                    line.pop_back();
-                }
-                if (line.rfind("# ", 0) == 0) {
-                    g_changelog.push_back({line.substr(2), {}});
-                }
-                else if (line.rfind("- ", 0) == 0 && !g_changelog.empty()) {
-                    g_changelog.back().lines.push_back(line.substr(2));
                 }
             }
         }
@@ -487,8 +475,9 @@ namespace RDMP::Frontend {
         }
 
         void Quit() {
-            if (HWND window = static_cast<HWND>(Overlay::Window())) {
-                PostMessageW(window, WM_CLOSE, 0, 0);
+            // The game ends the way its own exit does (rdmp.dll stops our game loop); a WM_CLOSE only made it beep.
+            if (g_host && g_host->quit) {
+                g_host->quit();
             }
         }
 
@@ -508,8 +497,63 @@ namespace RDMP::Frontend {
             g_notice = {error, text, NowMs()};
         }
 
-        const std::vector<ChangelogEntry> &Changelog() {
-            return g_changelog;
+        std::vector<rdmp::fw::GameBinding> GameBindings() {
+            std::vector<rdmp::fw::GameBinding> out(256);
+            const int n = g_host && g_host->get_bindings ? g_host->get_bindings(out.data(), static_cast<int>(out.size())) : 0;
+            out.resize(static_cast<size_t>(std::max(0, n)));
+            return out;
+        }
+
+        bool SetGameBinding(const std::string &action, int slot, int type, int input) {
+            if (!g_host || !g_host->set_binding || g_host->set_binding(action.c_str(), slot, type, input) == 0) {
+                return false;
+            }
+            // Kept in our own file, the whole action: "type input type input" (primary, secondary).
+            for (const auto &b : GameBindings()) {
+                if (action == b.action) {
+                    char value[64];
+                    std::snprintf(value, sizeof(value), "%d %d %d %d", b.type[0], b.input[0], b.type[1], b.input[1]);
+                    IniWrite(L"game_binds", std::wstring(action.begin(), action.end()).c_str(), value);
+                }
+            }
+            return true;
+        }
+
+        bool GameBindingDefault(const std::string &action, rdmp::fw::GameBinding &out) {
+            for (const auto &b : g_gameDefaults) {
+                if (action == b.action) {
+                    out = b;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        void ResetGameBindings() {
+            const auto now = GameBindings();
+            for (const auto &d : g_gameDefaults) {
+                for (const auto &b : now) {
+                    if (std::strcmp(b.action, d.action) != 0) {
+                        continue;
+                    }
+                    for (int slot = 0; slot < 2; ++slot) {
+                        if (b.type[slot] != d.type[slot] || b.input[slot] != d.input[slot]) {
+                            g_host->set_binding(d.action, slot, d.type[slot], d.input[slot]);
+                        }
+                    }
+                }
+            }
+            WritePrivateProfileStringW(L"game_binds", nullptr, nullptr, g_ini.c_str());
+        }
+
+        std::string ChatKey() {
+            const std::string key = IniString(L"binds", L"chat", L"t");
+            return ScriptBinds::KeyCode(key) ? key : std::string("t");
+        }
+
+        void SetChatKey(const std::string &key) {
+            IniWrite(L"binds", L"chat", key);
+            Overlay::SetChatKey(ScriptBinds::KeyCode(ChatKey()));
         }
     } // namespace Model
 
@@ -524,13 +568,13 @@ namespace RDMP::Frontend {
         g_enabled = IniInt(L"client", L"menu", 1) != 0;
         MenuUi::Attach(client, host);
         LoadServers();
-        LoadChangelog();
         LoadDisplayModes();
         ApplySettings();
         SeedRemembered("favorites");
         SeedRemembered("recent");
         // The game's own pause menu never opens: Esc is ours (the in-game menu).
         Overlay::CaptureEscape(g_enabled);
+        Overlay::SetChatKey(ScriptBinds::KeyCode(Model::ChatKey()));
     }
 
     void Frame() {
@@ -555,6 +599,44 @@ namespace RDMP::Frontend {
             g_pendingAddress.clear();
         }
         g_wasConnected = connected;
+
+        // Our game binds over the game's own, once its table is up (MTA-style: the mod's config is applied at launch).
+        if (!g_gameBindsApplied && g_host && g_host->get_bindings && g_host->set_binding) {
+            const auto loaded = Model::GameBindings();
+            if (!loaded.empty()) {
+                g_gameBindsApplied = true;
+                g_gameDefaults     = loaded;
+                std::vector<wchar_t> section(32768);
+                const DWORD len = GetPrivateProfileSectionW(L"game_binds", section.data(), static_cast<DWORD>(section.size()), g_ini.c_str());
+                int applied     = 0;
+                for (const wchar_t *p = section.data(); p < section.data() + len && *p; p += std::wcslen(p) + 1) {
+                    const std::wstring line(p);
+                    const size_t eq = line.find(L'=');
+                    if (eq == std::wstring::npos) {
+                        continue;
+                    }
+                    std::string action; // action names are ASCII
+                    for (size_t k = 0; k < eq; ++k) {
+                        action.push_back(static_cast<char>(line[k]));
+                    }
+                    int t[2] = {0, 0}, in[2] = {-1, -1};
+                    if (swscanf_s(line.c_str() + eq + 1, L"%d %d %d %d", &t[0], &in[0], &t[1], &in[1]) != 4) {
+                        continue;
+                    }
+                    for (const auto &b : loaded) {
+                        if (action != b.action) {
+                            continue;
+                        }
+                        for (int slot = 0; slot < 2; ++slot) {
+                            if (b.type[slot] != t[slot] || b.input[slot] != in[slot]) {
+                                applied += g_host->set_binding(b.action, slot, t[slot], in[slot]);
+                            }
+                        }
+                    }
+                }
+                Log()->info("menu: {} game binding(s) applied from rdmp.ini [game_binds]", applied);
+            }
+        }
 
         for (const auto &info : ServerQuery::Poll()) {
             if (g_native.size() < 1024) {

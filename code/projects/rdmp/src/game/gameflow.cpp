@@ -76,6 +76,7 @@ constexpr uintptr_t kGameVtable = 0x141C7AFD0;
 constexpr uintptr_t kRenderThreadOwner = 0x1422722E0;  // thread id that owns the device (or -1)
 
 bool g_installed = false;
+volatile bool g_quitRequested = false;  // the menu's Quit: our loop ends like the game's own exit (state 6)
 int g_bootPhase = 0;  // 0 = waiting for sign-in, 1 = boot gate open
 ULONGLONG g_runStartMs = 0;
 int g_gateFrames = 0;                // frames since the boot gate opened
@@ -540,7 +541,7 @@ void OurRun(uintptr_t game) {
                 stateChange = 0;
             }
         }
-        const bool exitAfter = state == 6;
+        const bool exitAfter = state == 6 || g_quitRequested;
 
         BootStep();
 
@@ -641,6 +642,12 @@ void OurRun(uintptr_t game) {
     }
     Log("gameflow: our game loop exiting");
     NetShutdown();
+    if (g_quitRequested) {
+        // The menu's Quit ends the process like the game's own Quit does (ExitProcess with the level loaded): the
+        // engine's shutdown below waits forever with a world loaded.
+        Log("gameflow: quitting");
+        ExitProcess(0);
+    }
     int32_t us = 100000;
     F<void (*)(int32_t*)>(0x140EB9160)(&us);
     const uintptr_t sysApp = At<uintptr_t>(G<uintptr_t>(0x142893448), 0x48);
@@ -650,6 +657,11 @@ void OurRun(uintptr_t game) {
 }  // namespace
 
 bool OwnGameLoopActive() { return g_installed; }
+void GameflowRequestQuit() {
+    if (!g_installed) return;
+    Log("gameflow: quit requested (menu)");
+    g_quitRequested = true;
+}
 bool OwnBootGateOpen() { return g_bootPhase >= 1; }
 bool GameflowTitleMode() { return g_titleMode; }
 bool GameflowWorldLoadStarted() { return g_bootPhase >= 2; }

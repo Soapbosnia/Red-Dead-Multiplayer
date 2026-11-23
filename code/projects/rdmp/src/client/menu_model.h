@@ -2,10 +2,11 @@
 /*
  * What the ImGui main menu (menu_ui.cpp) shows and does, kept by frontend.cpp: the multiplayer settings (rdmp.ini),
  * the game's own settings (shared/game_options.h, through rdmp.dll), the server lists (servers.json + ServerQuery),
- * the connection and the changelog. Main thread only.
+ * the connection and the key binds. Main thread only.
  */
 
 #include "client/server_query.h"
+#include "shared/fw_api.h"
 #include "shared/game_options.h"
 
 #include <cstdint>
@@ -76,10 +77,16 @@ namespace RDMP::Frontend::Model {
     const Notice &LastNotice();
     void Notify(bool error, const std::string &text);
 
-    // ---- ui/changelog.txt: "# heading" starts a version, "- " a line ----
-    struct ChangelogEntry {
-        std::string heading;
-        std::vector<std::string> lines;
-    };
-    const std::vector<ChangelogEntry> &Changelog();
+    // ---- key binds ----
+    // The game's player bindings (fw::GameBinding: action, primary / secondary {type, input}).
+    std::vector<rdmp::fw::GameBinding> GameBindings();
+    // Applies it through the game and keeps it in rdmp.ini [game_binds] (applied over the game's at every launch).
+    bool SetGameBinding(const std::string &action, int slot, int type, int input);
+    // The game's own binding for an action (as it loaded it, before ours); false when unknown.
+    bool GameBindingDefault(const std::string &action, rdmp::fw::GameBinding &out);
+    // Every game control back to the game's own (and [game_binds] cleared).
+    void ResetGameBindings();
+    // The chat key (a key name as isKeyDown takes it; [binds] chat).
+    std::string ChatKey();
+    void SetChatKey(const std::string &key);
 } // namespace RDMP::Frontend::Model

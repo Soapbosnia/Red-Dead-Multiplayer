@@ -117,6 +117,11 @@ Owner's call (2026-11-22): the native menus took too long, ImGui instead, themed
   small serif (ImGui's default font: widgets, chat, nametags; Bahnschrift merged in for other scripts) and condensed
   face; the logo is the title movie's brush letters RED / DEAD with MULTIPLAYER on its red brush stroke; menu items
   get the brush stroke as their hover highlight. Without the game files it falls back to Palatino / Bahnschrift.
+* Settings > Binds (MTA-style): chat key, resource binds (client `bindKey` with a description; overrides in rdmp.ini
+  [resource_binds]), the game's controls by category, primary / secondary (live through the game's own commit, kept in
+  rdmp.ini [game_binds], reapplied at launch; gabindings.xml untouched). re/NOTES.md "Key bindings".
+* Open: the game's own saves fail here (gabindings.xml and options.xml unchanged since 2026-11-03): the game settings
+  applied from Settings likely do not survive a restart either; same remedy (keep them in rdmp.ini, apply at launch).
 * In a session Esc opens the in-game menu over the darkened world: Resume, Settings, Disconnect (no prompt), Quit.
   While the menu is up: cursor shown, the game gets no keyboard / mouse (DirectInput + window hooks) and
   set_input_lock holds the player (checked: W does not move him). Esc never reaches the game (WM_KEYDOWN, raw input,
