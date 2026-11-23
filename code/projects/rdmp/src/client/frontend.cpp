@@ -522,7 +522,7 @@ namespace RDMP::Frontend {
         g_binDir  = std::filesystem::path(Framework::Utils::GetModuleDirW());
         g_ini     = (g_binDir / "rdmp.ini").wstring();
         g_enabled = IniInt(L"client", L"menu", 1) != 0;
-        MenuUi::Attach(client);
+        MenuUi::Attach(client, host);
         LoadServers();
         LoadChangelog();
         LoadDisplayModes();

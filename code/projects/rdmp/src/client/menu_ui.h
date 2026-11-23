@@ -7,9 +7,12 @@
 namespace RDMP {
     class FwClient;
 }
+namespace rdmp::fw {
+    struct Host;
+}
 
 namespace RDMP::MenuUi {
-    void Attach(FwClient *client);
+    void Attach(FwClient *client, const rdmp::fw::Host *host);
     // The menu came on screen: the main menu (not in a session) or the in-game menu.
     void Opened(bool inSession);
     // One frame of the menu.

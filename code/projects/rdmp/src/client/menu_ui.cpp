@@ -15,6 +15,8 @@
 #include "client/fw_client.h"
 #include "client/menu_model.h"
 #include "client/menu_ui.h"
+#include "client/rdr_assets.h"
+#include "shared/fw_api.h"
 
 #include <algorithm>
 #include <cctype>
@@ -30,7 +32,8 @@ namespace RDMP::MenuUi {
         namespace M = Frontend::Model;
         namespace opt = rdmp::opt;
 
-        FwClient *g_client = nullptr;
+        FwClient *g_client           = nullptr;
+        const rdmp::fw::Host *g_host = nullptr;
 
         // ---- palette ----
         constexpr ImU32 Rgba(int r, int g, int b, float a = 1.0f) {
@@ -53,8 +56,9 @@ namespace RDMP::MenuUi {
         const ImU32 kPanel  = Rgba(20, 15, 11, 0.88f);
 
         // ---- fonts / scale ----
-        ImFont *g_title = nullptr; // Palatino Linotype bold
-        ImFont *g_serif = nullptr; // Palatino Linotype
+        ImFont *g_title  = nullptr; // the game's slab serif (headings, menu items); Palatino without the game files
+        ImFont *g_serif  = nullptr; // Palatino Linotype
+        ImFont *g_narrow = nullptr; // the game's condensed face (the logo's MULTIPLAYER)
         ImFont *g_icons = nullptr; // Segoe MDL2 Assets
         bool g_fontsLooked = false;
         float S            = 1.0f; // window height / 1080
@@ -244,6 +248,13 @@ namespace RDMP::MenuUi {
             g_title       = imgui->GetFont("title");
             g_serif       = imgui->GetFont("serif");
             g_icons       = imgui->GetFont("icons");
+            // The game's own type, read from its files: the slab serif for headings, the small serif for everything else
+            // (it becomes ImGui's default font, so widgets, the chat and nametags use it too).
+            if (RdrAssets::Load(g_host)) {
+                g_title                    = RdrAssets::Font(RdrAssets::Face::Serif);
+                g_narrow                   = RdrAssets::Font(RdrAssets::Face::Narrow);
+                ImGui::GetIO().FontDefault = RdrAssets::Font(RdrAssets::Face::Body);
+            }
         }
 
         void ApplyTheme() {
@@ -310,7 +321,7 @@ namespace RDMP::MenuUi {
             c[ImGuiCol_ResizeGripHovered]     = Vec(214, 56, 44, 0.5f);
             c[ImGuiCol_ResizeGripActive]      = Vec(214, 56, 44, 0.8f);
             st.ScaleAllSizes(S);
-            st.FontSizeBase = 18.0f;
+            st.FontSizeBase = 20.0f;
             st.FontScaleDpi = S;
             ImGui::GetStyle() = st;
         }
@@ -325,7 +336,8 @@ namespace RDMP::MenuUi {
         }
 
         ImFont *Sans() {
-            return ImGui::GetIO().Fonts->Fonts.empty() ? ImGui::GetFont() : ImGui::GetIO().Fonts->Fonts[0];
+            const ImGuiIO &io = ImGui::GetIO();
+            return io.FontDefault ? io.FontDefault : io.Fonts->Fonts.empty() ? ImGui::GetFont() : io.Fonts->Fonts[0];
         }
         ImFont *Or(ImFont *font) {
             return font ? font : Sans();
@@ -1110,14 +1122,49 @@ namespace RDMP::MenuUi {
                                         Rgba(4, 3, 2, 0.80f));
         }
 
+        void Art(ImDrawList *dl, RdrAssets::Art art, ImVec2 p0, ImVec2 p1, ImU32 tint) {
+            const RdrAssets::Texture t = RdrAssets::Get(art);
+            if (t.valid) {
+                dl->AddImage(t.ref, p0, p1, ImVec2(0, 0), ImVec2(1, 1), tint);
+            }
+        }
+
+        // The game's own brush letters RED and DEAD (title movie art), MULTIPLAYER in its condensed face on a red brush
+        // stroke under them. Without the game files: type only.
         void Logo(ImDrawList *dl, ImVec2 pos) {
-            // Type only: RED DEAD in the heading face, MULTIPLAYER spaced out in red under it, flush left.
-            PutSpaced(dl, g_title, 84.0f, ImVec2(pos.x + 2.0f * S, pos.y + 3.0f * S), Rgba(0, 0, 0, 0.6f), "RED DEAD", 1.0f); // shadow
-            const float w       = PutSpaced(dl, g_title, 84.0f, pos, kInk, "RED DEAD", 1.0f);
-            const float y       = pos.y + 92.0f * S;
-            const float mw      = PutSpaced(dl, nullptr, 21.0f, ImVec2(0, 0), kRedHi, "MULTIPLAYER", 0.0f, true);
-            const float spacing = std::max(0.0f, (w - mw) / 10.0f / S); // MULTIPLAYER spans the width of RED DEAD
-            PutSpaced(dl, nullptr, 21.0f, ImVec2(pos.x + 3.0f * S, y), kRedHi, "MULTIPLAYER", spacing);
+            const RdrAssets::Texture red = RdrAssets::Get(RdrAssets::Art::Red), dead = RdrAssets::Get(RdrAssets::Art::Dead);
+            if (!red.valid || !dead.valid) {
+                PutSpaced(dl, g_title, 84.0f, ImVec2(pos.x + 2.0f * S, pos.y + 3.0f * S), Rgba(0, 0, 0, 0.6f), "RED DEAD", 1.0f);
+                const float w       = PutSpaced(dl, g_title, 84.0f, pos, kInk, "RED DEAD", 1.0f);
+                const float mw      = PutSpaced(dl, nullptr, 21.0f, ImVec2(0, 0), kRedHi, "MULTIPLAYER", 0.0f, true);
+                const float spacing = std::max(0.0f, (w - mw) / 10.0f / S);
+                PutSpaced(dl, nullptr, 21.0f, ImVec2(pos.x + 3.0f * S, pos.y + 92.0f * S), kRedHi, "MULTIPLAYER", spacing);
+                return;
+            }
+            const float h     = 150.0f * S;     // letter height on screen
+            const float k     = h / red.height; // both masks share one scale
+            const float redW  = red.width * k, deadW = dead.width * k;
+            const float gap   = 22.0f * S;      // a word space (the masks carry a little margin)
+            const float total = redW + gap + deadW;
+            const ImVec2 sh(4.0f * S, 5.0f * S); // drop shadow
+            Art(dl, RdrAssets::Art::Red, ImVec2(pos.x + sh.x, pos.y + sh.y), ImVec2(pos.x + redW + sh.x, pos.y + h + sh.y), Rgba(0, 0, 0, 0.55f));
+            Art(dl, RdrAssets::Art::Dead, ImVec2(pos.x + redW + gap + sh.x, pos.y + sh.y), ImVec2(pos.x + total + sh.x, pos.y + h + sh.y),
+                Rgba(0, 0, 0, 0.55f));
+            Art(dl, RdrAssets::Art::Red, pos, ImVec2(pos.x + redW, pos.y + h), Rgba(244, 236, 220));
+            Art(dl, RdrAssets::Art::Dead, ImVec2(pos.x + redW + gap, pos.y), ImVec2(pos.x + total, pos.y + h), Rgba(244, 236, 220));
+
+            // The stroke and MULTIPLAYER, under the letters.
+            const float sy = pos.y + h - 2.0f * S, strokeH = 70.0f * S;
+            Art(dl, RdrAssets::Art::Stroke, ImVec2(pos.x - 10.0f * S, sy), ImVec2(pos.x + total + 10.0f * S, sy + strokeH), Rgba(168, 30, 24));
+            ImFont *font        = g_narrow ? g_narrow : g_title;
+            const float size    = 56.0f;
+            const float plain   = PutSpaced(dl, font, size, ImVec2(0, 0), 0, "MULTIPLAYER", 0.0f, true);
+            const float spacing = std::max(0.0f, (total * 0.78f - plain) / 10.0f / S);
+            const float mw      = PutSpaced(dl, font, size, ImVec2(0, 0), 0, "MULTIPLAYER", spacing, true);
+            const ImVec2 ts     = Measure(font, size, "M");
+            const ImVec2 at(pos.x + (total - mw) * 0.5f, sy + (strokeH - ts.y) * 0.5f + 1.0f * S);
+            PutSpaced(dl, font, size, ImVec2(at.x + 2.0f * S, at.y + 2.0f * S), Rgba(40, 6, 4, 0.8f), "MULTIPLAYER", spacing);
+            PutSpaced(dl, font, size, at, Rgba(244, 236, 220), "MULTIPLAYER", spacing);
         }
 
         // One title-screen item: big type, slides right and brightens on hover, a red mark in front.
@@ -1136,7 +1183,14 @@ namespace RDMP::MenuUi {
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float x  = pos.x + 16.0f * S * t;
             if (t > 0.0f) {
-                dl->AddRectFilled(ImVec2(pos.x - 14.0f * S, pos.y + ts.y * 0.22f), ImVec2(pos.x - 10.0f * S, pos.y + ts.y * 0.80f), Rgba(214, 56, 44, t));
+                if (RdrAssets::Get(RdrAssets::Art::StrokeThin).valid) {
+                    // The game's own menu highlight: a red brush stroke behind the item.
+                    Art(dl, RdrAssets::Art::StrokeThin, ImVec2(pos.x - 30.0f * S, pos.y - 4.0f * S), ImVec2(pos.x + ts.x + 60.0f * S, pos.y + ts.y + 6.0f * S),
+                        Rgba(168, 30, 24, 0.92f * t));
+                }
+                else {
+                    dl->AddRectFilled(ImVec2(pos.x - 14.0f * S, pos.y + ts.y * 0.22f), ImVec2(pos.x - 10.0f * S, pos.y + ts.y * 0.80f), Rgba(214, 56, 44, t));
+                }
             }
             const ImU32 col = enabled ? IM_COL32(static_cast<int>(201 + (255 - 201) * t), static_cast<int>(189 + (246 - 189) * t),
                                                  static_cast<int>(163 + (232 - 163) * t), 255)
@@ -1195,7 +1249,7 @@ namespace RDMP::MenuUi {
                         const ImVec2 p = ImGui::GetCursorScreenPos();
                         ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 4.0f * S, p.y + 10.0f * S), 2.5f * S, kRed, 8);
                         ImGui::SetCursorScreenPos(ImVec2(p.x + 16.0f * S, p.y));
-                        Label(nullptr, 15.0f, kInk2, line.c_str(), ImGui::GetContentRegionAvail().x - 16.0f * S);
+                        Label(nullptr, 17.0f, kInk2, line.c_str(), ImGui::GetContentRegionAvail().x - 16.0f * S);
                     }
                 }
             }
@@ -1256,8 +1310,14 @@ namespace RDMP::MenuUi {
         // A movable window in the menu's look: Palatino title, a red rule under the title bar.
         bool BeginWindow(Win which, const char *title, ImVec2 size, bool resizable) {
             const ImVec2 ds = ImGui::GetIO().DisplaySize;
+            // Right of the menu column, inside the screen.
+            const float left = 740.0f * S; // clear of the logo
+            size.x           = std::min(size.x, ds.x - left - 48.0f * S);
+            if (size.y > 0) {
+                size.y = std::min(size.y, ds.y - 96.0f * S);
+            }
             ImGui::SetNextWindowSize(size, ImGuiCond_Appearing);
-            ImGui::SetNextWindowPos(ImVec2(std::max(ds.x * 0.5f, 560.0f * S + size.x * 0.5f), ds.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowPos(ImVec2(left + (ds.x - left - 48.0f * S - size.x) * 0.5f, ds.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.0f, 0.5f));
             if (g_focusWant && g_focusWin == which) {
                 ImGui::SetNextWindowFocus();
                 g_focusWant = false;
@@ -1457,8 +1517,9 @@ namespace RDMP::MenuUi {
         }
     } // namespace
 
-    void Attach(FwClient *client) {
+    void Attach(FwClient *client, const rdmp::fw::Host *host) {
         g_client = client;
+        g_host   = host;
     }
 
     void Opened(bool inSession) {

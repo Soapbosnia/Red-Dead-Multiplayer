@@ -22,7 +22,8 @@ namespace rdmp::fw {
 // v11: server browser for the native menus (browser_refresh / browser_poll / browser_favorite / browser_connect);
 //      disconnect.
 // v12: multiplayer settings for the native menus (get_settings / set_settings).
-constexpr uint32_t kApiVersion = 12;
+// v13: Host inflate (the game's own decompressor, for reading the game's archives: fonts and art for the menu).
+constexpr uint32_t kApiVersion = 13;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -171,6 +172,9 @@ struct Host {
     // either pointer may be null.
     int (*get_game_options)(uint8_t* loaded, uint8_t* graphics);
     int (*set_game_options)(const uint8_t* loaded, const uint8_t* graphics);
+    // The game's decompressor (zlib 1.2.3's inflate; it also decodes the zstd frames the PC archives hold). Returns 1 when
+    // the whole stream was decoded (*outLen bytes), 2 when dst was too small, 0 on an error.
+    int (*inflate)(const void* src, uint64_t srcLen, void* dst, uint64_t dstCap, uint64_t* outLen);
 };
 
 // Function table filled by rdmp_client_get_api (one export keeps the dll boundary small).

@@ -158,10 +158,54 @@ bool HostRemotePosition(uint64_t netId, float out[3]) { return RemotePuppetPosit
 int HostGetGameOptions(uint8_t* loaded, uint8_t* graphics) { return ReadGameOptions(loaded, graphics) ? 1 : 0; }
 int HostSetGameOptions(const uint8_t* loaded, const uint8_t* graphics) { return ApplyGameOptions(loaded, graphics) ? 1 : 0; }
 
+// The game's zlib 1.2.3 (inflateInit_ 0x140F021D0, inflate 0x140F01B80, inflateEnd 0x140F01FC0) with Rockstar's zstd
+// support: while the global at 0x14225B228 is set (from the start; the PC archives are zstd) a stream starting with a
+// zstd frame is decoded as zstd. Same calls as the game's resource loader (FUN_1400b9xxx: init, inflate(Z_SYNC_FLUSH)).
+struct ZStream {
+    const uint8_t* nextIn;
+    uint32_t availIn;
+    uint32_t totalIn;
+    uint8_t* nextOut;
+    uint32_t availOut;
+    uint32_t totalOut;
+    const char* msg;
+    void* state;
+    void* zalloc;  // null: the game's own allocator
+    void* zfree;
+    void* opaque;
+    int32_t dataType;
+    uint32_t adler;
+    uint32_t reserved;  // the zstd wrapper marks its streams here
+};
+static_assert(sizeof(ZStream) == 0x58, "z_stream on Win64");
+
+int HostInflate(const void* src, uint64_t srcLen, void* dst, uint64_t dstCap, uint64_t* outLen) {
+    if (!src || !dst || srcLen > 0xFFFFFFFFull) return 0;
+    ZStream z{};
+    z.nextIn   = static_cast<const uint8_t*>(src);
+    z.availIn  = static_cast<uint32_t>(srcLen);
+    z.nextOut  = static_cast<uint8_t*>(dst);
+    z.availOut = static_cast<uint32_t>(dstCap > 0xFFFFFFFFull ? 0xFFFFFFFFull : dstCap);
+    using InitFn    = int (*)(ZStream*, const char*, int);
+    using InflateFn = int (*)(ZStream*, int);
+    using EndFn     = int (*)(ZStream*);
+    if (reinterpret_cast<InitFn>(GameAddr(0x140F021D0))(&z, "1.2.3", static_cast<int>(sizeof(ZStream))) != 0) return 0;
+    int rc = 0;
+    do {
+        rc = reinterpret_cast<InflateFn>(GameAddr(0x140F01B80))(&z, 2 /* Z_SYNC_FLUSH */);
+    } while (rc == 0 && z.availOut > 0 && z.availIn > 0);
+    reinterpret_cast<EndFn>(GameAddr(0x140F01FC0))(&z);
+    if (outLen) *outLen = z.totalOut;
+    if (rc == 1) return 1;                    // Z_STREAM_END
+    if (rc == 0 && z.availOut == 0) return 2;  // more output than room
+    if (rc == 0 && z.availIn == 0) return 1;   // all input consumed (the zstd path may not report the end itself)
+    return 0;
+}
+
 const fw::Host g_host = {
     fw::kApiVersion, &HostLog,     &HostInvokeNative, &HostGetLocalPlayer, &HostTeleport,  &HostFade,
     &HostSetControl, &HostCamera,  &HostSetHealth,    &HostFocus,          &HostShowText,  &HostKillLocal,
-    &HostGetCamera,  &HostInputLock,    &HostRemotePosition, &HostGetGameOptions, &HostSetGameOptions,
+    &HostGetCamera,  &HostInputLock,    &HostRemotePosition, &HostGetGameOptions, &HostSetGameOptions, &HostInflate,
 };
 
 }  // namespace

@@ -112,11 +112,11 @@ Owner's call (2026-11-22): the native menus took too long, ImGui instead, themed
   Server Browser (tabs, search, filters, sortable table, double-click / Join, Favourite, password dialog), Quick
   Connect, Settings (Multiplayer + the game's own options; Apply / Revert, display changes revert in 15 s unless
   kept), About. Esc closes the last window opened.
-* Owner wants the game's own fonts (Redemption, RDR2Lucid, RDR2Narrow). They are Scaleform bitmap atlases
-  (Redemption.charset_N.dds) inside the flash.rpf movies' serialized GFx graphs (payload 0x5ACE4A58 holds
-  RedemptionBIG / Stagger / shadow); glyph metrics not located yet. fonts.rpf holds button-icon fonts and small
-  rage bitmap fonts (10-byte glyph records). They must be read from the player's own game files at runtime (never
-  shipped). Until then: Windows' Palatino / Bahnschrift.
+* The game's own type and art, read at runtime from the player's game files (src/client/rdr_assets.cpp; never shipped;
+  formats in re/NOTES.md "Game fonts and title art"): fonts.rpf's slab serif (headings, menu items, window titles),
+  small serif (ImGui's default font: widgets, chat, nametags; Bahnschrift merged in for other scripts) and condensed
+  face; the logo is the title movie's brush letters RED / DEAD with MULTIPLAYER on its red brush stroke; menu items
+  get the brush stroke as their hover highlight. Without the game files it falls back to Palatino / Bahnschrift.
 * In a session Esc opens the in-game menu over the darkened world: Resume, Settings, Disconnect (no prompt), Quit.
   While the menu is up: cursor shown, the game gets no keyboard / mouse (DirectInput + window hooks) and
   set_input_lock holds the player (checked: W does not move him). Esc never reaches the game (WM_KEYDOWN, raw input,

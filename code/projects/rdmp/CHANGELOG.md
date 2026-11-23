@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **The game's own fonts and logo art in the menu**, read at runtime from the player's game files (nothing extracted is
+  shipped): the slab serif, small serif and condensed faces from fonts.rpf (served to ImGui through a custom font
+  loader, so every widget, the chat and nametags use them) and the title movie's brush letters for a RED DEAD
+  MULTIPLAYER logo; menu items get the game's red brush stroke on hover. fw_api v13 (Host inflate: the game's own
+  decompressor).
 * **Main menu, MTA-style:** a title screen (logo, QUICK CONNECT / BROWSE SERVERS / SETTINGS / ABOUT / QUIT, latest
   news, version) with the server browser, quick connect, settings and about as movable ImGui windows over it; Esc
   closes the last window opened. In game: RESUME / SETTINGS / DISCONNECT / QUIT over the darkened world.

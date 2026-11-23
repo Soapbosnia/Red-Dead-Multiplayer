@@ -808,3 +808,26 @@ components on a puppet, which other threads read playerInfo during the swap.
   is the owner's check).
 * While the menu is up the whole keyboard and mouse are blocked the same way (state zeroed, buffered events dropped)
   and the client's set_input_lock holds the player; verified in game: W held behind the menu does not move him.
+
+## Game fonts and title art (2026-11-23, src/client/rdr_assets.cpp, read at runtime, never shipped)
+* Archives: RPF6, TOC AES-256-ECB applied 16 times (key in re/tools/rpf6.py), 20-byte big-endian entries; payloads
+  are RSC5 (12-byte header) + zstd or plain zstd. RDR.exe's zlib 1.2.3 (inflateInit_ 0x140F021D0, inflate 0x140F01B80,
+  inflateEnd 0x140F01FC0; Win64 z_stream, 0x58 bytes) decodes zstd frames while the global 0x14225B228 is set (1 from
+  the start): fw::Host::inflate (fw_api v13) calls it the way the resource loader does (Z_SYNC_FLUSH).
+* fonts.rpf = rage bitmap fonts: a glyph table (float 1.02, +4 size, +0x2C glyph count; 10-byte glyphs {u16 code,
+  u16 0, u8 x, u8 y, u8 w, u8 h, s8 top from the baseline, s8 advance adjust}; then u32 page count and the index of
+  each page's end) plus one 128 x 128 DXT5 DDS per page (coverage in alpha). Text fonts (glyph table: pages):
+  - 0x0411E993 slab serif, size 31 (the game's menu face): 4EE9E283 08AF780F C3220EEC 501362D8 EA6D86F7 EF5113A7
+    8CB5145E 2EEC2FDC
+  - 0xBA922545 condensed, size 37: C47FB29E 1EBCC74D F7B13ADD 7093E1D6 84EDA8FA
+  - 0xEAE379F1 small serif, size 20: D94CD6B0 DD3CC5A2 12513FF0 31CAD755
+  The 512 x 512 pages and the 0xA35A5753 / 0x8DEC952B family are controller-button and icon fonts; 05BBE1DB /
+  7F66C050 / DEDC033D look like shadow variants. Line metrics: take ascent / descent from letters and digits (a few
+  symbols reach much further). Served to ImGui through a custom ImFontLoader (glyphs area-resampled to each size).
+* The menus' Scaleform fonts (Redemption, RDR2Lucid, RDR2Narrow: *.charset_N.dds) sit inside the flash.rpf movies'
+  serialized GFx graphs; their glyph metrics were not located (not needed: fonts.rpf has the faces).
+* Title art: flash.rpf 0x4D8DB2A4 (startscreen): brush masks _brs_startscreen_z_0111 RED 976x552, _0110 DEAD
+  1248x548, _0117 REDEM, _0116 PTION, brush strokes _0020 / _0023 / _0026, splatter _0069 (DXT1, white on black);
+  _0127 / startscreen_z_0104 / _0107 Undead Nightmare. Texture records as above (name ptr 0x5.., data ptr 0x6..,
+  physical = the last 0xA00000 bytes).
+

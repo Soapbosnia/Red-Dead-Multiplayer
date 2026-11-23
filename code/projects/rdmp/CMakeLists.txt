@@ -55,9 +55,10 @@ add_library(rdmp_client SHARED
     "${RDMP_SRC}/client/hud.cpp"
     "${RDMP_SRC}/client/frontend.cpp"
     "${RDMP_SRC}/client/menu_ui.cpp"
+    "${RDMP_SRC}/client/rdr_assets.cpp"
     "${RDMP_SRC}/client/server_query.cpp"
     "${RDMP_SRC}/client/overlay.cpp")
-target_link_libraries(rdmp_client PRIVATE Framework::Client minhook::minhook d3d12 dxgi dinput8 dxguid)
+target_link_libraries(rdmp_client PRIVATE Framework::Client minhook::minhook d3d12 dxgi dinput8 dxguid bcrypt)
 target_include_directories(rdmp_client PRIVATE "${RDMP_SRC}")
 target_compile_definitions(rdmp_client PRIVATE NOMINMAX _USE_MATH_DEFINES)
 target_link_options(rdmp_client PRIVATE /MANIFEST:NO /DEBUG /OPT:REF /OPT:ICF)
