@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **Main menu, MTA-style:** a title screen (logo, QUICK CONNECT / BROWSE SERVERS / SETTINGS / ABOUT / QUIT, latest
+  news, version) with the server browser, quick connect, settings and about as movable ImGui windows over it; Esc
+  closes the last window opened. In game: RESUME / SETTINGS / DISCONNECT / QUIT over the darkened world.
 * **ImGui main menu** (src/client/menu_ui.cpp, frontend.cpp): replaces the CEF HTML menu (ui/index.html, app.js,
   style.css removed) and the native SCXML menus as the default. Home (recent servers, changelog from
   ui/changelog.txt), server browser (Internet / Local / Favorites / Recent, search, filters, sorting), direct

@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace RDMP::MenuUi {
@@ -59,9 +60,7 @@ namespace RDMP::MenuUi {
         float S            = 1.0f; // window height / 1080
         float g_themeFor   = 0.0f;
 
-        // ---- pages ----
-        enum class Page { Home, Servers, Direct, Settings, Session };
-        Page g_page       = Page::Home;
+        // ---- state ----
         bool g_inSession  = false;
         bool g_focusNext  = false;
 
@@ -254,8 +253,9 @@ namespace RDMP::MenuUi {
             g_themeFor = S;
             ImGuiStyle st;
             st.WindowPadding     = ImVec2(20, 20);
-            st.WindowRounding    = 0;
-            st.WindowBorderSize  = 0;
+            st.WindowRounding    = 6;
+            st.WindowBorderSize  = 1;
+            st.WindowTitleAlign  = ImVec2(0.0f, 0.5f);
             st.ChildRounding     = 6;
             st.ChildBorderSize   = 1;
             st.PopupRounding     = 6;
@@ -274,7 +274,7 @@ namespace RDMP::MenuUi {
             ImVec4 *c                         = st.Colors;
             c[ImGuiCol_Text]                  = Vec(239, 230, 210);
             c[ImGuiCol_TextDisabled]          = Vec(143, 131, 108);
-            c[ImGuiCol_WindowBg]              = Vec(14, 10, 8, 0.96f);
+            c[ImGuiCol_WindowBg]              = Vec(16, 12, 9, 0.97f);
             c[ImGuiCol_ChildBg]               = Vec(0, 0, 0, 0);
             c[ImGuiCol_PopupBg]               = Vec(22, 17, 13, 0.98f);
             c[ImGuiCol_Border]                = Vec(239, 230, 210, 0.12f);
@@ -282,8 +282,9 @@ namespace RDMP::MenuUi {
             c[ImGuiCol_FrameBg]               = Vec(239, 230, 210, 0.05f);
             c[ImGuiCol_FrameBgHovered]        = Vec(239, 230, 210, 0.09f);
             c[ImGuiCol_FrameBgActive]         = Vec(239, 230, 210, 0.12f);
-            c[ImGuiCol_TitleBg]               = Vec(14, 10, 8);
-            c[ImGuiCol_TitleBgActive]         = Vec(22, 17, 13);
+            c[ImGuiCol_TitleBg]               = Vec(12, 9, 7, 0.98f);
+            c[ImGuiCol_TitleBgActive]         = Vec(28, 19, 13, 0.98f);
+            c[ImGuiCol_TitleBgCollapsed]      = Vec(12, 9, 7, 0.98f);
             c[ImGuiCol_Button]                = Vec(239, 230, 210, 0.07f);
             c[ImGuiCol_ButtonHovered]         = Vec(239, 230, 210, 0.13f);
             c[ImGuiCol_ButtonActive]          = Vec(239, 230, 210, 0.18f);
@@ -305,9 +306,9 @@ namespace RDMP::MenuUi {
             c[ImGuiCol_TableRowBgAlt]         = Vec(239, 230, 210, 0.025f);
             c[ImGuiCol_TextSelectedBg]        = Vec(179, 38, 30, 0.45f);
             c[ImGuiCol_ModalWindowDimBg]      = Vec(5, 4, 3, 0.70f);
-            c[ImGuiCol_ResizeGrip]            = Vec(0, 0, 0, 0);
-            c[ImGuiCol_ResizeGripHovered]     = Vec(0, 0, 0, 0);
-            c[ImGuiCol_ResizeGripActive]      = Vec(0, 0, 0, 0);
+            c[ImGuiCol_ResizeGrip]            = Vec(239, 230, 210, 0.06f);
+            c[ImGuiCol_ResizeGripHovered]     = Vec(214, 56, 44, 0.5f);
+            c[ImGuiCol_ResizeGripActive]      = Vec(214, 56, 44, 0.8f);
             st.ScaleAllSizes(S);
             st.FontSizeBase = 18.0f;
             st.FontScaleDpi = S;
@@ -447,30 +448,6 @@ namespace RDMP::MenuUi {
             return pressed && enabled;
         }
 
-        // Sidebar entry: icon, label, a red bar when active.
-        bool NavItem(const char *text, unsigned icon, bool active, float width) {
-            ImGui::PushID(text);
-            const ImVec2 pos   = ImGui::GetCursorScreenPos();
-            const ImVec2 size  = ImVec2(width, 54.0f * S);
-            const bool pressed = ImGui::InvisibleButton("##nav", size);
-            const bool hovered = ImGui::IsItemHovered();
-            ImDrawList *dl     = ImGui::GetWindowDrawList();
-            const ImVec2 end   = ImVec2(pos.x + size.x, pos.y + size.y);
-            if (active) {
-                dl->AddRectFilledMultiColor(pos, end, Rgba(179, 38, 30, 0.30f), Rgba(179, 38, 30, 0.0f), Rgba(179, 38, 30, 0.0f), Rgba(179, 38, 30, 0.30f));
-                dl->AddRectFilled(pos, ImVec2(pos.x + 3.0f * S, end.y), kRedHi);
-            }
-            else if (hovered) {
-                dl->AddRectFilledMultiColor(pos, end, Rgba(239, 230, 210, 0.08f), Rgba(239, 230, 210, 0.0f), Rgba(239, 230, 210, 0.0f), Rgba(239, 230, 210, 0.08f));
-            }
-            const ImU32 fg = active || hovered ? kInk : kInk2;
-            PutIcon(dl, 19.0f, ImVec2(pos.x + 22.0f * S, pos.y + (size.y - 19.0f * S) * 0.5f), active ? kRedHi : hovered ? kBrass : kInk3, icon);
-            const ImVec2 ts = Measure(nullptr, 22.0f, text);
-            Put(dl, nullptr, 22.0f, ImVec2(pos.x + 60.0f * S, pos.y + (size.y - ts.y) * 0.5f), fg, text);
-            ImGui::PopID();
-            return pressed;
-        }
-
         // An on / off switch.
         bool Toggle(const char *id, bool *value) {
             const ImVec2 pos  = ImGui::GetCursorScreenPos();
@@ -560,14 +537,6 @@ namespace RDMP::MenuUi {
             Gap(4);
         }
 
-        void PageHeader(const char *title, const char *subtitle) {
-            Label(g_title, 42.0f, kInk, title);
-            if (subtitle) {
-                Label(nullptr, 17.0f, kInk3, subtitle);
-            }
-            Gap(18);
-        }
-
         std::string ToLower(std::string s) {
             std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             return s;
@@ -599,228 +568,9 @@ namespace RDMP::MenuUi {
             M::Connect(info.host, info.port, "");
         }
 
-        // =============================================================================================================
-        // backdrop and sidebar
-        // =============================================================================================================
-        void Backdrop(ImDrawList *dl, ImVec2 ds) {
-            if (!g_inSession) {
-                dl->AddRectFilledMultiColor(ImVec2(0, 0), ds, Rgba(29, 20, 13), Rgba(18, 13, 9), Rgba(5, 4, 3), Rgba(12, 9, 6));
-                RadialGlow(dl, ImVec2(ds.x * 0.80f, ds.y * 0.16f), ds.y * 0.95f, 179, 38, 30, 0.26f);
-                RadialGlow(dl, ImVec2(ds.x * 0.12f, ds.y * 1.02f), ds.y * 0.80f, 201, 161, 90, 0.10f);
-                // A low horizon: the sun gone under, a line of brass.
-                const float hy = ds.y * 0.74f;
-                dl->AddRectFilledMultiColor(ImVec2(0, hy - 140.0f * S), ImVec2(ds.x, hy), Rgba(179, 38, 30, 0.0f), Rgba(179, 38, 30, 0.0f),
-                                            Rgba(179, 38, 30, 0.07f), Rgba(179, 38, 30, 0.07f));
-                dl->AddLine(ImVec2(0, hy), ImVec2(ds.x, hy), Rgba(201, 161, 90, 0.10f), 1.0f);
-                // Vignette.
-                const float v = ds.y * 0.28f;
-                dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(ds.x, v), Rgba(0, 0, 0, 0.45f), Rgba(0, 0, 0, 0.45f), Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0));
-                dl->AddRectFilledMultiColor(ImVec2(0, ds.y - v), ds, Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0.55f), Rgba(0, 0, 0, 0.55f));
-            }
-            else {
-                // Over the game: the world stays visible, darkened, and darker under the menu column.
-                dl->AddRectFilled(ImVec2(0, 0), ds, Rgba(5, 4, 3, 0.55f));
-            }
-            const float side = 420.0f * S;
-            dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(side * 1.6f, ds.y), Rgba(6, 4, 3, 0.85f), Rgba(6, 4, 3, 0.0f), Rgba(6, 4, 3, 0.0f),
-                                        Rgba(6, 4, 3, 0.85f));
-            dl->AddRectFilled(ImVec2(0, 0), ImVec2(side, ds.y), Rgba(6, 4, 3, 0.35f));
-            dl->AddLine(ImVec2(side, 64.0f * S), ImVec2(side, ds.y - 64.0f * S), Rgba(201, 161, 90, 0.14f), 1.0f);
-        }
-
-        void Logo(ImDrawList *dl, ImVec2 pos) {
-            // RED DEAD over a brass-ruled MULTIPLAYER: type only, the project's own mark.
-            const float w = PutSpaced(dl, g_title, 60.0f, pos, kInk, "RED DEAD", 3.0f, true);
-            PutSpaced(dl, g_title, 60.0f, pos, kInk, "RED DEAD", 3.0f);
-            const float y   = pos.y + 70.0f * S;
-            const float mw  = PutSpaced(dl, nullptr, 16.0f, ImVec2(0, 0), kRedHi, "MULTIPLAYER", 8.0f, true);
-            const float mx  = pos.x + (w - mw) * 0.5f;
-            const float my  = y + 8.0f * S;
-            const float pad = 14.0f * S;
-            dl->AddLine(ImVec2(pos.x, my), ImVec2(mx - pad, my), Rgba(201, 161, 90, 0.55f), 1.0f * S);
-            dl->AddLine(ImVec2(mx + mw + pad, my), ImVec2(pos.x + w, my), Rgba(201, 161, 90, 0.55f), 1.0f * S);
-            PutSpaced(dl, nullptr, 16.0f, ImVec2(mx, y - 1.0f * S), kRedHi, "MULTIPLAYER", 8.0f);
-        }
-
-        void Sidebar(ImVec2 ds) {
-            const float side = 420.0f * S;
-            const float x    = 48.0f * S;
-            ImDrawList *dl   = ImGui::GetWindowDrawList();
-            Logo(dl, ImVec2(x + 8.0f * S, 64.0f * S));
-
-            ImGui::SetCursorScreenPos(ImVec2(x, 230.0f * S));
-            const float w = side - x - 40.0f * S;
-            ImGui::BeginGroup();
-            if (!g_inSession) {
-                if (NavItem("Home", 0xE80F, g_page == Page::Home, w)) g_page = Page::Home;
-                if (NavItem("Server browser", 0xE774, g_page == Page::Servers, w)) {
-                    g_page = Page::Servers;
-                    if (!g_listAsked[g_list]) {
-                        g_listAsked[g_list] = true;
-                        M::Refresh(kLists[g_list]);
-                    }
-                }
-                if (NavItem("Direct connect", 0xE71B, g_page == Page::Direct, w)) g_page = Page::Direct;
-                if (NavItem("Settings", 0xE713, g_page == Page::Settings, w)) {
-                    if (g_page != Page::Settings) {
-                        g_page = Page::Settings;
-                        g_mpLive = g_mpStage = M::LoadMp();
-                        std::snprintf(g_nickname, sizeof(g_nickname), "%s", g_mpStage.nickname.c_str());
-                        g_gameAvailable = M::ReadGame(g_gameLive);
-                        g_gameStage     = g_gameLive;
-                    }
-                }
-            }
-            else {
-                if (NavItem("Resume", 0xE768, false, w)) Frontend::CloseInGameMenu();
-                if (NavItem("Settings", 0xE713, g_page == Page::Settings, w)) {
-                    if (g_page != Page::Settings) {
-                        g_page = Page::Settings;
-                        g_mpLive = g_mpStage = M::LoadMp();
-                        std::snprintf(g_nickname, sizeof(g_nickname), "%s", g_mpStage.nickname.c_str());
-                        g_gameAvailable = M::ReadGame(g_gameLive);
-                        g_gameStage     = g_gameLive;
-                    }
-                }
-                if (NavItem("Disconnect", 0xE8BB, false, w)) {
-                    M::Disconnect();
-                    M::Notify(false, "You left the server.");
-                    g_page = Page::Home;
-                }
-            }
-            Gap(18);
-            ImGui::GetWindowDrawList()->AddLine(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + w, ImGui::GetCursorScreenPos().y), kLine,
-                                                1.0f);
-            Gap(18);
-            if (NavItem("Quit", 0xE7E8, false, w)) M::Quit();
-            ImGui::EndGroup();
-
-            // Who you are, which build.
-            const M::MpSettings mp = M::LoadMp();
-            const std::string who  = "Playing as " + mp.nickname;
-            Put(dl, nullptr, 15.0f, ImVec2(x + 8.0f * S, ds.y - 92.0f * S), kInk2, who.c_str());
-            const std::string build = "Red Dead Multiplayer " + M::Version() + "  ·  MafiaHub Framework";
-            Put(dl, nullptr, 13.0f, ImVec2(x + 8.0f * S, ds.y - 66.0f * S), kInk4, build.c_str());
-        }
-
-        // =============================================================================================================
-        // pages
-        // =============================================================================================================
-        void ServerRow(const M::Server &row, float width, const char *id) {
-            ImGui::PushID(id);
-            const ImVec2 pos  = ImGui::GetCursorScreenPos();
-            const float h     = 56.0f * S;
-            ImDrawList *dl    = ImGui::GetWindowDrawList();
-            ImGui::InvisibleButton("##row", ImVec2(width - 110.0f * S, h));
-            const bool hovered = ImGui::IsItemHovered();
-            const bool dbl     = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-            if (hovered) {
-                dl->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + h), Rgba(239, 230, 210, 0.04f), 4.0f * S);
-            }
-            const auto &info = row.info;
-            Put(dl, nullptr, 18.0f, ImVec2(pos.x + 12.0f * S, pos.y + 8.0f * S), kInk, NameOf(info).c_str());
-            std::string meta = AddressOf(info);
-            if (row.answered && info.online) {
-                meta += "   ·   " + std::to_string(info.players) + " / " + std::to_string(info.maxPlayers) + " players";
-            }
-            else if (row.answered) {
-                meta += "   ·   offline";
-            }
-            Put(dl, nullptr, 14.0f, ImVec2(pos.x + 12.0f * S, pos.y + 32.0f * S), kInk3, meta.c_str());
-            if (row.answered && info.online) {
-                const std::string ping = std::to_string(info.pingMs) + " ms";
-                const ImVec2 ts        = Measure(nullptr, 14.0f, ping.c_str());
-                const float px         = pos.x + width - 124.0f * S - ts.x;
-                dl->AddCircleFilled(ImVec2(px - 10.0f * S, pos.y + h * 0.5f), 4.0f * S, PingColor(info.pingMs), 12);
-                Put(dl, nullptr, 14.0f, ImVec2(px, pos.y + (h - ts.y) * 0.5f), kInk2, ping.c_str());
-            }
-            ImGui::SameLine(0, 0);
-            ImGui::SetCursorScreenPos(ImVec2(pos.x + width - 96.0f * S, pos.y + (h - 38.0f * S) * 0.5f));
-            const bool canJoin = !row.answered || info.online;
-            if (Button("join", "Join", ImVec2(96.0f * S, 38.0f * S), Tone::Primary, 0, canJoin) || (dbl && canJoin)) {
-                Join(info);
-            }
-            ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + h + 4.0f * S));
-            ImGui::Dummy(ImVec2(0, 0));
-            ImGui::PopID();
-        }
-
-        void HomePage(ImVec2 avail) {
-            const M::MpSettings mp   = M::LoadMp();
-            const std::string title  = "Welcome, " + mp.nickname;
-            PageHeader(title.c_str(), "Find a server and ride with other players across the frontier.");
-
-            const float rightW = std::min(460.0f * S, avail.x * 0.42f);
-            const float leftW  = avail.x - rightW - 24.0f * S;
-            const float top    = ImGui::GetCursorPosY();
-            const float h      = avail.y - top;
-
-            // Left: actions, then recent servers.
-            ImGui::BeginGroup();
-            if (Button("browse", "Server browser", ImVec2(220.0f * S, 52.0f * S), Tone::Primary, 0xE774)) {
-                g_page = Page::Servers;
-                if (!g_listAsked[g_list]) {
-                    g_listAsked[g_list] = true;
-                    M::Refresh(kLists[g_list]);
-                }
-            }
-            ImGui::SameLine(0, 12.0f * S);
-            if (Button("direct", "Direct connect", ImVec2(220.0f * S, 52.0f * S), Tone::Secondary, 0xE71B)) {
-                g_page = Page::Direct;
-            }
-            Gap(14);
-            if (BeginCard("##recent", ImVec2(leftW, h - 52.0f * S - 38.0f * S), true)) {
-                CardTitle("Jump back in", 0xE81C);
-                const auto &rows = M::List("recent");
-                if (rows.empty()) {
-                    Label(nullptr, 17.0f, kInk3, "Servers you join show up here.");
-                    Gap(6);
-                    Label(nullptr, 15.0f, kInk4, "Open the server browser to find one, or connect straight to an address.");
-                }
-                int n = 0;
-                for (const auto &row : rows) {
-                    if (n >= 8) {
-                        break;
-                    }
-                    ServerRow(row, ImGui::GetContentRegionAvail().x, AddressOf(row.info).c_str());
-                    ++n;
-                }
-            }
-            EndCard();
-            ImGui::EndGroup();
-
-            // Right: what's new.
-            ImGui::SameLine(0, 24.0f * S);
-            ImGui::SetCursorPosY(top);
-            if (BeginCard("##news", ImVec2(rightW, h), true)) {
-                CardTitle("What's new", 0xE789);
-                const auto &log = M::Changelog();
-                if (log.empty()) {
-                    Label(nullptr, 15.0f, kInk3, "No changelog in this build.");
-                }
-                bool first = true;
-                for (const auto &entry : log) {
-                    if (!first) {
-                        Gap(14);
-                    }
-                    first = false;
-                    Label(g_title, 22.0f, kInk, entry.heading.c_str());
-                    Gap(2);
-                    for (const auto &line : entry.lines) {
-                        const ImVec2 p = ImGui::GetCursorScreenPos();
-                        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 4.0f * S, p.y + 11.0f * S), 2.5f * S, kRed, 8);
-                        ImGui::SetCursorScreenPos(ImVec2(p.x + 16.0f * S, p.y));
-                        Label(nullptr, 15.5f, kInk2, line.c_str(), ImGui::GetContentRegionAvail().x - 16.0f * S);
-                        Gap(2);
-                    }
-                }
-            }
-            EndCard();
-        }
-
         void ServersPage(ImVec2 avail) {
-            PageHeader("Server browser", "Double-click a server to join it.");
-            ImDrawList *dl = ImGui::GetWindowDrawList();
+            const float startY = ImGui::GetCursorPosY();
+            ImDrawList *dl     = ImGui::GetWindowDrawList();
 
             // Tabs.
             const ImVec2 tabsAt = ImGui::GetCursorScreenPos();
@@ -885,7 +635,7 @@ namespace RDMP::MenuUi {
             }
 
             const float barH   = 84.0f * S;
-            const float tableH = avail.y - ImGui::GetCursorPosY() - barH - ImGui::GetStyle().ItemSpacing.y;
+            const float tableH = avail.y - (ImGui::GetCursorPosY() - startY) - barH - ImGui::GetStyle().ItemSpacing.y;
             const M::Server *selected = nullptr;
             if (BeginCard("##list", ImVec2(avail.x, tableH), false)) {
                 const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Sortable |
@@ -1036,37 +786,6 @@ namespace RDMP::MenuUi {
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (innerH - 20.0f * S) * 0.5f - 4.0f * S);
                     const std::string count = std::to_string(shown.size()) + (shown.size() == 1 ? " server" : " servers") + "  ·  select one to see it here";
                     Label(nullptr, 16.0f, kInk3, count.c_str());
-                }
-            }
-            EndCard();
-        }
-
-        void DirectPage(ImVec2 avail) {
-            PageHeader("Direct connect", "Join a server by its address.");
-            const float w = std::min(620.0f * S, avail.x);
-            if (BeginCard("##direct", ImVec2(w, 330.0f * S))) {
-                CardTitle("Server", 0xE71B);
-                Label(nullptr, 15.0f, kInk2, "Address");
-                ImGui::SetNextItemWidth(-1);
-                bool go = ImGui::InputTextWithHint("##addr", "127.0.0.1:27015", g_address, sizeof(g_address), ImGuiInputTextFlags_EnterReturnsTrue);
-                Gap(4);
-                Label(nullptr, 15.0f, kInk2, "Password (if the server has one)");
-                ImGui::SetNextItemWidth(-1);
-                go |= ImGui::InputText("##pw", g_directPassword, sizeof(g_directPassword), ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
-                Gap(10);
-                go |= Button("connect", "Connect", ImVec2(180.0f * S, 46.0f * S), Tone::Primary, 0xE768);
-                ImGui::SameLine(0, 16.0f * S);
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 12.0f * S);
-                Label(nullptr, 14.0f, kInk4, "Port 27015 when left out.");
-                if (go) {
-                    std::string host;
-                    int port = 0;
-                    if (M::ParseAddress(g_address, host, port)) {
-                        M::Connect(host, port, g_directPassword);
-                    }
-                    else {
-                        M::Notify(true, "That address cannot be read. Use host or host:port.");
-                    }
                 }
             }
             EndCard();
@@ -1262,11 +981,10 @@ namespace RDMP::MenuUi {
         }
 
         void SettingsPage(ImVec2 avail) {
-            PageHeader("Settings", g_inSession ? "Changes apply at once; display changes ask to be kept." : "Multiplayer, display, graphics, audio and controls.");
-            const float listW = 250.0f * S;
+            const float listW = 230.0f * S;
             const float top   = ImGui::GetCursorPosY();
-            const float footH = 64.0f * S;
-            const float h     = avail.y - top - footH - 12.0f * S;
+            const float footH = 52.0f * S;
+            const float h     = avail.y - footH - 12.0f * S;
 
             // Sections.
             ImGui::BeginGroup();
@@ -1372,19 +1090,247 @@ namespace RDMP::MenuUi {
             }
         }
 
-        void SessionPage(ImVec2 avail) {
-            (void)avail;
-            PageHeader("Paused", nullptr);
-            if (BeginCard("##session", ImVec2(std::min(560.0f * S, avail.x), 170.0f * S))) {
-                CardTitle("Connected", 0xE968);
-                Label(nullptr, 20.0f, kInk, M::PendingAddress().empty() ? "On a server" : M::PendingAddress().c_str());
-                const int ping = M::PingMs();
-                std::string line = ping >= 0 ? "Ping " + std::to_string(ping) + " ms" : "Ping unknown";
-                Label(nullptr, 15.0f, kInk3, line.c_str());
-                Gap(6);
-                Label(nullptr, 14.0f, kInk4, "The game keeps running for everyone else. Esc to resume.");
+        // =============================================================================================================
+        // the title screen (MTA-style: logo, a column of menu items, news, version)
+        // =============================================================================================================
+        void Backdrop(ImDrawList *dl, ImVec2 ds) {
+            if (!g_inSession) {
+                dl->AddRectFilledMultiColor(ImVec2(0, 0), ds, Rgba(27, 18, 12), Rgba(16, 11, 8), Rgba(5, 4, 3), Rgba(11, 8, 6));
+                RadialGlow(dl, ImVec2(ds.x * 0.78f, ds.y * 0.70f), ds.y * 0.95f, 179, 38, 30, 0.22f);
+                RadialGlow(dl, ImVec2(ds.x * 0.10f, ds.y * 0.05f), ds.y * 0.70f, 201, 161, 90, 0.07f);
+                const float v = ds.y * 0.30f;
+                dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(ds.x, v), Rgba(0, 0, 0, 0.40f), Rgba(0, 0, 0, 0.40f), Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0));
+                dl->AddRectFilledMultiColor(ImVec2(0, ds.y - v), ds, Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0.60f), Rgba(0, 0, 0, 0.60f));
+            }
+            else {
+                dl->AddRectFilled(ImVec2(0, 0), ds, Rgba(5, 4, 3, 0.50f));
+            }
+            // The menu column sits on a soft dark band.
+            dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(ds.x * 0.45f, ds.y), Rgba(4, 3, 2, 0.80f), Rgba(4, 3, 2, 0.0f), Rgba(4, 3, 2, 0.0f),
+                                        Rgba(4, 3, 2, 0.80f));
+        }
+
+        void Logo(ImDrawList *dl, ImVec2 pos) {
+            // Type only: RED DEAD in the heading face, MULTIPLAYER spaced out in red under it, flush left.
+            PutSpaced(dl, g_title, 84.0f, ImVec2(pos.x + 2.0f * S, pos.y + 3.0f * S), Rgba(0, 0, 0, 0.6f), "RED DEAD", 1.0f); // shadow
+            const float w       = PutSpaced(dl, g_title, 84.0f, pos, kInk, "RED DEAD", 1.0f);
+            const float y       = pos.y + 92.0f * S;
+            const float mw      = PutSpaced(dl, nullptr, 21.0f, ImVec2(0, 0), kRedHi, "MULTIPLAYER", 0.0f, true);
+            const float spacing = std::max(0.0f, (w - mw) / 10.0f / S); // MULTIPLAYER spans the width of RED DEAD
+            PutSpaced(dl, nullptr, 21.0f, ImVec2(pos.x + 3.0f * S, y), kRedHi, "MULTIPLAYER", spacing);
+        }
+
+        // One title-screen item: big type, slides right and brightens on hover, a red mark in front.
+        bool MenuItem(const char *text, ImVec2 pos, bool enabled = true) {
+            static std::unordered_map<std::string, float> anim;
+            float &t         = anim[text];
+            const float size = 36.0f;
+            const ImVec2 ts  = Measure(g_title, size, text);
+            ImGui::SetCursorScreenPos(ImVec2(pos.x - 24.0f * S, pos.y));
+            ImGui::PushID(text);
+            const bool pressed = ImGui::InvisibleButton("##mi", ImVec2(ts.x + 64.0f * S, ts.y + 6.0f * S)) && enabled;
+            const bool hovered = enabled && ImGui::IsItemHovered();
+            ImGui::PopID();
+            const float dt = ImGui::GetIO().DeltaTime;
+            t              = std::clamp(t + (hovered ? dt : -dt) * 8.0f, 0.0f, 1.0f);
+            ImDrawList *dl = ImGui::GetWindowDrawList();
+            const float x  = pos.x + 16.0f * S * t;
+            if (t > 0.0f) {
+                dl->AddRectFilled(ImVec2(pos.x - 14.0f * S, pos.y + ts.y * 0.22f), ImVec2(pos.x - 10.0f * S, pos.y + ts.y * 0.80f), Rgba(214, 56, 44, t));
+            }
+            const ImU32 col = enabled ? IM_COL32(static_cast<int>(201 + (255 - 201) * t), static_cast<int>(189 + (246 - 189) * t),
+                                                 static_cast<int>(163 + (232 - 163) * t), 255)
+                                      : kInk4;
+            Put(dl, g_title, size, ImVec2(x + 2.0f * S, pos.y + 2.0f * S), Rgba(0, 0, 0, 0.55f), text);
+            Put(dl, g_title, size, ImVec2(x, pos.y), col, text);
+            return pressed;
+        }
+
+        // ---- windows over the title screen ----
+        enum class Win { Browser, Direct, Settings, About };
+        std::vector<Win> g_open; // opening order: Esc closes the last
+        bool IsOpen(Win w) {
+            return std::find(g_open.begin(), g_open.end(), w) != g_open.end();
+        }
+        void Close(Win w) {
+            g_open.erase(std::remove(g_open.begin(), g_open.end(), w), g_open.end());
+        }
+        Win g_focusWin   = Win::Browser;
+        bool g_focusWant = false;
+        void Open(Win w) {
+            if (!IsOpen(w)) {
+                g_open.push_back(w);
+                if (w == Win::Browser && !g_listAsked[g_list]) {
+                    g_listAsked[g_list] = true;
+                    M::Refresh(kLists[g_list]);
+                }
+                if (w == Win::Settings) {
+                    g_mpLive = g_mpStage = M::LoadMp();
+                    std::snprintf(g_nickname, sizeof(g_nickname), "%s", g_mpStage.nickname.c_str());
+                    g_gameAvailable = M::ReadGame(g_gameLive);
+                    g_gameStage     = g_gameLive;
+                }
+            }
+            g_focusWin  = w;
+            g_focusWant = true;
+        }
+
+        void NewsPanel(ImVec2 ds) {
+            const auto &log = M::Changelog();
+            if (log.empty()) {
+                return;
+            }
+            const float w = 460.0f * S, h = 330.0f * S;
+            ImGui::SetCursorScreenPos(ImVec2(ds.x - w - 64.0f * S, ds.y - h - 92.0f * S));
+            if (BeginCard("##news", ImVec2(w, h), true)) {
+                CardTitle("Latest news");
+                bool first = true;
+                for (size_t i = 0; i < log.size() && i < 3; ++i) {
+                    if (!first) {
+                        Gap(10);
+                    }
+                    first = false;
+                    Label(g_title, 20.0f, kInk, log[i].heading.c_str());
+                    for (const auto &line : log[i].lines) {
+                        const ImVec2 p = ImGui::GetCursorScreenPos();
+                        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 4.0f * S, p.y + 10.0f * S), 2.5f * S, kRed, 8);
+                        ImGui::SetCursorScreenPos(ImVec2(p.x + 16.0f * S, p.y));
+                        Label(nullptr, 15.0f, kInk2, line.c_str(), ImGui::GetContentRegionAvail().x - 16.0f * S);
+                    }
+                }
             }
             EndCard();
+        }
+
+        void TitleScreen(ImVec2 ds) {
+            ImDrawList *dl = ImGui::GetWindowDrawList();
+            Backdrop(dl, ds);
+            const float x = 110.0f * S;
+            Logo(dl, ImVec2(x, 96.0f * S));
+
+            float y          = ds.y * 0.40f;
+            const float step = 62.0f * S;
+            auto item        = [&](const char *text) {
+                const bool pressed = MenuItem(text, ImVec2(x, y));
+                y += step;
+                return pressed;
+            };
+            if (g_inSession) {
+                if (item("RESUME")) Frontend::CloseInGameMenu();
+                if (item("SETTINGS")) Open(Win::Settings);
+                if (item("DISCONNECT")) {
+                    M::Disconnect();
+                    M::Notify(false, "You left the server.");
+                }
+                y += step * 0.35f;
+                if (item("QUIT")) M::Quit();
+            }
+            else {
+                if (item("QUICK CONNECT")) Open(Win::Direct);
+                if (item("BROWSE SERVERS")) Open(Win::Browser);
+                if (item("SETTINGS")) Open(Win::Settings);
+                if (item("ABOUT")) Open(Win::About);
+                y += step * 0.35f;
+                if (item("QUIT")) M::Quit();
+            }
+
+            if (!g_inSession) {
+                NewsPanel(ds);
+            }
+            else {
+                const int ping       = M::PingMs();
+                const std::string at = "Connected to " + (M::PendingAddress().empty() ? std::string("a server") : M::PendingAddress()) +
+                                       (ping >= 0 ? "   ·   " + std::to_string(ping) + " ms" : "");
+                Put(dl, nullptr, 16.0f, ImVec2(x, y + 12.0f * S), kInk3, at.c_str());
+            }
+            const M::MpSettings mp  = M::LoadMp();
+            const std::string who   = "Playing as " + mp.nickname;
+            Put(dl, nullptr, 16.0f, ImVec2(x, ds.y - 64.0f * S), kInk2, who.c_str());
+            const std::string build = "Red Dead Multiplayer " + M::Version();
+            const ImVec2 bs         = Measure(nullptr, 15.0f, build.c_str());
+            Put(dl, nullptr, 15.0f, ImVec2(ds.x - bs.x - 64.0f * S, ds.y - 52.0f * S), kInk4, build.c_str());
+            ImGui::SetCursorScreenPos(ImVec2(0, 0));
+            ImGui::Dummy(ImVec2(0, 0));
+        }
+
+        // A movable window in the menu's look: Palatino title, a red rule under the title bar.
+        bool BeginWindow(Win which, const char *title, ImVec2 size, bool resizable) {
+            const ImVec2 ds = ImGui::GetIO().DisplaySize;
+            ImGui::SetNextWindowSize(size, ImGuiCond_Appearing);
+            ImGui::SetNextWindowPos(ImVec2(std::max(ds.x * 0.5f, 560.0f * S + size.x * 0.5f), ds.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            if (g_focusWant && g_focusWin == which) {
+                ImGui::SetNextWindowFocus();
+                g_focusWant = false;
+            }
+            bool open = true;
+            ImGui::PushFont(Or(g_title), 20.0f);
+            const float titleH = ImGui::GetFontSize() + ImGui::GetStyle().FramePadding.y * 2.0f;
+            const bool shown =
+                ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | (resizable ? 0 : ImGuiWindowFlags_NoResize));
+            ImGui::PopFont();
+            if (!open) {
+                Close(which);
+            }
+            if (shown) {
+                const ImVec2 p = ImGui::GetWindowPos();
+                ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + titleH - 2.0f * S), ImVec2(p.x + ImGui::GetWindowWidth(), p.y + titleH), kRed);
+            }
+            return shown;
+        }
+
+        void AboutWindow() {
+            if (BeginWindow(Win::About, "About", ImVec2(560.0f * S, 0), false)) {
+                Label(g_title, 30.0f, kInk, "Red Dead Multiplayer");
+                Label(nullptr, 15.0f, kInk3, ("Version " + M::Version()).c_str());
+                Gap(8);
+                Label(nullptr, 16.0f, kInk2,
+                      "A multiplayer modification for Red Dead Redemption on PC, built on the MafiaHub Framework: servers with "
+                      "JavaScript resources, synced players, horses and blips.",
+                      500.0f * S);
+                Gap(8);
+                Label(nullptr, 14.0f, kInk4,
+                      "Unofficial fan project, not affiliated with or endorsed by Rockstar Games or Take-Two Interactive. Red Dead "
+                      "Redemption is a trademark of its owners.",
+                      500.0f * S);
+                Gap(6);
+                if (Button("close", "Close", ImVec2(140.0f * S, 40.0f * S))) {
+                    Close(Win::About);
+                }
+            }
+            ImGui::End();
+        }
+
+        void DirectWindow() {
+            if (BeginWindow(Win::Direct, "Quick Connect", ImVec2(520.0f * S, 0), false)) {
+                Label(nullptr, 15.0f, kInk2, "Address");
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::IsWindowAppearing()) {
+                    ImGui::SetKeyboardFocusHere();
+                }
+                bool go = ImGui::InputTextWithHint("##addr", "127.0.0.1:27015", g_address, sizeof(g_address), ImGuiInputTextFlags_EnterReturnsTrue);
+                Label(nullptr, 15.0f, kInk2, "Password (if the server has one)");
+                ImGui::SetNextItemWidth(-1);
+                go |= ImGui::InputText("##pw", g_directPassword, sizeof(g_directPassword), ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
+                Label(nullptr, 13.0f, kInk4, "Port 27015 when left out.");
+                Gap(6);
+                const float bw = (ImGui::GetContentRegionAvail().x - 10.0f * S) * 0.5f;
+                if (Button("back", "Back", ImVec2(bw, 42.0f * S))) {
+                    Close(Win::Direct);
+                }
+                ImGui::SameLine(0, 10.0f * S);
+                go |= Button("connect", "Connect", ImVec2(bw, 42.0f * S), Tone::Primary, 0xE768);
+                if (go) {
+                    std::string host;
+                    int port = 0;
+                    if (M::ParseAddress(g_address, host, port)) {
+                        M::Connect(host, port, g_directPassword);
+                    }
+                    else {
+                        M::Notify(true, "That address cannot be read. Use host or host:port.");
+                    }
+                }
+            }
+            ImGui::End();
         }
 
         // =============================================================================================================
@@ -1517,10 +1463,11 @@ namespace RDMP::MenuUi {
 
     void Opened(bool inSession) {
         g_inSession = inSession;
-        g_page      = inSession ? Page::Session : Page::Home;
         g_focusNext = true;
-        if (!inSession) {
-            M::Refresh("recent");
+        if (inSession) {
+            Close(Win::Browser);
+            Close(Win::Direct);
+            Close(Win::About);
         }
     }
 
@@ -1537,9 +1484,8 @@ namespace RDMP::MenuUi {
             M::Disconnect();
             return true;
         }
-        const Page root = g_inSession ? Page::Session : Page::Home;
-        if (g_page != root) {
-            g_page = root;
+        if (!g_open.empty()) {
+            g_open.pop_back();
             return true;
         }
         return false;
@@ -1557,6 +1503,7 @@ namespace RDMP::MenuUi {
         LookUpFonts();
         ApplyTheme();
 
+        // The title screen: a full-screen window under the others.
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ds);
         if (g_focusNext) {
@@ -1564,32 +1511,37 @@ namespace RDMP::MenuUi {
             g_focusNext = false;
         }
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
         const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse;
+                                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBringToFrontOnFocus;
         const bool open = ImGui::Begin("##rdmp_menu", nullptr, flags);
-        ImGui::PopStyleVar();
+        ImGui::PopStyleVar(2);
         if (open) {
-            Backdrop(ImGui::GetWindowDrawList(), ds);
-            Sidebar(ds);
-
-            // The page, right of the menu column.
-            const float x0 = 420.0f * S + 64.0f * S;
-            const float y0 = 64.0f * S;
-            const ImVec2 size(ds.x - x0 - 72.0f * S, ds.y - y0 - 64.0f * S);
-            ImGui::SetCursorScreenPos(ImVec2(x0, y0));
-            if (ImGui::BeginChild("##page", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-                switch (g_page) {
-                case Page::Home: HomePage(size); break;
-                case Page::Servers: ServersPage(size); break;
-                case Page::Direct: DirectPage(size); break;
-                case Page::Settings: SettingsPage(size); break;
-                case Page::Session: SessionPage(size); break;
-                }
-            }
-            ImGui::EndChild();
+            TitleScreen(ds);
             Dialogs();
         }
         ImGui::End();
+
+        // The windows, in the order they were opened.
+        const std::vector<Win> order = g_open;
+        for (Win w : order) {
+            switch (w) {
+            case Win::Browser:
+                if (BeginWindow(Win::Browser, "Server Browser", ImVec2(1180.0f * S, 720.0f * S), true)) {
+                    ServersPage(ImGui::GetContentRegionAvail());
+                }
+                ImGui::End();
+                break;
+            case Win::Direct: DirectWindow(); break;
+            case Win::Settings:
+                if (BeginWindow(Win::Settings, "Settings", ImVec2(1180.0f * S, 760.0f * S), true)) {
+                    SettingsPage(ImGui::GetContentRegionAvail());
+                }
+                ImGui::End();
+                break;
+            case Win::About: AboutWindow(); break;
+            }
+        }
         Toast(ds);
     }
 } // namespace RDMP::MenuUi
