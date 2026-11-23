@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased: remote-player sync rework
+* **New chat box and nametags** (drawn by the mod, hud.cpp): chat top-left with outlined text that fades when idle,
+  a dark panel with a red edge and a "Say:" line while typing (Up / Down history, Esc cancels; "chatSend" still lets
+  scripts block a line); nametags with a bold outlined name and a slim red health bar, fading with distance.
+* Menu look: Segoe UI throughout (Black for the title screen items, Bold / Semibold for headings and buttons) instead
+  of the game's bitmap fonts; the RED DEAD logo in the original's red with MULTIPLAYER on a dark brush stroke; the
+  title background moves (drifting glows, rising embers). Player-facing texts trimmed.
+* Fixed: the mouse cursor stayed visible in game after joining.
+* Fixed: applying a display / graphics change (refresh rate, frame rate limit) showed the old value again until the
+  keep / revert prompt; the revert works on the applied values.
 * **Game settings survive a restart:** the game's own save fails here (options.xml unchanged since 2026-11-03), so the
   settings changed in Settings (display, graphics, audio, controls, interface) are kept in rdmp.ini [game_options] (only
   the ones that differ from the game's) and applied over the game's at every launch, like the binds.

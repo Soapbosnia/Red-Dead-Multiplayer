@@ -823,7 +823,8 @@ components on a puppet, which other threads read playerInfo during the swap.
   - 0xEAE379F1 small serif, size 20: D94CD6B0 DD3CC5A2 12513FF0 31CAD755
   The 512 x 512 pages and the 0xA35A5753 / 0x8DEC952B family are controller-button and icon fonts; 05BBE1DB /
   7F66C050 / DEDC033D look like shadow variants. Line metrics: take ascent / descent from letters and digits (a few
-  symbols reach much further). Served to ImGui through a custom ImFontLoader (glyphs area-resampled to each size).
+  symbols reach much further). Served to ImGui through a custom ImFontLoader (glyphs area-resampled to each size) until
+  2026-11-23; the menu now uses Segoe UI (the loader is in git history: rdr_assets.cpp at e4668a42).
 * The menus' Scaleform fonts (Redemption, RDR2Lucid, RDR2Narrow: *.charset_N.dds) sit inside the flash.rpf movies'
   serialized GFx graphs; their glyph metrics were not located (not needed: fonts.rpf has the faces).
 * Title art: flash.rpf 0x4D8DB2A4 (startscreen): brush masks _brs_startscreen_z_0111 RED 976x552, _0110 DEAD

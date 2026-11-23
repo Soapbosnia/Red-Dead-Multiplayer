@@ -227,6 +227,10 @@ namespace RDMP::Overlay {
                         }
                     }
                 }
+                if (msg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT && !g_cursor.load() && !g_menu.load()) {
+                    ::SetCursor(nullptr); // the game shows none; neither do we
+                    return TRUE;
+                }
                 const bool typing = KeyboardBlocked();
                 // The chat key (T) opens the chat (the character that follows is swallowed so it is not typed).
                 static bool swallowChar = false;
@@ -419,18 +423,34 @@ namespace RDMP::Overlay {
         height = g_height.load();
     }
 
+    namespace {
+        // ImGui draws its own cursor while a UI wants one; otherwise it must not set the Windows arrow either (its
+        // Win32 backend does every frame unless told not to), or the arrow stays over the game.
+        void ApplyCursor() {
+            if (!g_ready.load() || !ImGui::GetCurrentContext()) {
+                return;
+            }
+            const bool show = g_cursor.load() || g_menu.load();
+            Framework::External::ImGUI::Wrapper::ShowCursor(show);
+            ImGuiIO &io = ImGui::GetIO();
+            if (show) {
+                io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+            }
+            else {
+                io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+                ::SetCursor(nullptr);
+            }
+        }
+    } // namespace
+
     void ShowCursor(bool show) {
         g_cursor = show;
-        if (g_ready.load()) {
-            Framework::External::ImGUI::Wrapper::ShowCursor(show || g_menu.load());
-        }
+        ApplyCursor();
     }
 
     void SetMenuActive(bool active) {
         g_menu = active;
-        if (g_ready.load()) {
-            Framework::External::ImGUI::Wrapper::ShowCursor(active || g_cursor.load());
-        }
+        ApplyCursor();
     }
 
     void CaptureEscape(bool capture) {

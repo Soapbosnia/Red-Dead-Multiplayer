@@ -40,6 +40,8 @@ namespace RDMP::ClientApi {
     const std::vector<KeyName> &Keys();
     // bindKey handlers for a key that went down / up (api_input.cpp); main thread, outside any engine scope.
     void DispatchBinds(const char *key, bool down);
+    // The reserved "chatSend" event for a line the player typed (false: a handler blocked it), as the Framework raises it.
+    bool EmitChatSend(const std::string &text);
 
     void RegisterPlayerApi(const ScriptApi::Publisher &publish);
     void RegisterHudApi(const ScriptApi::Publisher &publish);

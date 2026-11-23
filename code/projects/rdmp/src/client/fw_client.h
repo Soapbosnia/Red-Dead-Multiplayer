@@ -47,7 +47,7 @@ namespace RDMP {
 
         // Set by the in-game DLL: publishes the RDMP client script natives into each script context, and sees chat.
         std::function<void(Framework::Scripting::Engine *)> onModuleRegister;
-        std::function<void(const std::string &)> onChatLine;
+        std::function<void(const std::string &author, const std::string &text, uint32_t color)> onChatLine;
 
         // Round trip to the server (ms), -1 = unknown.
         int PingMs() const {
@@ -70,10 +70,10 @@ namespace RDMP {
             }
         }
 
-        // The framework emits the "chatMessage" script event itself; the game shows the line too.
+        // The framework emits the "chatMessage" script event itself; our chat box (hud.cpp) shows the line.
         void OnChatMessageReceived(const Framework::Networking::RPC::ChatMessage &msg) override {
             if (onChatLine) {
-                onChatLine(msg.text);
+                onChatLine(msg.author, msg.text, msg.color);
             }
         }
 
@@ -183,8 +183,8 @@ namespace RDMP {
             opts.initRendererManually = true;
             opts.verifyBuildToken     = true; // must match the server: same game/mod identity, same salt
             if (renderer) {
-                // The menu's type (menu_ui.cpp): Bahnschrift for the UI, Palatino for headings, Segoe MDL2 for icons;
-                // all ship with Windows 10 / 11. A missing one falls back to ImGui's own font.
+                // The UI's type (menu, chat, nametags): Segoe UI in four weights, Segoe MDL2 for icons; all ship with
+                // Windows 10 / 11. A missing one falls back to ImGui's own font.
                 wchar_t windows[MAX_PATH] {};
                 GetWindowsDirectoryW(windows, MAX_PATH);
                 const std::filesystem::path fonts = std::filesystem::path(windows) / "Fonts";
@@ -192,9 +192,10 @@ namespace RDMP {
                     const auto path = fonts / file;
                     return std::filesystem::exists(path) ? path.string() : std::string();
                 };
-                opts.imguiFontPath = font("bahnschrift.ttf");
+                opts.imguiFontPath = font("segoeui.ttf");
                 opts.imguiFontSize = 18.0f;
-                for (const auto &[name, file] : {std::pair {"title", "palab.ttf"}, std::pair {"serif", "pala.ttf"}, std::pair {"icons", "segmdl2.ttf"}}) {
+                for (const auto &[name, file] : {std::pair {"semibold", "seguisb.ttf"}, std::pair {"bold", "segoeuib.ttf"}, std::pair {"black", "seguibl.ttf"},
+                                                  std::pair {"icons", "segmdl2.ttf"}}) {
                     if (const std::string path = font(file); !path.empty()) {
                         opts.imguiFonts.push_back({name, path});
                     }

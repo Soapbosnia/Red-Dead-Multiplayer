@@ -458,7 +458,7 @@ namespace RDMP::Frontend {
 
         void Connect(const std::string &host, int port, const std::string &password) {
             if (host.empty() || port <= 0 || port > 65535 || !g_client) {
-                Notify(true, "Enter a server address (host:port).");
+                Notify(true, "Enter a server address.");
                 return;
             }
             if (Connected() || !g_pendingAddress.empty()) {

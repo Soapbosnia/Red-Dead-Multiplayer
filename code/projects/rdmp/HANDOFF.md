@@ -112,11 +112,13 @@ Owner's call (2026-11-22): the native menus took too long, ImGui instead, themed
   Server Browser (tabs, search, filters, sortable table, double-click / Join, Favourite, password dialog), Quick
   Connect, Settings (Multiplayer + the game's own options; Apply / Revert, display changes revert in 15 s unless
   kept), About. Esc closes the last window opened.
-* The game's own type and art, read at runtime from the player's game files (src/client/rdr_assets.cpp; never shipped;
-  formats in re/NOTES.md "Game fonts and title art"): fonts.rpf's slab serif (headings, menu items, window titles),
-  small serif (ImGui's default font: widgets, chat, nametags; Bahnschrift merged in for other scripts) and condensed
-  face; the logo is the title movie's brush letters RED / DEAD with MULTIPLAYER on its red brush stroke; menu items
-  get the brush stroke as their hover highlight. Without the game files it falls back to Palatino / Bahnschrift.
+* Type: Segoe UI in four weights (owner: a clean bold sans, not the game's bitmap fonts; Roboto is not on Windows).
+  Art read at runtime from the player's game files (src/client/rdr_assets.cpp; never shipped; re/NOTES.md "Game fonts
+  and title art"): the logo is the title movie's brush letters RED / DEAD in the original red, MULTIPLAYER on a dark
+  brush stroke; menu items get a red brush stroke on hover. Background: drifting glows and embers (menu_ui.cpp).
+* Chat box and nametags are the mod's own (hud.cpp): the Framework's ChatBox only keeps the open / visible / session
+  state (T and the scripts' Chat.open drive it); lines come from OnChatMessageReceived and Hud::ChatLine, typed lines
+  raise "chatSend" then SendChatMessage, as the Framework's box does.
 * Settings > Binds (MTA-style): chat key, resource binds (client `bindKey` with a description; overrides in rdmp.ini
   [resource_binds]), the game's controls by category, primary / secondary (live through the game's own commit, kept in
   rdmp.ini [game_binds], reapplied at launch; gabindings.xml untouched). re/NOTES.md "Key bindings".

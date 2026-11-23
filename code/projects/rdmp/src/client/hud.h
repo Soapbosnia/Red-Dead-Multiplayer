@@ -45,8 +45,10 @@ namespace RDMP::Hud {
     int NametagOverride(uint64_t playerId);
     void SetNametagDrawDistance(float meters);
 
-    // ---- chat ----
+    // ---- chat (our own box; the Framework's ChatBox keeps the open / visible state and the session) ----
     void ChatLine(const std::string &text, uint32_t colorRGBA = 0); // a notice line in this player's chat box
+    // A line from the server (author empty = a notice); color 0xRRGGBBAA for the body, 0 = default.
+    void ChatMessage(const std::string &author, const std::string &text, uint32_t colorRGBA);
     void SetChatVisible(bool visible);
     bool ChatVisible();
     bool ChatInputActive();

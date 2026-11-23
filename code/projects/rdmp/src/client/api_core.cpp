@@ -81,6 +81,23 @@ namespace {
     }
 } // namespace
 
+namespace RDMP::ClientApi {
+    bool EmitChatSend(const std::string &text) {
+        auto *client = Client();
+        auto *module = client ? client->GetScriptingModule() : nullptr;
+        auto *engine = module ? module->GetScriptingEngine() : nullptr;
+        if (!engine || !module->GetResourceManager()) {
+            return true;
+        }
+        Framework::Scripting::EngineScope scope(engine);
+        if (!scope.Valid()) {
+            return true;
+        }
+        std::vector<v8::Local<v8::Value>> args {RDMP::ScriptApi::JsString(scope.Isolate(), text)};
+        return module->GetResourceManager()->GetEvents().EmitReservedSync(scope.Isolate(), scope.Context(), "chatSend", args);
+    }
+} // namespace RDMP::ClientApi
+
 namespace ClientNatives {
     void Attach(RDMP::FwClient *client, const rdmp::fw::Host *host) {
         RDMP::ClientApi::g_client = client;

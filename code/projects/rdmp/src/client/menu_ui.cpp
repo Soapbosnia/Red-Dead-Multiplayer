@@ -56,11 +56,12 @@ namespace RDMP::MenuUi {
         const ImU32 kLine   = Rgba(239, 230, 210, 0.10f);
         const ImU32 kLine2  = Rgba(239, 230, 210, 0.18f);
         const ImU32 kPanel  = Rgba(20, 15, 11, 0.88f);
+        const ImU32 kLogoRed = Rgba(182, 22, 18); // the original logo's red
 
         // ---- fonts / scale ----
-        ImFont *g_title  = nullptr; // the game's slab serif (headings, menu items); Palatino without the game files
-        ImFont *g_serif  = nullptr; // Palatino Linotype
-        ImFont *g_narrow = nullptr; // the game's condensed face (the logo's MULTIPLAYER)
+        ImFont *g_title = nullptr; // Segoe UI Bold: headings, window titles, dialogs
+        ImFont *g_black = nullptr; // Segoe UI Black: the title screen's menu items, the logo's MULTIPLAYER
+        ImFont *g_semi  = nullptr; // Segoe UI Semibold: buttons, labels
         ImFont *g_icons = nullptr; // Segoe MDL2 Assets
         bool g_fontsLooked = false;
         float S            = 1.0f; // window height / 1080
@@ -119,12 +120,12 @@ namespace RDMP::MenuUi {
         const std::vector<Section> kSections = {
             {"Multiplayer", 0xE716, {
                 {"You", {
-                    {"mp.nickname", "Nickname", "Shown to other players", Kind::Text},
+                    {"mp.nickname", "Nickname", nullptr, Kind::Text},
                 }},
                 {"Other players", {
-                    {"mp.nametags", "Nametags", "Names and health above other players", Kind::Toggle},
+                    {"mp.nametags", "Nametags", nullptr, Kind::Toggle},
                     {"mp.nametagDistance", "Nametag distance", nullptr, Kind::Slider, 10, 200, 5, Fmt::Meters},
-                    {"mp.chat", "Chat box", "T opens it in game", Kind::Toggle},
+                    {"mp.chat", "Chat box", nullptr, Kind::Toggle},
                 }},
             }},
             {"Display", 0xE7F4, {
@@ -144,7 +145,7 @@ namespace RDMP::MenuUi {
                     {"display.fSaturation", "Saturation", nullptr, Kind::Slider},
                 }},
                 {"HDR", {
-                    {"HDR", "HDR", "Needs an HDR display", Kind::Toggle},
+                    {"HDR", "HDR", nullptr, Kind::Toggle},
                     {"PeakBrightness", "Peak brightness", nullptr, Kind::Slider, 200, 2000, 50, Fmt::Nits},
                     {"PaperWhite", "Paper white", nullptr, Kind::Slider, 80, 500, 10, Fmt::Nits},
                 }},
@@ -247,16 +248,11 @@ namespace RDMP::MenuUi {
             }
             g_fontsLooked = true;
             auto *imgui   = g_client->GetImGUI();
-            g_title       = imgui->GetFont("title");
-            g_serif       = imgui->GetFont("serif");
+            g_title       = imgui->GetFont("bold");
+            g_black       = imgui->GetFont("black");
+            g_semi        = imgui->GetFont("semibold");
             g_icons       = imgui->GetFont("icons");
-            // The game's own type, read from its files: the slab serif for headings, the small serif for everything else
-            // (it becomes ImGui's default font, so widgets, the chat and nametags use it too).
-            if (RdrAssets::Load(g_host)) {
-                g_title                    = RdrAssets::Font(RdrAssets::Face::Serif);
-                g_narrow                   = RdrAssets::Font(RdrAssets::Face::Narrow);
-                ImGui::GetIO().FontDefault = RdrAssets::Font(RdrAssets::Face::Body);
-            }
+            RdrAssets::Load(g_host); // the title art (logo, brush strokes)
         }
 
         void ApplyTheme() {
@@ -408,7 +404,7 @@ namespace RDMP::MenuUi {
         bool Button(const char *id, const char *text, ImVec2 size, Tone tone = Tone::Secondary, unsigned icon = 0, bool enabled = true) {
             ImGui::PushID(id);
             const float fontSize = 18.0f;
-            const ImVec2 textSize = Measure(nullptr, fontSize, text);
+            const ImVec2 textSize = Measure(g_semi, fontSize, text);
             const float iconW     = icon && g_icons ? 26.0f * S : 0.0f;
             if (size.x <= 0) {
                 size.x = textSize.x + iconW + 40.0f * S;
@@ -457,7 +453,7 @@ namespace RDMP::MenuUi {
                 PutIcon(dl, 16.0f, ImVec2(x, pos.y + (size.y - 16.0f * S) * 0.5f), fg, icon);
                 x += iconW;
             }
-            Put(dl, nullptr, fontSize, ImVec2(x, y), fg, text);
+            Put(dl, g_semi, fontSize, ImVec2(x, y), fg, text);
             ImGui::PopID();
             return pressed && enabled;
         }
@@ -754,7 +750,7 @@ namespace RDMP::MenuUi {
                     else if (M::Refreshing(list)) text = "Looking for servers...";
                     else if (list == "favorites") text = rows.empty() ? "No favourites yet. Star a server to keep it here." : "No servers match the filters.";
                     else if (list == "recent") text = rows.empty() ? "Servers you join show up here." : "No servers match the filters.";
-                    else if (list == "local") text = "No server is running on this PC (ports 27015 - 27020).";
+                    else if (list == "local") text = "No servers found on this computer.";
                     else text = rows.empty() ? "No servers found." : "No servers match the filters.";
                     const ImVec2 p  = ImGui::GetWindowPos();
                     const ImVec2 sz = ImGui::GetWindowSize();
@@ -762,7 +758,7 @@ namespace RDMP::MenuUi {
                     if (M::Refreshing(list) && err.empty()) {
                         Spinner(ImGui::GetWindowDrawList(), ImVec2(p.x + sz.x * 0.5f, p.y + sz.y * 0.5f - 34.0f * S), 14.0f * S, kRedHi);
                     }
-                    Put(ImGui::GetWindowDrawList(), nullptr, 17.0f, ImVec2(p.x + (sz.x - ts.x) * 0.5f, p.y + sz.y * 0.5f), err.empty() ? kInk3 : kRedHi, text);
+                    Put(ImGui::GetWindowDrawList(), nullptr, 17.0f, ImVec2(p.x + (sz.x - ts.x) * 0.5f, p.y + sz.y * 0.5f), kInk3, text);
                 }
             }
             EndCard();
@@ -798,7 +794,7 @@ namespace RDMP::MenuUi {
                 }
                 else {
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (innerH - 20.0f * S) * 0.5f - 4.0f * S);
-                    const std::string count = std::to_string(shown.size()) + (shown.size() == 1 ? " server" : " servers") + "  ·  select one to see it here";
+                    const std::string count = std::to_string(shown.size()) + (shown.size() == 1 ? " server" : " servers");
                     Label(nullptr, 16.0f, kInk3, count.c_str());
                 }
             }
@@ -969,11 +965,12 @@ namespace RDMP::MenuUi {
                 bool loadedChanged = false, graphicsChanged = false;
                 const M::GameBlocks before = g_gameLive;
                 if (!M::ApplyGame(before, g_gameStage, loadedChanged, graphicsChanged)) {
-                    M::Notify(true, "The game's settings are not available right now.");
+                    M::Notify(true, "Game settings are not available right now.");
                     return;
                 }
-                g_gameAvailable = M::ReadGame(g_gameLive);
-                g_gameStage     = g_gameLive;
+                // What was just applied (the game takes graphics changes over a frame or two: reading back at once
+                // returned the old values, which put them back into the menu).
+                g_gameLive = g_gameStage;
                 if (graphicsChanged) {
                     g_keepAsk    = true;
                     g_keepUntil  = NowMs() + 15000;
@@ -986,14 +983,11 @@ namespace RDMP::MenuUi {
 
         void RevertDisplay() {
             bool l = false, g = false;
-            M::GameBlocks now;
-            if (M::ReadGame(now)) {
-                M::GameBlocks restore = now;
-                std::memcpy(restore.graphics, g_keepBefore.graphics, sizeof(restore.graphics));
-                M::ApplyGame(now, restore, l, g);
-            }
-            g_gameAvailable = M::ReadGame(g_gameLive);
-            g_gameStage     = g_gameLive;
+            M::GameBlocks restore = g_gameLive; // what is applied now (see ApplySettings)
+            std::memcpy(restore.graphics, g_keepBefore.graphics, sizeof(restore.graphics));
+            M::ApplyGame(g_gameLive, restore, l, g);
+            g_gameLive  = restore;
+            g_gameStage = restore;
             g_keepAsk       = false;
             M::Notify(false, "Display settings reverted.");
         }
@@ -1165,7 +1159,7 @@ namespace RDMP::MenuUi {
                     }
                 }
                 if (!M::SetGameBinding(g_capture.action, g_capture.slot, type, input)) {
-                    M::Notify(true, "The game did not take that binding.");
+                    M::Notify(true, "That key could not be bound.");
                 }
                 g_gameBindsAt = 0; // re-read
             } break;
@@ -1183,7 +1177,7 @@ namespace RDMP::MenuUi {
             case Capture::Kind::Resource: {
                 const std::string name = clear ? std::string() : ScriptBinds::KeyName(pressed);
                 if (!clear && name.empty()) {
-                    M::Notify(true, "Scripts cannot use that key.");
+                    M::Notify(true, "That key cannot be used here.");
                 }
                 else {
                     ScriptBinds::SetKey(g_capture.action, g_capture.description, name);
@@ -1223,7 +1217,7 @@ namespace RDMP::MenuUi {
             const float cellW     = std::min(190.0f * S, ImGui::GetContentRegionAvail().x * 0.24f);
             const float right     = ImGui::GetWindowContentRegionMax().x;
 
-            Label(nullptr, 14.0f, kInk3, "Click a key to change it, then press the new key. Backspace or Delete unbinds it, Esc cancels. * = changed.");
+            Label(nullptr, 14.0f, kInk3, "Click a key, then press the new one. Backspace clears it, Esc cancels.");
             Gap(8);
 
             // Multiplayer controls.
@@ -1243,7 +1237,7 @@ namespace RDMP::MenuUi {
             Gap(14);
             CardTitle("Resource binds");
             if (scripts.empty()) {
-                Label(nullptr, 15.0f, kInk3, "The server's scripts have not bound any keys.");
+                Label(nullptr, 15.0f, kInk3, "None on this server.");
             }
             for (const auto &e : scripts) {
                 ImGui::PushID((e.resource + "/" + e.description).c_str());
@@ -1269,12 +1263,10 @@ namespace RDMP::MenuUi {
             Gap(14);
             CardTitle("Game controls");
             if (g_gameBinds.empty()) {
-                Label(nullptr, 15.0f, kInk3, "The game's controls are not available right now.");
+                Label(nullptr, 15.0f, kInk3, "Not available right now.");
                 return;
             }
-            Label(nullptr, 14.0f, kInk3, "Kept by the mod (rdmp.ini); your single-player controls file is not changed.");
-            Gap(4);
-            if (Button("resetgame", "Reset game controls", ImVec2(0, 36.0f * S), Tone::Ghost)) {
+            if (Button("resetgame", "Reset to defaults", ImVec2(0, 36.0f * S), Tone::Ghost)) {
                 M::ResetGameBindings();
                 g_gameBindsAt = 0;
             }
@@ -1404,7 +1396,7 @@ namespace RDMP::MenuUi {
             }
             if (!g_gameAvailable) {
                 Gap(8);
-                Label(nullptr, 14.0f, kInk4, "The game's own settings are not available right now.", listW);
+                Label(nullptr, 14.0f, kInk4, "Game settings are not available right now.", listW);
             }
             ImGui::EndGroup();
 
@@ -1461,8 +1453,6 @@ namespace RDMP::MenuUi {
 
             // Apply / revert (binds take effect at once: no footer there).
             if (g_section == bindsSection) {
-                ImGui::SetCursorPos(ImVec2(ImGui::GetCursorStartPos().x + listW + 24.0f * S, top + h + 26.0f * S));
-                Label(nullptr, 15.0f, kInk3, "Binds take effect at once and are kept by the mod.");
                 return;
             }
             int changes = 0;
@@ -1491,9 +1481,29 @@ namespace RDMP::MenuUi {
         // =============================================================================================================
         void Backdrop(ImDrawList *dl, ImVec2 ds) {
             if (!g_inSession) {
-                dl->AddRectFilledMultiColor(ImVec2(0, 0), ds, Rgba(27, 18, 12), Rgba(16, 11, 8), Rgba(5, 4, 3), Rgba(11, 8, 6));
-                RadialGlow(dl, ImVec2(ds.x * 0.78f, ds.y * 0.70f), ds.y * 0.95f, 179, 38, 30, 0.22f);
-                RadialGlow(dl, ImVec2(ds.x * 0.10f, ds.y * 0.05f), ds.y * 0.70f, 201, 161, 90, 0.07f);
+                // Dusk: a dark warm sky, slow glows drifting through it, embers rising.
+                const float t = static_cast<float>(ImGui::GetTime());
+                dl->AddRectFilledMultiColor(ImVec2(0, 0), ds, Rgba(22, 13, 9), Rgba(14, 9, 7), Rgba(4, 3, 2), Rgba(9, 6, 4));
+                const float pulse = 0.85f + 0.15f * std::sin(t * 0.35f);
+                RadialGlow(dl, ImVec2(ds.x * (0.72f + 0.10f * std::sin(t * 0.07f)), ds.y * (0.66f + 0.08f * std::cos(t * 0.05f))), ds.y * 0.95f, 168, 26, 20,
+                           0.24f * pulse);
+                RadialGlow(dl, ImVec2(ds.x * (0.40f + 0.16f * std::cos(t * 0.045f)), ds.y * (0.95f + 0.05f * std::sin(t * 0.06f))), ds.y * 0.75f, 120, 18, 12,
+                           0.18f);
+                RadialGlow(dl, ImVec2(ds.x * (0.95f + 0.04f * std::sin(t * 0.09f + 1.0f)), ds.y * (0.20f + 0.10f * std::sin(t * 0.04f))), ds.y * 0.55f, 201, 120,
+                           60, 0.07f * pulse);
+                // Embers: each rises at its own pace, sways, and flickers; positions come from its index and the time.
+                for (int i = 0; i < 70; ++i) {
+                    const float seed  = static_cast<float>(i) * 12.9898f;
+                    const float rnd   = std::fmod(std::sin(seed) * 43758.5453f, 1.0f);
+                    const float rnd2  = std::fmod(std::sin(seed * 1.7f) * 24634.6345f, 1.0f);
+                    const float speed = 0.012f + 0.03f * std::fabs(rnd2);
+                    const float life  = std::fmod(t * speed + std::fabs(rnd), 1.0f); // 0 bottom .. 1 top
+                    const float x     = ds.x * std::fabs(std::fmod(rnd * 7.13f, 1.0f)) + std::sin(t * 0.6f + seed) * 18.0f * S;
+                    const float y     = ds.y * (1.05f - life * 1.1f);
+                    const float fade  = std::sin(life * 3.14159265f) * (0.55f + 0.45f * std::sin(t * 3.0f + seed));
+                    const float r     = (0.8f + 1.6f * std::fabs(rnd2)) * S;
+                    dl->AddCircleFilled(ImVec2(x, y), r, Rgba(255, 150, 80, std::clamp(0.55f * fade, 0.0f, 1.0f)), 8);
+                }
                 const float v = ds.y * 0.30f;
                 dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(ds.x, v), Rgba(0, 0, 0, 0.40f), Rgba(0, 0, 0, 0.40f), Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0));
                 dl->AddRectFilledMultiColor(ImVec2(0, ds.y - v), ds, Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0), Rgba(0, 0, 0, 0.60f), Rgba(0, 0, 0, 0.60f));
@@ -1518,8 +1528,8 @@ namespace RDMP::MenuUi {
         void Logo(ImDrawList *dl, ImVec2 pos) {
             const RdrAssets::Texture red = RdrAssets::Get(RdrAssets::Art::Red), dead = RdrAssets::Get(RdrAssets::Art::Dead);
             if (!red.valid || !dead.valid) {
-                PutSpaced(dl, g_title, 84.0f, ImVec2(pos.x + 2.0f * S, pos.y + 3.0f * S), Rgba(0, 0, 0, 0.6f), "RED DEAD", 1.0f);
-                const float w       = PutSpaced(dl, g_title, 84.0f, pos, kInk, "RED DEAD", 1.0f);
+                PutSpaced(dl, g_black, 84.0f, ImVec2(pos.x + 2.0f * S, pos.y + 3.0f * S), Rgba(0, 0, 0, 0.6f), "RED DEAD", 1.0f);
+                const float w       = PutSpaced(dl, g_black, 84.0f, pos, kLogoRed, "RED DEAD", 1.0f);
                 const float mw      = PutSpaced(dl, nullptr, 21.0f, ImVec2(0, 0), kRedHi, "MULTIPLAYER", 0.0f, true);
                 const float spacing = std::max(0.0f, (w - mw) / 10.0f / S);
                 PutSpaced(dl, nullptr, 21.0f, ImVec2(pos.x + 3.0f * S, pos.y + 92.0f * S), kRedHi, "MULTIPLAYER", spacing);
@@ -1534,20 +1544,19 @@ namespace RDMP::MenuUi {
             Art(dl, RdrAssets::Art::Red, ImVec2(pos.x + sh.x, pos.y + sh.y), ImVec2(pos.x + redW + sh.x, pos.y + h + sh.y), Rgba(0, 0, 0, 0.55f));
             Art(dl, RdrAssets::Art::Dead, ImVec2(pos.x + redW + gap + sh.x, pos.y + sh.y), ImVec2(pos.x + total + sh.x, pos.y + h + sh.y),
                 Rgba(0, 0, 0, 0.55f));
-            Art(dl, RdrAssets::Art::Red, pos, ImVec2(pos.x + redW, pos.y + h), Rgba(244, 236, 220));
-            Art(dl, RdrAssets::Art::Dead, ImVec2(pos.x + redW + gap, pos.y), ImVec2(pos.x + total, pos.y + h), Rgba(244, 236, 220));
+            Art(dl, RdrAssets::Art::Red, pos, ImVec2(pos.x + redW, pos.y + h), kLogoRed);
+            Art(dl, RdrAssets::Art::Dead, ImVec2(pos.x + redW + gap, pos.y), ImVec2(pos.x + total, pos.y + h), kLogoRed);
 
             // The stroke and MULTIPLAYER, under the letters.
             const float sy = pos.y + h - 2.0f * S, strokeH = 70.0f * S;
-            Art(dl, RdrAssets::Art::Stroke, ImVec2(pos.x - 10.0f * S, sy), ImVec2(pos.x + total + 10.0f * S, sy + strokeH), Rgba(168, 30, 24));
-            ImFont *font        = g_narrow ? g_narrow : g_title;
-            const float size    = 56.0f;
+            Art(dl, RdrAssets::Art::Stroke, ImVec2(pos.x - 10.0f * S, sy), ImVec2(pos.x + total + 10.0f * S, sy + strokeH), Rgba(14, 9, 7, 0.92f));
+            ImFont *font        = g_black ? g_black : g_title;
+            const float size    = 34.0f;
             const float plain   = PutSpaced(dl, font, size, ImVec2(0, 0), 0, "MULTIPLAYER", 0.0f, true);
             const float spacing = std::max(0.0f, (total * 0.78f - plain) / 10.0f / S);
             const float mw      = PutSpaced(dl, font, size, ImVec2(0, 0), 0, "MULTIPLAYER", spacing, true);
             const ImVec2 ts     = Measure(font, size, "M");
             const ImVec2 at(pos.x + (total - mw) * 0.5f, sy + (strokeH - ts.y) * 0.5f + 1.0f * S);
-            PutSpaced(dl, font, size, ImVec2(at.x + 2.0f * S, at.y + 2.0f * S), Rgba(40, 6, 4, 0.8f), "MULTIPLAYER", spacing);
             PutSpaced(dl, font, size, at, Rgba(244, 236, 220), "MULTIPLAYER", spacing);
         }
 
@@ -1556,7 +1565,7 @@ namespace RDMP::MenuUi {
             static std::unordered_map<std::string, float> anim;
             float &t         = anim[text];
             const float size = 36.0f;
-            const ImVec2 ts  = Measure(g_title, size, text);
+            const ImVec2 ts  = Measure(g_black, size, text);
             ImGui::SetCursorScreenPos(ImVec2(pos.x - 24.0f * S, pos.y));
             ImGui::PushID(text);
             const bool pressed = ImGui::InvisibleButton("##mi", ImVec2(ts.x + 64.0f * S, ts.y + 6.0f * S)) && enabled;
@@ -1579,8 +1588,8 @@ namespace RDMP::MenuUi {
             const ImU32 col = enabled ? IM_COL32(static_cast<int>(201 + (255 - 201) * t), static_cast<int>(189 + (246 - 189) * t),
                                                  static_cast<int>(163 + (232 - 163) * t), 255)
                                       : kInk4;
-            Put(dl, g_title, size, ImVec2(x + 2.0f * S, pos.y + 2.0f * S), Rgba(0, 0, 0, 0.55f), text);
-            Put(dl, g_title, size, ImVec2(x, pos.y), col, text);
+            Put(dl, g_black, size, ImVec2(x + 2.0f * S, pos.y + 2.0f * S), Rgba(0, 0, 0, 0.55f), text);
+            Put(dl, g_black, size, ImVec2(x, pos.y), col, text);
             return pressed;
         }
 
@@ -1694,10 +1703,7 @@ namespace RDMP::MenuUi {
                 Label(g_title, 30.0f, kInk, "Red Dead Multiplayer");
                 Label(nullptr, 15.0f, kInk3, ("Version " + M::Version()).c_str());
                 Gap(8);
-                Label(nullptr, 16.0f, kInk2,
-                      "A multiplayer modification for Red Dead Redemption on PC, built on the MafiaHub Framework: servers with "
-                      "JavaScript resources, synced players, horses and blips.",
-                      500.0f * S);
+                Label(nullptr, 16.0f, kInk2, "Multiplayer for Red Dead Redemption.", 500.0f * S);
                 Gap(8);
                 Label(nullptr, 14.0f, kInk4,
                       "Unofficial fan project, not affiliated with or endorsed by Rockstar Games or Take-Two Interactive. Red Dead "
@@ -1719,10 +1725,9 @@ namespace RDMP::MenuUi {
                     ImGui::SetKeyboardFocusHere();
                 }
                 bool go = ImGui::InputTextWithHint("##addr", "127.0.0.1:27015", g_address, sizeof(g_address), ImGuiInputTextFlags_EnterReturnsTrue);
-                Label(nullptr, 15.0f, kInk2, "Password (if the server has one)");
+                Label(nullptr, 15.0f, kInk2, "Password");
                 ImGui::SetNextItemWidth(-1);
                 go |= ImGui::InputText("##pw", g_directPassword, sizeof(g_directPassword), ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
-                Label(nullptr, 13.0f, kInk4, "Port 27015 when left out.");
                 Gap(6);
                 const float bw = (ImGui::GetContentRegionAvail().x - 10.0f * S) * 0.5f;
                 if (Button("back", "Back", ImVec2(bw, 42.0f * S))) {
@@ -1737,7 +1742,7 @@ namespace RDMP::MenuUi {
                         M::Connect(host, port, g_directPassword);
                     }
                     else {
-                        M::Notify(true, "That address cannot be read. Use host or host:port.");
+                        M::Notify(true, "Enter an address like 127.0.0.1:27015.");
                     }
                 }
             }

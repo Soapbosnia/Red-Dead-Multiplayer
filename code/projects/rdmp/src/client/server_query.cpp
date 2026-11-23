@@ -10,6 +10,7 @@
 
 #include <integrations/client/masterlist_browser.h>
 
+#include "client/fw_client.h"
 #include "client/server_query.h"
 
 #include <atomic>
@@ -110,11 +111,13 @@ namespace RDMP::ServerQuery {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
             }
-            const std::string error = done ? std::string() : (browser.LastError().empty() ? "the masterlist did not answer" : browser.LastError());
+            if (!done) {
+                Log()->warn("server browser: the masterlist did not answer ({})", browser.LastError());
+            }
             browser.Shutdown();
             if (!done) {
                 std::lock_guard lock(g_mutex);
-                g_errors.emplace_back("internet", error);
+                g_errors.emplace_back("internet", "Could not reach the server list.");
                 return;
             }
             std::vector<Address> addresses;
@@ -123,7 +126,7 @@ namespace RDMP::ServerQuery {
             }
             if (addresses.empty()) {
                 std::lock_guard lock(g_mutex);
-                g_errors.emplace_back("internet", "no servers are listed right now");
+                g_errors.emplace_back("internet", "No servers online right now.");
                 return;
             }
             QueryAddresses("internet", addresses);

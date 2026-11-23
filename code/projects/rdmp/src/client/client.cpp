@@ -83,10 +83,13 @@ namespace {
             g_client->onModuleRegister = [](Framework::Scripting::Engine *engine) {
                 ClientNatives::Register(engine);
             };
-            g_client->onChatLine = [](const std::string &text) {
-                // The chat box shows it once the overlay is up; until then (or without it) the game's subtitle line.
-                if (!RDMP::Overlay::Ready() && g_host && g_host->show_text) {
-                    g_host->show_text(static_cast<int>(fw::TextStyle::Subtitle), text.c_str(), 6000);
+            g_client->onChatLine = [](const std::string &author, const std::string &text, uint32_t color) {
+                // Our chat box once the overlay is up; until then (or without it) the game's subtitle line.
+                if (RDMP::Overlay::Ready()) {
+                    RDMP::Hud::ChatMessage(author, text, color);
+                }
+                else if (g_host && g_host->show_text) {
+                    g_host->show_text(static_cast<int>(fw::TextStyle::Subtitle), (author.empty() ? text : author + ": " + text).c_str(), 6000);
                 }
             };
             if (!g_client->InitInGame(cacheFolder ? cacheFolder : "")) {

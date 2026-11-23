@@ -1,5 +1,5 @@
 /*
- * The game's own fonts and logo art for the menu: see rdr_assets.h. Formats in re/NOTES.md "Game fonts and title art".
+ * The game's own title art for the menu: see rdr_assets.h. Formats in re/NOTES.md "Game fonts and title art".
  */
 
 #include <utils/safe_win32.h>
@@ -203,183 +203,6 @@ namespace RDMP::RdrAssets {
             return true;
         }
 
-        // ---- fonts ----
-        struct Glyph {
-            uint32_t code = 0;
-            int page = 0, x = 0, y = 0, w = 0, h = 0, top = 0, adjust = 0;
-        };
-        struct BitmapFont {
-            std::string name;
-            std::vector<Glyph> glyphs;
-            std::unordered_map<uint32_t, int> index; // codepoint -> glyphs[]
-            std::vector<std::vector<uint8_t>> pages; // 128 x 128 coverage
-            float ascent = 0, descent = 0;
-            ImFont *font = nullptr;
-        };
-        BitmapFont g_fonts[3];
-        constexpr int kPage = 128;
-
-        // Glyph table (rage::grcFont): header 0x30 bytes (+0x2C glyph count), 10-byte glyphs {u16 code, u16 0, u8 x, u8 y,
-        // u8 w, u8 h, s8 top (from the baseline), s8 advance adjust}, then {u32 pages, u32 first glyph of the next page...}.
-        bool ParseGlyphs(const std::vector<uint8_t> &d, BitmapFont &font) {
-            if (d.size() < 0x30) {
-                return false;
-            }
-            uint32_t count = 0;
-            std::memcpy(&count, d.data() + 0x2C, 4);
-            const size_t tail = 0x30 + size_t(count) * 10;
-            if (count == 0 || count > 4096 || d.size() < tail + 4) {
-                return false;
-            }
-            uint32_t pages = 0;
-            std::memcpy(&pages, d.data() + tail, 4);
-            if (pages == 0 || pages > 32 || d.size() < tail + 4 + pages * 4) {
-                return false;
-            }
-            std::vector<uint32_t> ends(pages);
-            std::memcpy(ends.data(), d.data() + tail + 4, pages * 4);
-            uint32_t page = 0;
-            for (uint32_t i = 0; i < count; ++i) {
-                while (page + 1 < pages && i >= ends[page]) {
-                    ++page;
-                }
-                const uint8_t *r = d.data() + 0x30 + size_t(i) * 10;
-                Glyph g;
-                g.code   = uint32_t(r[0] | (r[1] << 8));
-                g.page   = int(page);
-                g.x      = r[4];
-                g.y      = r[5];
-                g.w      = r[6];
-                g.h      = r[7];
-                g.top    = int8_t(r[8]);
-                g.adjust = int8_t(r[9]);
-                if (g.w == 0 || g.h == 0 || g.h > 64 || g.x + g.w > kPage || g.y + g.h > kPage || font.index.count(g.code)) {
-                    continue; // padding records and duplicates
-                }
-                font.index[g.code] = int(font.glyphs.size());
-                font.glyphs.push_back(g);
-                // Line metrics from letters and digits only: a few symbols ({ } | and the like) reach far beyond them.
-                if ((g.code >= 'A' && g.code <= 'Z') || (g.code >= 'a' && g.code <= 'z') || (g.code >= '0' && g.code <= '9')) {
-                    font.ascent  = std::max(font.ascent, float(-g.top));
-                    font.descent = std::max(font.descent, float(g.h + g.top));
-                }
-            }
-            return !font.glyphs.empty() && font.ascent > 0;
-        }
-
-        // A 128 x 128 DXT5 page (DDS) -> coverage (its alpha).
-        bool ParsePage(const std::vector<uint8_t> &d, std::vector<uint8_t> &coverage) {
-            if (d.size() < 128 || std::memcmp(d.data(), "DDS ", 4) != 0 || std::memcmp(d.data() + 84, "DXT5", 4) != 0) {
-                return false;
-            }
-            uint32_t h = 0, w = 0;
-            std::memcpy(&h, d.data() + 12, 4);
-            std::memcpy(&w, d.data() + 16, 4);
-            std::vector<uint8_t> rgba;
-            if (w != kPage || h != kPage || !DecodeDxt(d.data() + 128, d.size() - 128, kPage, kPage, true, rgba)) {
-                return false;
-            }
-            coverage.resize(kPage * kPage);
-            for (int i = 0; i < kPage * kPage; ++i) {
-                coverage[i] = rgba[i * 4 + 3];
-            }
-            return true;
-        }
-
-        BitmapFont *FontOf(ImFontConfig *src) {
-            return static_cast<BitmapFont *>(src->FontLoaderData);
-        }
-
-        bool LoaderFontSrcInit(ImFontAtlas *, ImFontConfig *) {
-            return true;
-        }
-        int LoaderGlyphIndex(ImFontAtlas *, ImFontConfig *src, ImWchar codepoint) {
-            const BitmapFont *f = FontOf(src);
-            const auto it       = f->index.find(codepoint);
-            return it == f->index.end() ? 0 : it->second + 1;
-        }
-        bool LoaderContains(ImFontAtlas *, ImFontConfig *src, int glyphIndex) {
-            return glyphIndex > 0 && glyphIndex <= int(FontOf(src)->glyphs.size());
-        }
-        bool LoaderBakedInit(ImFontAtlas *, ImFontConfig *src, ImFontBaked *baked, void *) {
-            const BitmapFont *f = FontOf(src);
-            const float scale   = baked->Size / (f->ascent + f->descent);
-            if (!src->MergeMode) {
-                baked->Ascent  = std::ceil(f->ascent * scale);
-                baked->Descent = -std::ceil(f->descent * scale);
-            }
-            return true;
-        }
-        void LoaderBakedDestroy(ImFontAtlas *, ImFontConfig *, ImFontBaked *, void *) {}
-
-        // The glyph scaled from its page to the size asked for (area-weighted, so small sizes stay clean).
-        bool LoaderLoadGlyph(ImFontAtlas *atlas, ImFontConfig *src, ImFontBaked *baked, void *, int glyphIndex, ImFontGlyph *out, float *outAdvance) {
-            const BitmapFont *f = FontOf(src);
-            if (glyphIndex <= 0 || glyphIndex > int(f->glyphs.size())) {
-                return false;
-            }
-            const Glyph &g      = f->glyphs[glyphIndex - 1];
-            const float scale   = baked->Size / (f->ascent + f->descent);
-            const float density = baked->RasterizerDensity > 0 ? baked->RasterizerDensity : 1.0f;
-            const float advance = std::max(1.0f, float(g.w + g.adjust)) * scale;
-            if (outAdvance) {
-                *outAdvance = advance;
-            }
-            if (!out) {
-                return true;
-            }
-            out->AdvanceX  = advance;
-            const int tw   = std::max(1, int(std::lround(g.w * scale * density)));
-            const int th   = std::max(1, int(std::lround(g.h * scale * density)));
-            const ImFontAtlasRectId pack = ImFontAtlasPackAddRect(atlas, tw, th);
-            if (pack == ImFontAtlasRectId_Invalid) {
-                return false;
-            }
-            ImTextureRect *r = ImFontAtlasPackGetRect(atlas, pack);
-            std::vector<uint8_t> bitmap(size_t(tw) * th);
-            const std::vector<uint8_t> &page = f->pages[g.page];
-            const float sx = float(g.w) / tw, sy = float(g.h) / th;
-            for (int y = 0; y < th; ++y) {
-                const float y0 = y * sy, y1 = (y + 1) * sy;
-                for (int x = 0; x < tw; ++x) {
-                    const float x0 = x * sx, x1 = (x + 1) * sx;
-                    float sum = 0, area = 0;
-                    for (int yy = int(y0); yy < int(std::ceil(y1)); ++yy) {
-                        const float wy = std::min(y1, float(yy + 1)) - std::max(y0, float(yy));
-                        for (int xx = int(x0); xx < int(std::ceil(x1)); ++xx) {
-                            const float wx = std::min(x1, float(xx + 1)) - std::max(x0, float(xx));
-                            const int px = std::min(g.x + xx, kPage - 1), py = std::min(g.y + yy, kPage - 1);
-                            sum += page[size_t(py) * kPage + px] * wx * wy;
-                            area += wx * wy;
-                        }
-                    }
-                    bitmap[size_t(y) * tw + x] = uint8_t(std::clamp(area > 0 ? sum / area : 0.0f, 0.0f, 255.0f));
-                }
-            }
-            out->X0      = 0;
-            out->Y0      = std::round((f->ascent + g.top) * scale);
-            out->X1      = out->X0 + tw / density;
-            out->Y1      = out->Y0 + th / density;
-            out->Visible = true;
-            out->PackId  = pack;
-            ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, src, out, r, bitmap.data(), ImTextureFormat_Alpha8, tw);
-            return true;
-        }
-
-        ImFontLoader MakeLoader() {
-            ImFontLoader l;
-            l.Name                              = "rdr-bitmap";
-            l.FontSrcInit                       = &LoaderFontSrcInit;
-            l.FontSrcGetGlyphIndexFromCodepoint = &LoaderGlyphIndex;
-            l.FontSrcContainsGlyph              = &LoaderContains;
-            l.FontBakedInit                     = &LoaderBakedInit;
-            l.FontBakedDestroy                  = &LoaderBakedDestroy;
-            l.FontBakedLoadGlyph                = &LoaderLoadGlyph;
-            return l;
-        }
-        const ImFontLoader g_loader = MakeLoader();
-        uint8_t g_dummyFontData     = 0;
-
         // ---- art ----
         struct ArtTexture {
             std::unique_ptr<ImTextureData> tex;
@@ -465,60 +288,6 @@ namespace RDMP::RdrAssets {
         }
         const std::filesystem::path game = GameDir() / "game";
 
-        // Fonts: glyph table + its pages, in page order (fonts.rpf names are hashes; see re/NOTES.md).
-        struct FontFiles {
-            const char *name;
-            uint32_t glyphs;
-            std::vector<uint32_t> pages;
-        };
-        const FontFiles files[3] = {
-            {"RDR Serif", 0x0411E993, {0x4EE9E283, 0x08AF780F, 0xC3220EEC, 0x501362D8, 0xEA6D86F7, 0xEF5113A7, 0x8CB5145E, 0x2EEC2FDC}},
-            {"RDR Narrow", 0xBA922545, {0xC47FB29E, 0x1EBCC74D, 0xF7B13ADD, 0x7093E1D6, 0x84EDA8FA}},
-            {"RDR Body", 0xEAE379F1, {0xD94CD6B0, 0xDD3CC5A2, 0x12513FF0, 0x31CAD755}},
-        };
-        Rpf fonts;
-        int fontCount = 0;
-        if (fonts.Open(game / "fonts.rpf")) {
-            for (int i = 0; i < 3; ++i) {
-                BitmapFont &f = g_fonts[i];
-                f.name        = files[i].name;
-                std::vector<uint8_t> data;
-                bool ok = fonts.Payload(files[i].glyphs, data) && ParseGlyphs(data, f);
-                for (uint32_t page : files[i].pages) {
-                    std::vector<uint8_t> coverage;
-                    ok = ok && fonts.Payload(page, data) && ParsePage(data, coverage);
-                    f.pages.push_back(std::move(coverage));
-                }
-                for (const Glyph &g : f.glyphs) {
-                    ok = ok && g.page < int(f.pages.size());
-                }
-                if (!ok) {
-                    Log()->warn("menu: the game font {} could not be read", f.name);
-                    continue;
-                }
-                ImFontConfig cfg;
-                cfg.FontData             = &g_dummyFontData; // the loader reads its own pages
-                cfg.FontDataSize         = 1;
-                cfg.FontDataOwnedByAtlas = false;
-                cfg.FontLoader           = &g_loader;
-                cfg.FontLoaderData       = &f;
-                cfg.SizePixels           = f.ascent + f.descent;
-                std::snprintf(cfg.Name, sizeof(cfg.Name), "%s", f.name.c_str());
-                f.font = ImGui::GetIO().Fonts->AddFont(&cfg);
-                // Characters the game's fonts lack (other scripts) come from Windows' Bahnschrift.
-                wchar_t windows[MAX_PATH] {};
-                GetWindowsDirectoryW(windows, MAX_PATH);
-                const std::filesystem::path fallback = std::filesystem::path(windows) / "Fonts" / "bahnschrift.ttf";
-                if (f.font && std::filesystem::exists(fallback)) {
-                    ImFontConfig merge;
-                    merge.MergeMode = true;
-                    merge.DstFont   = f.font;
-                    ImGui::GetIO().Fonts->AddFontFromFileTTF(fallback.string().c_str(), 0.0f, &merge);
-                }
-                fontCount += f.font ? 1 : 0;
-            }
-        }
-
         // Title art.
         Rpf flash;
         std::vector<uint8_t> movie;
@@ -544,13 +313,9 @@ namespace RDMP::RdrAssets {
                 }
             }
         }
-        g_loaded = fontCount == 3;
-        Log()->info("menu: game fonts {}/3, title art {}/5 read from {}", fontCount, artCount, game.string());
+        g_loaded = artCount > 0;
+        Log()->info("menu: title art {}/5 read from {}", artCount, game.string());
         return g_loaded;
-    }
-
-    ImFont *Font(Face face) {
-        return g_fonts[int(face)].font;
     }
 
     Texture Get(Art art) {
