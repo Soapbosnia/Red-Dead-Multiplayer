@@ -661,7 +661,7 @@ components on a puppet, which other threads read playerInfo during the swap.
   The meaning of some enum values (FrameRateLimit, aaAntiAliasing, MotionBlurStyle, upscaler qualities) is not
   confirmed yet: the menu labels them, keeps unknown values as "Custom (n)", and offers a 15 s revert for graphics.
 
-## Native menus (2026-11-22, WIP: [game] title_screen=1, [debug] ui_widget_dump / ui_open)
+## Native menus (2026-11-22, RETIRED 2026-11-23 for the ImGui menu; still runs with [game] title_screen=1)
 - Title mode boots the game's own front end inside our loop: Game::Init keeps the legals/logo controller, the original
   loading frame FUN_1405f4390 runs, the "loading"/"startscreen" movies are not stubbed, OurRun starts PressStart
   (t = FUN_1401e9c30(); FUN_140205900(t, "$/content/PressStart", 0x600, 0, 0); FUN_1402060b0(t, 0, 0, 0, 0);
@@ -799,3 +799,12 @@ components on a puppet, which other threads read playerInfo during the swap.
   side of the UI list) or draw our menu in a movie that is already above the fader (popup/loading are).
 - Owner's idea (2026-11-22): run the game like MTA - load the world once at boot, hidden under our menu, so joining
   only connects and Disconnect only resets the session; needs the same cover.
+
+## Keeping Esc and input from the game under our menu (2026-11-23, src/client/overlay.cpp)
+* The game reads keys through DirectInput 8; its pause menu opens on the keyboard's DIK_ESCAPE. To keep it shut while
+  the ImGui menu owns Esc: zero byte DIK_ESCAPE (1) of the 256-byte GetDeviceState buffer and drop GetDeviceData events
+  with dwOfs == 1 (no mouse / joystick offset is 1), swallow WM_KEYDOWN / WM_KEYUP VK_ESCAPE in the subclassed window
+  procedure and hand raw-input Esc to DefWindowProc. Only the window-message path is verified so far (a real Esc press
+  is the owner's check).
+* While the menu is up the whole keyboard and mouse are blocked the same way (state zeroed, buffered events dropped)
+  and the client's set_input_lock holds the player; verified in game: W held behind the menu does not move him.

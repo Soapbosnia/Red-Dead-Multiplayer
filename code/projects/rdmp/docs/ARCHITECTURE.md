@@ -8,11 +8,10 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
         rdmp.dll  (static CRT, no Framework code)
           boot / sandbox  : sp_idle root script, menus + legals skipped, player created, limbo until spawned
           natives         : the game's native registry (hash → handler), NativeCall
-          gameflow        : own game loop + boot; [game] title_screen=1 boots to the game's own title screen
-          uifiles         : native menus: our SCXML files (ui/native/) loaded with the game's menus; one menu (the
-                            pause scene's list) on the title and in game, each entry opening its own view (server
-                            browser, Options with a MULTIPLAYER tab), Direct Connect / nickname through the game's
-                            own text entry; Disconnect leaves in-process (see re/NOTES.md "Native menus")
+          gameflow        : own game loop + boot: the world loads at boot (MTA-style) under the client's main menu;
+                            [game] title_screen=1 (retired experiment) boots to the game's own title screen
+          uifiles         : (title_screen=1 only) native SCXML menus loaded with the game's (ui/native/,
+                            re/NOTES.md "Native menus")
           host            : fw::Host table (log, invoke_native, local player, fade, camera, controls, print_text)
           netclient       : per frame (main thread): FwStep() → rdmp_client.dll; puppets for remote players;
                             server actions (spawn, fade, camera, control, health); blips → the game's blip pool
@@ -21,10 +20,13 @@ RDMP.exe ──starts──► RDMPServer.exe (optional, local)            Frame
           FwClient        : Framework client instance (headless: no window of its own, ImGui context only for the
                             chat model), replication of Player and Blip entities
           client scripts  : run inside Update() on the game's main thread; natives call back through fw::Host
-          frontend        : main menu (ui/ HTML in the Framework's CEF web UI): server browser + settings, shown
-                            while not on a server; server_query fetches GET /rdmp from servers and the masterlist
+          frontend        : main menu state + data (menu_model.h): settings (rdmp.ini, the game's own options),
+                            servers.json, server lists, connection; server_query fetches GET /rdmp and the masterlist
+          menu_ui         : the main menu drawn with Dear ImGui (themed, Windows fonts): covers the world while not
+                            on a server; Esc in a session opens the in-game menu (Resume, Settings, Disconnect, Quit)
           overlay         : D3D12 Present hook -> Framework renderer + ImGui (chat box, nametags, dx* drawing);
-                            DirectInput hooks keep typing out of the game
+                            DirectInput / window hooks keep typing and the open menu out of the game, and Esc is
+                            always ours (the game's pause menu never opens)
 ```
 
 * **Threading.** The Framework client is updated from the game's frame callback, so client scripts and the

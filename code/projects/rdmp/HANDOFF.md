@@ -55,8 +55,8 @@ agrees.
 * Server console: `players`, `tp`, `help`, and the Framework's `start|stop|restart|refresh <resource>`, `status`.
 
 ## Status (0.6.0, tested in game)
-Works: main menu (HTML, server browser Internet/Local/Favorites/Recent, settings, join/leave/rejoin), D3D12
-overlay (Framework renderer + ImGui + CEF), chat box (T), nametags, dx* drawing (scoreboard on Tab), blips (own blip
+Works: main menu (ImGui, see "Main menu" below: server browser Internet/Local/Favorites/Recent, settings,
+join/leave/rejoin, Esc in-game menu), D3D12 overlay (Framework renderer + ImGui), chat box (T), nametags, dx* drawing (scoreboard on Tab), blips (own blip
 hidden), death with animation (killPed) and respawn without a crash, resource stop/restart removing its elements,
 rdmp_bot as a second player, server `/rdmp` info endpoint.
 
@@ -69,8 +69,8 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
 * `src/shared/fw_api.h` (v12): the C ABI between the two DLLs. Bump the version on any change; rebuild both.
 * `rdmp_client.dll` (src/client): `fw_client.h` (Framework client instance), `overlay.cpp` (D3D12 Present /
   ExecuteCommandLists hooks, DirectInput hooks so typing never reaches the game; borrows the game's swapchain and
-  queue, never AddRefs them - the game checks), `hud.cpp` (dx* queue, nametags, chat box), `frontend.cpp` +
-  `server_query.cpp` + `ui/` (main menu), `api_*.cpp` (client script API).
+  queue, never AddRefs them - the game checks), `hud.cpp` (dx* queue, nametags, chat box), `frontend.cpp` (menu
+  state + data, `menu_model.h`) + `menu_ui.cpp` (ImGui main menu) + `server_query.cpp` (main menu), `api_*.cpp` (client script API).
 * `RDMPServer` (src/server): `main.cpp` (instance, connections, chat -> playerChat/playerCommand, /rdmp endpoint),
   `state.cpp` (action channel, ownership, deaths, chat), `api_*.cpp` (server script API).
 * `src/shared/script_api.h`: helpers + the SHARED functions; `player.h` / `blip.h`: replicated entities.
@@ -86,8 +86,8 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
 * Text: PRINT_OBJECTIVE_B draws the bottom line (one at a time); PRINT_BIG the big title; PRINT_SMALL_B and
   PRINT_HELP_B draw nothing in the sandbox. DRAW_STRING_CURRENT_FONT is a debug native whose queue draws nothing.
 * Input: the game reads keyboard and mouse through DirectInput 8 (GetDeviceState / GetDeviceData).
-* Native menus: Scaleform in flash.rpf; adding pages needs new SWF content (re/docs/FRONTEND_MAP.md) - not done, the
-  HTML menu replaces it; game settings stay in the game's pause menu.
+* Native menus: SCXML data driving Scaleform movies (re/NOTES.md "Native menus"); explored, then retired for the
+  ImGui menu (title_screen=1 still runs them).
 
 ## Open
 1. **Respawn freeze.** After a death + respawn the screen keeps showing the old body until the game reads any keyboard
@@ -101,55 +101,35 @@ rdmp_bot as a second player, server `/rdmp` info endpoint.
 3. Done: the game boots to the main menu and starts no server; auto-join / local server only with `--connect` /
    `--server` (or the ini keys) for development.
 
-## In progress (2026-11-22)
-* New main menu + the game's own settings: built, checked in a browser with sample data; NOT yet checked in game
-  (the PC was locked). Check: the menu shows, Settings pages show your real values, Apply works (e.g. brightness,
-  mouse sensitivity, a graphics option, then the keep / revert prompt), the game's files keep the values after a
-  restart. Unconfirmed enum labels (frame limit, anti-aliasing, motion blur, upscaler qualities): see re/NOTES.md
-  "Game settings".
-* Native menus. Owner: custom menus built from the game's own UI are fine (also new screens). The menus are SCXML
-  data; ours load with the game's (src/game/uifiles.cpp, ui/native/, re/NOTES.md "Native menus"). Working with
-  [game] title_screen=1 (build/bin/rdmp.ini; config default still 0), all checked in game (2026-11-22):
-  boot -> game legals (8 s) + loading -> ONE menu (the pause scene's list), off a server: Server Browser, Direct
-  Connect, Options, Quit; on a server: Resume, Options, Disconnect, Quit (Map left the list on the owner's wish).
-  Each entry opens its own view: the column shows the entry as heading with its tabs under it (the scene draws a
-  category list as the submenu of a row; we hide the other entries so ours is row 0, menu.elements[0]).
-  - Options: single-player tabs out (Gameplay, Extras), MULTIPLAYER tab first: nickname (text entry), nametags,
-    nametag distance (20..500 m), chat; saved to rdmp.ini through the client DLL (fw_api v12), applied at once.
-  - Direct Connect: the game's own text entry (the cheat entry box), host[:port], joins like the browser (Recent).
-  - Disconnect: leaves in-process, no prompt: world stays, player in limbo (no fade: the engine fade's FadeToBlack UI
-    scene kills the pause and locks the UI stack), the scene closes and re-opens as the main menu; joining again
-    gives the HUD back (rdmp.ingame) without a world load. Dropped by the server: rdmp.menu opens the menu (NOT
-    tested yet: stop RDMPServer while joined). The game's own "return to main menu" restarts the process through
-    PlayRDR.exe -restart, without the mod: never use AwaitRebootTransition.
-  Owner: native menus throughout, NO HTML/CEF overlays (an overlay logo + changelog was tried and removed).
-  NEXT (owner's wishes):
-  1. Disconnect = FULL WORLD UNLOAD back to the boot state (owner's choice, 2026-11-22). In progress behind
-     [game] disconnect_unload=1 (default 0 = world stays behind the menu): the in-process session restart releases
-     the session (re/NOTES.md "Disconnect: unloading the world"); join after it works (player owner generation).
-     Left: cover the empty session under the menu (re/NOTES.md "Covering the empty session": the fader goes black and
-     our menu can be moved above it, but moved UI movies stop updating), title background; then make it the default.
-     Owner's idea: MTA-style - load the world at boot hidden under the menu, join = connect only. RDR1 has no level teardown (restart /
-     ExitProcess); MTA does the same (reset the game state, cover the world with its menu). UIPlayer.Disable() /
-     Enable() (the fader's own actions) is the game's switch for player input under UI: try it for the pause menu.
-  2. In-game pause menu: no cursor, and the player's input is live behind it (mouse-look, movement). One cause: our
-     pause hold (no_pause_freeze presents state 3 to Game::Update). Measured + two failed fixes in re/NOTES.md
-     "(open) No mouse cursor" / "(open, 2026-11-22) The same pause hold"; next: patch only the world-freeze "paused"
-     tests (like the 3 render ones) and drop the state-3 hold.
-  3. Native logo "RED DEAD MULTIPLAYER" and a native changelog / news panel on the main menu (owner's wish; the title
-     label RdmpMenuTitle in the list movie's top_title slot is not drawn there). Cosmetic: the nickname row shows
-     Change arrows that do nothing (UIOption with one value).
-  4. Back from Options via an injected "k @UI.CANCEL*RELEASED" sometimes also reaches the scene (quit prompt); check
-     with a real Esc press (the owner), it may be the injection only.
-  5. Graphics options that need a restart (RestartGame) use the game's process restart too: comes up without the mod.
-  6. Logo in the game's own brush letters: rebuild the textures (re/NOTES.md); needs a resource-load hook.
-  7. Legal pages: shorten once signed in (owner paused this; ask first). The owner sees the legals as "intros".
-  Test automation: keys through computer-use (arrows with key, Enter / others with hold_key ~0.12 s) only when
-  RDR.exe is in front, NEVER Esc (it stops Claude). build/bin/ui_exec.txt ([debug] ui_exec=1): "k <input event>",
-  "e <ui event>", "a <ids>" (active / hidden), "n|x <id>" Enter / Exit, "h <id> 0|1" show / hide, "m <addr> [off]",
-  "q <addr> <off>..." pointer chain, "w <addr> <off> <hex>" byte write (only lines written while the game runs
-  are run). Cursor shown or not: GetCursorInfo (screenshots do not show the cursor).
-  Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop it before building).
+## Main menu (2026-11-23)
+Owner's call (2026-11-22): the native menus took too long, ImGui instead, themed, NO CEF main menu. Done and pushed
+(179ad9de), checked in game: src/client/menu_ui.cpp draws it, frontend.cpp keeps its data (menu_model.h).
+* MTA flow ([game] title_screen=0, [client] menu=1, the defaults): the world loads at boot with the player in limbo,
+  the full-screen menu covers it while not on a server; join = connect only, Disconnect = leave + limbo + menu (no
+  world reload; rejoin checked).
+* Pages: Home (recent servers, "What's new" from ui/changelog.txt - keep it player-facing), Server browser (tabs,
+  search, hide empty / full / locked, sortable table, double-click or Join, Favourite, password dialog), Direct
+  connect, Settings (Multiplayer + the game's own display / graphics / audio / controls / interface; Apply / Revert,
+  a change count per section, display changes revert in 15 s unless kept), Quit.
+* In a session Esc opens the in-game menu over the darkened world: Resume, Settings, Disconnect (no prompt), Quit.
+  While the menu is up: cursor shown, the game gets no keyboard / mouse (DirectInput + window hooks) and
+  set_input_lock holds the player (checked: W does not move him). Esc never reaches the game (WM_KEYDOWN, raw input,
+  DirectInput state and buffered events), so the game's pause menu never opens.
+* Fonts: Windows' bahnschrift.ttf (UI), palab / pala.ttf (headings, logo), segmdl2.ttf (icons), through the
+  Framework's imguiFontPath / imguiFonts (fw_client.h). Sizes are written for 1080 p and scaled with the window.
+* NOT checked yet: a real Esc key press (automation cannot press Esc; WM_KEYDOWN posted to the window was used), so
+  the DirectInput Esc filter (the game's own pause menu staying shut) needs the owner's check; a server drop while
+  joined (should show "Disconnected from the server." on the menu); the keep / revert display prompt.
+* Ideas: a texture logo (ui/assets/logo.svg rasterised) instead of the type-only one; gamepad navigation
+  (ImGuiConfigFlags_NavEnableGamepad); LAN discovery for Local.
+* The native-menu work (uifiles.cpp, ui/native/, disconnect_unload, ui_exec debug commands) stays behind
+  title_screen=1 for reference; re/NOTES.md "Native menus" and "Disconnect" hold what was learned.
+
+Test automation: keys through computer-use only when RDR.exe is in front, NEVER Esc (it stops Claude): post
+WM_KEYDOWN / WM_KEYUP VK_ESCAPE to the game window instead (PowerShell PostMessage). Start RDMP.exe without the shell
+(Process.Start with UseShellExecute=false): Start-Process triggers Windows' "Open File - Security Warning". The
+Claude app window may sit over part of the screen and swallow clicks there (check with WindowFromPoint).
+Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop the game before building).
 
 ## Next (chosen: horses first)
 1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:
