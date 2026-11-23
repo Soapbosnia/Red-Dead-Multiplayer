@@ -165,6 +165,8 @@ namespace {
                     me->gait        = g_local.input.gait;
                     std::memcpy(me->controls, g_local.controls, sizeof(me->controls));
                     me->localVehicle = g_local.vehicle;
+                    me->weapon       = g_local.weapon;
+                    me->ammo         = g_local.ammo;
                 }
             }
 
@@ -236,6 +238,8 @@ namespace {
             remote.s.input.gait    = player->gait;
             std::memcpy(remote.s.controls, player->controls, sizeof(remote.s.controls));
             remote.s.vehicle = player->vehicle;
+            remote.s.weapon  = player->weapon;
+            remote.s.ammo    = player->ammo;
         });
         return n;
     }

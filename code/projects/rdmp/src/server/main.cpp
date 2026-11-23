@@ -86,6 +86,7 @@ namespace {
             FlushActions(world);
             UpdateAttachedBlips(world);
             UpdateVehicles(world);
+            UpdateWeapons(world);
 
             // Wasted: the client reports its real health (localHealth); 0 while alive = death.
             std::vector<uint64_t> wasted, respawned;
@@ -114,6 +115,7 @@ namespace {
             RegisterBlipApi(publish);
             RegisterHudApi(publish);
             RegisterVehicleApi(publish);
+            RegisterWeaponApi(publish);
             Log()->info("RDMP script API registered");
         }
 
@@ -150,6 +152,7 @@ namespace {
             DestroyElementsOnlyFor(guid);
             LeaveVehicleOnDisconnect(id);
             ForgetPlayer(id);
+            ForgetPlayerWeapons(id);
             EmitPlayerEvent("playerDisconnected", id);
         }
 

@@ -8,12 +8,15 @@
  *   killPed(localPlayer)                            the game's death (animation); the server then hears playerWasted
  *   getPlayerName(player), getElementType(element), isElement(value), getElementsByType("player" | "blip")
  *   fadeCamera(fadeIn[, ms]), setCameraTarget(), toggleAllControls(enabled)
+ *   getPedWeapon(player) -> weapon id in hand (-1 = none), getPedTotalAmmo(player) -> its ammo
+ *   getWeaponNameFromID(id) / getWeaponIDFromName(name)                  shared/weapons.h
  */
 
 #include <utils/safe_win32.h>
 
 #include "client/api.h"
 #include "client/fw_client.h"
+#include "shared/weapons.h"
 
 namespace RDMP::ClientApi {
     namespace {
@@ -70,6 +73,32 @@ namespace RDMP::ClientApi {
             }
             auto *player = Client() ? Client()->Entity<Shared::Player>(id) : nullptr;
             args.GetReturnValue().Set(player ? static_cast<int>(player->localHealth) : 0);
+        }
+
+        // The weapon in a player's hand as the network has it (the local player's own state included).
+        void GetPedWeaponFn(const Args &args) {
+            auto *player = Client() ? Client()->Entity<Shared::Player>(ElementId(args, 0)) : nullptr;
+            args.GetReturnValue().Set(player ? static_cast<int>(player->weapon) : -1);
+        }
+
+        void GetPedTotalAmmoFn(const Args &args) {
+            auto *player = Client() ? Client()->Entity<Shared::Player>(ElementId(args, 0)) : nullptr;
+            args.GetReturnValue().Set(player && player->weapon >= 0 ? static_cast<int>(player->ammo) : 0);
+        }
+
+        void GetWeaponNameFn(const Args &args) {
+            const int id = static_cast<int>(Num(args, 0, -1));
+            if (rdmp::weapons::Valid(id)) {
+                args.GetReturnValue().Set(JsString(args.GetIsolate(), rdmp::weapons::Name(id)));
+            }
+            else {
+                args.GetReturnValue().SetNull();
+            }
+        }
+
+        void GetWeaponIdFn(const Args &args) {
+            const int id = Has(args, 0) && args[0]->IsString() ? rdmp::weapons::FromName(Str(args.GetIsolate(), args[0])) : -1;
+            args.GetReturnValue().Set(id);
         }
 
         void SetElementHealthFn(const Args &args) {
@@ -173,5 +202,9 @@ namespace RDMP::ClientApi {
         publish("fadeCamera", &FadeCameraFn);
         publish("setCameraTarget", &SetCameraTargetFn);
         publish("toggleAllControls", &ToggleAllControlsFn);
+        publish("getPedWeapon", &GetPedWeaponFn);
+        publish("getPedTotalAmmo", &GetPedTotalAmmoFn);
+        publish("getWeaponNameFromID", &GetWeaponNameFn);
+        publish("getWeaponIDFromName", &GetWeaponIdFn);
     }
 } // namespace RDMP::ClientApi

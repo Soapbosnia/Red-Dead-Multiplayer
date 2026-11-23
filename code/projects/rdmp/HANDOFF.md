@@ -145,6 +145,22 @@ WM_KEYDOWN / WM_KEYUP VK_ESCAPE to the game window instead (PowerShell PostMessa
 Claude app window may sit over part of the screen and swallow clicks there (check with WindowFromPoint).
 Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop the game before building).
 
+## Weapons and damage (in progress, 2026-11-23; owner's plan: weapons + damage, then element functions)
+* Done: script API (docs/SCRIPTING.md "Weapons"), weapon in hand + ammo synced (Player::weapon / ammo, owner
+  fields), puppets armed and invulnerable locally; aim (input 0x19) and fire (0x09 / 0x0d) are among the 30 synced
+  controls. Sidearms (pistols, revolvers) give / draw / fire fine. re/NOTES.md "Weapons".
+* Next: (1) long guns: given but not drawable (ACTOR_PUT_WEAPON_IN_HAND fails, aiming draws nothing): probably the
+  model must be streamed (REQUEST_ASSET with GET_WEAPON_FRAGMENT_NAME) or the item differs; (2) aim direction: a
+  puppet aims with the camera its player-info copy points at (the local one): sync the remote's camera yaw / pitch
+  and swap it in the puppet's context; (3) damage: local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON /
+  GET_LAST_HIT_ZONE (now resolvable, scriptnatives.cpp) -> client `clientPlayerDamage` (cancellable: restore health;
+  lethal hits need a hook on the damage function to cancel before death) and server `playerDamage`, killer on
+  `playerWasted`; (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
+  flag at playerInfo+0x104 bit 0x20000 is set while the wheel is open); (5) Tab is both the weapon wheel and the
+  scoreboard's default bind.
+* Test aids: [debug] weapon_probe=1 logs weapon names, input changes and the weapon in hand, and binds aim to K too
+  (automation cannot hold a mouse button and a key together).
+
 ## Next (chosen: horses first)
 1. **Horses: done (first version)** - createVehicle & co., E mount / dismount synced, rider syncs the horse. Left:
    remote horses are driven by the rider's movement request (desire mode), not yet by the rider's horse controls

@@ -28,6 +28,7 @@
 #include "puppet_player.h"
 #include "remote_timeline.h"
 #include "vehicles.h"
+#include "weapons.h"
 #include "gameflow.h"
 #include "events.h"
 #include "log.h"
@@ -183,6 +184,10 @@ void FwStep() {
         case fw::ActionKind::Health: ScriptSetPlayerHealth(action.a); break;
         case fw::ActionKind::Kill: GameHost()->kill_local(); break;
         case fw::ActionKind::HudText: GameHost()->show_text(static_cast<int>(action.a), action.text, static_cast<int>(action.b)); break;
+        case fw::ActionKind::GiveWeapon: GiveLocalWeapon(static_cast<int>(action.a), static_cast<int>(action.b), action.c != 0.0f); break;
+        case fw::ActionKind::TakeWeapon: TakeLocalWeapon(static_cast<int>(action.a)); break;
+        case fw::ActionKind::WeaponAmmo: SetLocalWeaponAmmo(static_cast<int>(action.a), static_cast<int>(action.b)); break;
+        case fw::ActionKind::WeaponInHand: PutLocalWeaponInHand(static_cast<int>(action.a)); break;
         default: break;
         }
     }
@@ -276,6 +281,7 @@ void NetFrame(float /*gameTime*/) {
         MoveInput input;
         uint8_t controls[PlayerState::kControlCount];
         uint64_t vehicle;  // the vehicle the server has them on (newest state), 0 = on foot
+        int weapon;        // the weapon in their hand (newest state), -1 = none
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -296,6 +302,7 @@ void NetFrame(float /*gameTime*/) {
         if (GetPlayerDesire(desire, nullptr)) g_local.input = MoveInputFromDesire(desire);
         PlayerControls controls;
         g_local.vehicle = LocalVehicle();
+        LocalWeapon(g_local.weapon, g_local.ammo);
         if (CaptureLocalControls(controls)) std::memcpy(g_local.controls, controls.value, sizeof(g_local.controls));
         float health = 0.0f;
         if (GetLocalPlayerHealth(health)) g_localHealth = health;
@@ -334,6 +341,7 @@ void NetFrame(float /*gameTime*/) {
                 v.offset = static_cast<float>(r.offset);
                 v.leadMs = LeadMsFor(r);
                 v.vehicle = r.samples.empty() ? 0 : r.samples.back().s.vehicle;
+                v.weapon = r.samples.empty() ? -1 : r.samples.back().s.weapon;
                 ++nViews;
             }
             ++it;
@@ -407,6 +415,7 @@ void NetFrame(float /*gameTime*/) {
             if (p.goh && !p.hidden) {
                 DetachPlayerControl(p.goh);
                 StreamOutPuppet(p.goh);
+                ForgetPuppetWeapon(p.goh);
                 p.hidden = true;
                 Log("net: player %u \"%s\" streamed out (%s, %.0f m)", v.id, v.name.c_str(), v.stale ? "timed out" : "far", dist);
             }
@@ -423,6 +432,7 @@ void NetFrame(float /*gameTime*/) {
             Log("net: player %u \"%s\" streamed in (%.0f m)", v.id, v.name.c_str(), dist);
         }
         p.hidden = false;
+        SyncPuppetWeapon(p.goh, v.weapon);
         // On a horse: the horse carries the puppet (no player control, no corrections of its own).
         if (const uint32_t horse = v.vehicle ? VehicleGoh(v.vehicle) : 0) {
             if (p.mountedOn != horse) {
@@ -492,6 +502,7 @@ void NetFrame(float /*gameTime*/) {
                     d.teleported ? 1 : 0, d.corrected ? 1 : 0, v.transit, v.offset, v.leadMs);
     }
     PuppetPlayerFrame();
+    WeaponsFrame();
     if (g_trace) fflush(g_trace);  // test runs end by killing the game
 }
 
@@ -530,6 +541,7 @@ void StartNetClient(const wchar_t* ini) {
     LoadPuppetControlConfig(ini);
     LoadVehicleConfig(ini);
     g_puppetPlayerTest = GetPrivateProfileIntW(L"debug", L"puppet_player_test", 0, ini) != 0;
+    InitWeapons(ini);
     GetPrivateProfileStringW(L"net", L"puppet_mode", L"player", w, 64, ini);
     g_puppetPlayerMode = _wcsicmp(w, L"desire") != 0;
     GetPrivateProfileStringW(L"net", L"lead_ms", L"auto", w, 64, ini);

@@ -39,6 +39,9 @@ struct PlayerState {
     uint8_t controls[kControlCount] = {};
     // Local: the vehicle the game has the player on. Remote: the vehicle the server has them on. 0 = on foot.
     uint64_t vehicle = 0;
+    // The weapon in hand (shared/weapons.h; -1 = none / holstered) and its ammo.
+    int8_t weapon = -1;
+    uint16_t ammo = 0;
 };
 
 }  // namespace rdmp::net

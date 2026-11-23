@@ -852,3 +852,22 @@ components on a puppet, which other threads read playerInfo during the swap.
 * Quit: the game's own Quit calls ExitProcess with the level loaded; the engine shutdown after our loop waits forever
   with a world loaded, so the menu's Quit ends our loop, shuts the network client down, then ExitProcess(0).
 
+## Weapons (2026-11-23, src/game/weapons.cpp)
+* WeaponModel ids 0..31 (GET_WEAPON_ENUM_STRING_FROM_ENUM): table in src/shared/weapons.h; 39..52 are "Default*"
+  category entries, 32..38 and 53+ NULL.
+* GIVE_WEAPON_TO_ACTOR(actor, weapon, n, notify, hidden): with n = 0 the weapon is in the wheel but
+  ACTOR_PUT_WEAPON_IN_HAND refuses it; with n = 1 a sidearm goes in hand at once. ACTOR_PUT_WEAPON_IN_HAND (handler
+  0x1403BDDB0 -> 0x1403BBBF0 -> FUN_1403bb9f0 -> FUN_140340240(inventory, item, 1, inHand)) fails while the inventory
+  is busy (FUN_140341e00) or the item is not found (FUN_14033d150). Long guns (repeater, shotgun) fail and aiming draws
+  nothing: open (model streaming?). GET_WEAPON_IN_HAND is -1 once the game holsters (a few seconds without aiming).
+* Ammo: the reserve is per ammo type (GET_AMMOENUM_FOR_WEAPONENUM: Cattleman 7, carbine 8): ACTOR_SET_INV_AMMO /
+  ACTOR_GET_INV_AMMO; ACTOR_SET_WEAPON_AMMO alone leaves the HUD at 0/0. These and the damage natives
+  (GET_LAST_ATTACKER, GET_LAST_HIT_*, SET_ACTOR_INVULNERABILITY) are not registered in retail: called through
+  scriptnatives.cpp kUnregistered.
+* Controls (the 30 synced foot inputs): aim 0x19, fire 0x09 + 0x0d. So a puppet with the weapon in hand aims and fires
+  from the remote's buttons; its aim direction is the camera of the player-info it runs with (to sync).
+* Key bindings: aim = @GENERIC.TARGET, fire = @GENERIC.FIRE, weapon wheel = @RADIAL_MENU.SHOW_HIDE (Tab, scan 15).
+* Weapon wheel slow motion: not the timestep (0x142273750 keeps the real frame time), not playerInfo+0x3d4 /
+  +0x3d8 (Dead Eye's time scale, SET_DEADEYE_TIMESCALE); while the wheel is open playerInfo+0x104 gains 0x20000,
+  +0x224 grows, +0x43c byte 0x01. Open.
+

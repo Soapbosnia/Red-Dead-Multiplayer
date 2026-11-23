@@ -327,6 +327,34 @@ namespace RDMP::Server {
     }
 
     // ---- events ----
+    void EmitPlayerEventArgs(const char *name, uint64_t networkId, std::vector<EventArg> extra) {
+        auto *module = g_instance ? g_instance->GetScriptingModule() : nullptr;
+        auto *engine = module ? module->GetScriptingEngine() : nullptr;
+        if (!engine) {
+            return;
+        }
+        g_instance->PostToScripts([engine, eventName = std::string(name), networkId, extra = std::move(extra)] {
+            Framework::Scripting::EngineScope scope(engine);
+            if (!scope.Valid()) {
+                return;
+            }
+            auto *isolate = scope.Isolate();
+            auto player   = g_instance->WrapScriptPlayer(isolate, networkId);
+            if (player.IsEmpty()) {
+                return;
+            }
+            std::vector<v8::Local<v8::Value>> args {player};
+            for (const auto &a : extra) {
+                switch (a.kind) {
+                case EventArg::Kind::Text: args.push_back(ScriptApi::JsString(isolate, a.text)); break;
+                case EventArg::Kind::Number: args.push_back(v8::Number::New(isolate, a.number)); break;
+                case EventArg::Kind::Element: args.push_back(a.element ? WrapElement(isolate, a.element) : v8::Null(isolate).As<v8::Value>()); break;
+                }
+            }
+            g_instance->GetScriptingModule()->GetResourceManager()->GetEvents().EmitReserved(isolate, scope.Context(), eventName, args);
+        });
+    }
+
     void EmitPlayerEvent(const char *name, uint64_t networkId, std::vector<std::string> extra) {
         auto *module = g_instance ? g_instance->GetScriptingModule() : nullptr;
         auto *engine = module ? module->GetScriptingEngine() : nullptr;

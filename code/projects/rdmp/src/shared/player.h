@@ -89,6 +89,11 @@ namespace RDMP::Shared {
         // Owner -> server: the last actSeq this client has queued for the game (see the header comment).
         uint8_t actAck = 0;
 
+        // Owner -> every client: the weapon in hand (shared/weapons.h, -1 = none) and its ammo. Remote puppets carry the
+        // same weapon; the synced aim / fire inputs (controls) make them use it.
+        int8_t weapon   = -1;
+        uint16_t ammo   = 0;
+
         // Owner -> server: the game's real health (0 = dead). `health` above is a server field the owner never
         // sends up, so without this a real in-game death (fall, drowning, gunfire) never reached the server.
         uint8_t localHealth = 100;
@@ -136,6 +141,8 @@ namespace RDMP::Shared {
             fields.Field(localHealth);
             fields.ServerField(vehicle);
             fields.Field(localVehicle);
+            fields.Field(weapon);
+            fields.Field(ammo);
         }
 
         // The owner only hears a server field through a forced state, so repeat them here.

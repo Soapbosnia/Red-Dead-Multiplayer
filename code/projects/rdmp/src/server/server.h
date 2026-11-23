@@ -99,6 +99,17 @@ namespace RDMP::Server {
     // ---- script events ----
     // Emits a reserved event with the player handle first and optional string arguments; any thread.
     void EmitPlayerEvent(const char *name, uint64_t networkId, std::vector<std::string> extra = {});
+    // The same with typed arguments: text, a number, or an element (0 = null).
+    struct EventArg {
+        enum class Kind { Text, Number, Element } kind = Kind::Text;
+        std::string text;
+        double number = 0;
+        uint64_t element = 0;
+        static EventArg Text(std::string s) { return {Kind::Text, std::move(s), 0, 0}; }
+        static EventArg Number(double n) { return {Kind::Number, {}, n, 0}; }
+        static EventArg Element(uint64_t id) { return {Kind::Element, {}, 0, id}; }
+    };
+    void EmitPlayerEventArgs(const char *name, uint64_t networkId, std::vector<EventArg> args);
 
     // ---- API modules ----
     void RegisterPlayerApi(const ScriptApi::Publisher &publish);
@@ -106,6 +117,11 @@ namespace RDMP::Server {
     void RegisterBlipApi(const ScriptApi::Publisher &publish);
     void RegisterHudApi(const ScriptApi::Publisher &publish);
     void RegisterVehicleApi(const ScriptApi::Publisher &publish);
+    void RegisterWeaponApi(const ScriptApi::Publisher &publish);
+
+    // Weapons (api_weapons.cpp): what the server gave each player, and weapon switches (tick thread).
+    void UpdateWeapons(World &world);
+    void ForgetPlayerWeapons(uint64_t playerId);
 
     void UpdateAttachedBlips(World &world); // tick thread (api_blips.cpp)
     void UpdateVehicles(World &world);      // tick thread (api_vehicles.cpp): who rides what

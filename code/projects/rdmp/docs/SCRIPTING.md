@@ -51,6 +51,7 @@ Names follow MTA where an MTA function does the same thing. Below, each function
 | `playerCommand` | player, command, ...args | a chat line starting with `/` (`/tp 1 2 3` → `"tp", "1", "2", "3"`) |
 | `playerVehicleEnter` | player, vehicle | got on a vehicle (the game's own mount, E held, or `warpPedIntoVehicle`) |
 | `playerVehicleExit` | player, vehicle | got off (own dismount, `removePedFromVehicle`, the vehicle destroyed, the rider left) |
+| `playerWeaponSwitch` | player, previous, current | the weapon in hand changed (ids, -1 = none; the game holsters after a few seconds without aiming) |
 
 ### Players
 | Function | Notes |
@@ -93,6 +94,28 @@ A vehicle is an element: `getElementPosition`, `setElementPosition`, `getElement
 `getElementsByType("vehicle")`, `destroyElement`. Players also get on and off with the game's own controls (hold E
 near a horse); the server accepts it when the horse is free. While someone rides it, the rider's game syncs it; a
 horse nobody rides stands still for everyone (no animal AI).
+
+### Weapons
+| Function | Notes |
+|---|---|
+| `giveWeapon(player, weapon[, ammo = 30[, inHand = false]])` → bool | adds it to their weapon wheel with that much ammo (the reserve of its ammo type) |
+| `takeWeapon(player, weapon)` / `takeAllWeapons(player)` → bool | |
+| `setWeaponAmmo(player, weapon, ammo)` → bool | |
+| `setPedWeapon(player, weapon)` → bool | put it in hand; `-1` / `null` holsters |
+| `getPedWeapon(player)` | the weapon in hand, `-1` = none |
+| `getPedTotalAmmo(player)` | ammo of the weapon in hand |
+| `getPedWeapons(player)` → `[ids]` | what the server gave and did not take |
+| `getWeaponNameFromID(id)` / `getWeaponIDFromName(name)` | |
+
+`weapon` is an id 0..31 or a name: the game's (`"REVOLVER_Cattleman"`) or just the model (`"cattleman"`). 0 Volcanic
+pistol, 1 semi-auto pistol, 2 high power pistol, 3 Mauser, 4 Cattleman revolver, 5 Schofield, 6 double-action
+revolver, 7 LeMat, 8 carbine repeater, 9 Winchester repeater, 10 Henry repeater, 11 Evans repeater, 12 Springfield
+rifle, 13 bolt-action rifle, 14 Buffalo rifle, 15 sawed-off shotgun, 16 double-barrel shotgun, 17 pump-action
+shotgun, 18 semi-auto shotgun, 19 rolling block rifle, 20 Carcano rifle, 21 lasso, 22 knife, 23 fire bottle, 24
+dynamite, 25 throwing knife, 26 Gatling gun, 27 Browning gun, 28 cannon, 29 tomahawk, 30 bow, 31 antitank rifle.
+Other players see the weapon in your hand and you using it (aim and fire come with your controls). In progress:
+long guns (repeaters, rifles, shotguns) are given but cannot be drawn yet; the direction a remote player aims is not
+synced yet; damage events are next.
 
 ### Console
 `players`, `tp <name> x y z`, `help`, plus the Framework's `start` / `stop` / `restart` / `refresh <resource>`, `status`.
@@ -137,6 +160,7 @@ Client scripts run on the game's main thread every frame.
 | Function | Notes |
 |---|---|
 | `isKeyDown(key)`, `getTickCount()` | keys: `"a".."z"`, `"0".."9"`, `"f1".."f12"`, `"num_0"..`, `"enter"`, `"space"`, `"tab"`, `"lshift"`, `"mouse1"`, ... |
+| `getPedWeapon(player)`, `getPedTotalAmmo(player)`, `getWeaponNameFromID(id)`, `getWeaponIDFromName(name)` | as on the server |
 | `bindKey(key, "down" \| "up" \| "both", handler(key, state) [, description])` | MTA-style key bind (same key names); with a description it is listed in the player's Settings > Binds under the resource's name, and the player can move it to another key (kept in their rdmp.ini). Removed when the resource stops. |
 | `unbindKey(key [, state [, handler]])` -> bool | this resource's binds on that key |
 | `invokeNative(nameOrHash, types, ...args)` | any game native |

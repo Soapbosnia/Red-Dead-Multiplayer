@@ -1,5 +1,6 @@
 // devtools (server): chat commands for testing. Remove this resource from servers people play on.
 //   /pos   /tp x y z   /kill   /heal   /big text   /horse [model]   /mount   /dismount
+//   /weapon name|id [ammo]   /weapons   /disarm
 
 const commands = {
     pos(player) {
@@ -32,7 +33,24 @@ const commands = {
         warpPedIntoVehicle(player, best);
     },
     dismount(player) { removePedFromVehicle(player); },
+    // a weapon in hand: /weapon cattleman 60   (names: getWeaponNameFromID 0..31)
+    weapon(player, name, ammo) {
+        if (name === undefined) return outputChatBox("usage: /weapon name|id [ammo]", player);
+        const id = isNaN(Number(name)) ? getWeaponIDFromName(name) : Number(name);
+        if (getWeaponNameFromID(id) === null) return outputChatBox("unknown weapon " + name, player);
+        giveWeapon(player, id, Number(ammo) || 60, true);
+        outputChatBox("given " + getWeaponNameFromID(id), player);
+    },
+    weapons(player) {
+        const names = [];
+        for (let i = 0; i < 32; i++) names.push(i + " " + getWeaponNameFromID(i));
+        outputChatBox(names.join(", "), player);
+    },
+    disarm(player) { takeAllWeapons(player); },
 };
+
+Events.on("playerWeaponSwitch", (player, previous, current) =>
+    console.log(getPlayerName(player) + " weapon " + previous + " -> " + current));
 
 Events.on("playerVehicleEnter", (player, vehicle) => outputChatBox(getPlayerName(player) + " mounted a horse"));
 Events.on("playerVehicleExit", (player, vehicle) => outputChatBox(getPlayerName(player) + " got off a horse"));

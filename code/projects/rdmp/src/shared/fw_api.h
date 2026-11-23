@@ -24,7 +24,8 @@ namespace rdmp::fw {
 // v12: multiplayer settings for the native menus (get_settings / set_settings).
 // v13: Host inflate (the game's own decompressor, for reading the game's archives: fonts and art for the menu).
 // v14: Host quit, get_bindings / set_binding (the game's key bindings, for the menu's Binds settings).
-constexpr uint32_t kApiVersion = 14;
+// v15: weapons: PlayerState weapon / ammo, weapon actions.
+constexpr uint32_t kApiVersion = 15;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -57,6 +58,10 @@ enum class ActionKind : int32_t {
     Health       = 5,  // a = health value to write
     Kill         = 6,  // kill the local player (the game's death, with its animation)
     HudText      = 7,  // a = TextStyle, b = milliseconds, text
+    GiveWeapon   = 8,  // a = weapon (shared/weapons.h), b = ammo, c = 1 put it in hand
+    TakeWeapon   = 9,  // a = weapon, -1 = every weapon
+    WeaponAmmo   = 10, // a = weapon, b = ammo
+    WeaponInHand = 11, // a = weapon to put in hand, -1 = holster
 };
 
 // Engine HUD text styles (Host::show_text).
