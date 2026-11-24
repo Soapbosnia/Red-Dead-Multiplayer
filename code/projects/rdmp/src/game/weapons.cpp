@@ -22,13 +22,18 @@
 #include "sandbox.h"
 #include "scriptnatives.h"
 #include "shared/weapons.h"
+#include "watch.h"
 
 namespace rdmp {
 namespace {
 
 bool g_probe = false;
 int g_aimHold = 0;      // [debug] aim_hold: the game copy (InstanceId) that sends the aim input held (two-copy tests)
-int g_aimHoldSide = 1;  // [debug] aim_hold_side: 1 / -1, the side of its camera the held aim point is on
+float g_aimHoldYaw = 0.0f, g_aimHoldSweep = 0.0f, g_aimHoldPitch = 0.0f;  // [debug] aim_hold_* (AimHoldPoint)
+bool g_aimHoldPitchSwing = false;
+bool g_aimHoldPoint = false;  // [debug] aim_hold_point=1: send a test point instead of the real crosshair
+uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
+bool g_aimTrace = false;  // [debug] aim_trace: log a puppet's wanted / actual heading every 100 ms while it aims
 
 uint32_t LocalActor() {
     NativeCall c;
@@ -147,7 +152,15 @@ void ProbeFrame(uint32_t actor) {
 void InitWeapons(const wchar_t* iniPath) {
     g_probe = GetPrivateProfileIntW(L"debug", L"weapon_probe", 0, iniPath) != 0;
     g_aimHold = GetPrivateProfileIntW(L"debug", L"aim_hold", 0, iniPath);
-    g_aimHoldSide = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_side", 1, iniPath));
+    g_aimTrace = GetPrivateProfileIntW(L"debug", L"aim_trace", 0, iniPath) != 0;
+    wchar_t hex[32] = {};
+    GetPrivateProfileStringW(L"debug", L"exec_watch", L"", hex, 32, iniPath);
+    g_execWatch = static_cast<uintptr_t>(wcstoull(hex, nullptr, 16));
+    g_aimHoldYaw = static_cast<float>(static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_yaw", 0, iniPath)));
+    g_aimHoldSweep = static_cast<float>(static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_sweep", 0, iniPath)));
+    g_aimHoldPitch = static_cast<float>(static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_pitch", 0, iniPath)));
+    g_aimHoldPitchSwing = GetPrivateProfileIntW(L"debug", L"aim_hold_pitch_swing", 0, iniPath) != 0;
+    g_aimHoldPoint = GetPrivateProfileIntW(L"debug", L"aim_hold_point", 0, iniPath) != 0;
 }
 
 void WeaponsFrame() {
@@ -161,6 +174,12 @@ void WeaponsFrame() {
         }
     }
     if (g_probe) ProbeFrame(actor);
+    static bool execArmed = false;
+    if (g_execWatch && !execArmed && !g_puppets.empty()) {  // once a puppet is around
+        execArmed = true;
+        ArmExecWatch(GameAddr(g_execWatch), "exec_watch");
+    }
+    SetLocalAimHeld(AimHoldDebug());  // [debug] aim_hold: this copy's own player really aims too
 }
 
 void LocalWeapon(int8_t& weapon, uint16_t& ammo) {
@@ -228,6 +247,7 @@ void PutLocalWeaponInHand(int weapon) {
 
 void SyncPuppetWeapon(uint32_t goh, int weapon) {
     if (!goh) return;
+    SetPlayerArmed(goh, weapons::Valid(weapon));
     PuppetWeapon& p = g_puppets[goh];
     if (!p.setUp) {
         p.setUp = true;
@@ -252,9 +272,13 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
         NativeCall a;  // unlimited for the puppet: the remote's own game counts their ammo
         a.Uint(goh).Int(weapon);
         if (a.Call(NativeHash("ACTOR_GET_WEAPON_AMMO")) && a.ResultFloat() < 200.0f) SetAmmo(goh, weapon, 999.0f);
-        if (inHand != weapon) PutInHand(goh, weapon, true);
+        if (inHand != weapon) {
+            const bool ok = PutInHand(goh, weapon, true);
+            if (g_aimTrace) Log("aim trace: puppet 0x%08x in hand %d, put %d in hand -> %d", goh, inHand, weapon, ok ? 1 : 0);
+        }
     } else if (weapons::Valid(inHand)) {
         PutInHand(goh, inHand, false);
+        if (g_aimTrace) Log("aim trace: puppet 0x%08x holstered %d", goh, inHand);
     }
 }
 
@@ -274,7 +298,15 @@ uintptr_t AimComponent(uint32_t goh) {
 }
 }  // namespace
 
-float AimHoldSide() { return g_aimHoldSide < 0 ? -1.0f : 1.0f; }
+void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
+    if (!g_aimHoldPoint) return;  // the real crosshair point
+    const double s = nowMs / 1000.0;
+    const float yaw = (g_aimHoldYaw + g_aimHoldSweep * static_cast<float>(std::fmod(s, 360.0))) * 0.01745329f;
+    const float pitch = (g_aimHoldPitchSwing ? g_aimHoldPitch * static_cast<float>(std::sin(s * 1.5707963)) : g_aimHoldPitch) * 0.01745329f;
+    x = pos.x - std::sin(yaw) * 20.0f;
+    z = pos.z - std::cos(yaw) * 20.0f;
+    y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
+}
 bool AimHoldDebug() { return g_aimHold != 0 && g_aimHold == InstanceId(); }
 
 void LocalAim(float& x, float& y, float& z) {
@@ -284,14 +316,20 @@ void LocalAim(float& x, float& y, float& z) {
     }
 }
 
-void SyncPuppetAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ, bool aiming) {
-    SetPlayerAim(goh, x, y, z, fromX, fromY, fromZ);
-    // While aiming the player code does not turn the puppet (the local player's aim turn comes from its camera): face it
-    // towards the aim point (engine heading: the actor faces (-sin h, -cos h)).
-    const float dx = x - fromX, dz = z - fromZ;
-    if (!aiming || !HasPlayerControl(goh) || dx * dx + dz * dz < 0.25f) return;
+void SyncPuppetAim(uint32_t goh, const Vec3& aim, const Vec3& from, float bodyHeading, bool aiming) {
+    SetPlayerAim(goh, aim.x, aim.y, aim.z, from.x, from.y, from.z);
+    if (!aiming || !HasPlayerControl(goh)) return;
+    if (g_aimTrace) {
+        const ULONGLONG now = GetTickCount64();
+        static ULONGLONG next = 0;
+        if (now >= next) {
+            next = now + 100;
+            Log("aim trace: puppet 0x%08x remote heading %.1f, puppet %.1f, aim (%.2f, %.2f, %.2f)", goh, bodyHeading,
+                ActorHeadingDeg(ActorFromGohHandle(goh)), aim.x, aim.y, aim.z);
+        }
+    }
     NativeCall h;
-    h.Uint(goh).Float(std::atan2(-dx, -dz) * 57.29578f).Bool(false);
+    h.Uint(goh).Float(bodyHeading).Bool(false);
     h.Call(NativeHash("SET_ACTOR_HEADING"));
 }
 

@@ -60,6 +60,8 @@ bool SetPuppetTransform(uint32_t goh, const Vec3& pos, float heading);
 bool NudgePuppet(uint32_t goh, const Vec3& pos, float heading);
 // goh handle -> actor entry (the 0x142C457F8 table object) / its actor handle; 0 = gone.
 uintptr_t ActorFromGohHandle(uint32_t gohHandle);
+// The actor's heading in degrees (engine convention: it faces (-sin h, -cos h)), from its transform.
+float ActorHeadingDeg(uintptr_t actor);
 uint32_t ActorHandleFromGohHandle(uint32_t gohHandle);
 // Puppet actor, with an AI brain created if missing (needed for the locomotion override). 0 = gone.
 uintptr_t PreparePuppetLocomotion(uint32_t goh);

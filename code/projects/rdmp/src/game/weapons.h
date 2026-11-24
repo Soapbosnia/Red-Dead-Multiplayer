@@ -4,6 +4,8 @@
 // code use it). Ids: shared/weapons.h. Main thread. re/NOTES.md "Weapons".
 #include <cstdint>
 
+#include "actors.h"
+
 namespace rdmp {
 
 void InitWeapons(const wchar_t* iniPath);
@@ -21,10 +23,14 @@ void SyncPuppetWeapon(uint32_t goh, int weapon);
 void ForgetPuppetWeapon(uint32_t goh);
 // The local player's aim point (the reticle target point: where the camera's crosshair is in the world).
 void LocalAim(float& x, float& y, float& z);
-// [debug] aim_hold=N: game copy N sends the aim input held (others see it aim; it does not aim itself). Testing aid.
+// [debug] aim_hold=N: game copy N holds its aim input (its player aims, no mouse button needed). Two-copy tests.
 bool AimHoldDebug();
-float AimHoldSide();  // [debug] aim_hold_side: 1 / -1, which side of the camera the held aim point is on
-// A remote player's aim point onto their puppet (eased): the puppet's weapon aims there. Main thread, every frame.
-void SyncPuppetAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ, bool aiming);  // the puppet's actor went away
+// [debug] aim_hold_point=1: the point that copy sends instead of its crosshair: 20 m away at a world yaw (aim_hold_yaw,
+// degrees) turning at aim_hold_sweep deg/s, up / down by aim_hold_pitch degrees (swinging when aim_hold_pitch_swing=1).
+void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z);
+// A remote player's aim, every frame (main thread): their aim point and where they stand (puppet_player SetPlayerAim:
+// the puppet's camera looks from them to it) and, while they aim, their body heading (degrees, interpolated): the
+// local player's camera turns its body as it aims, a puppet has no camera of its own, so it gets the remote's turn.
+void SyncPuppetAim(uint32_t goh, const Vec3& aim, const Vec3& from, float bodyHeading, bool aiming);
 
 }  // namespace rdmp

@@ -149,15 +149,21 @@ Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop th
 * Done: script API (docs/SCRIPTING.md "Weapons"), weapon in hand + ammo synced (Player::weapon / ammo, owner
   fields), puppets armed and invulnerable locally; aim (input 0x19) and fire (0x09 / 0x0d) are among the 30 synced
   controls. Sidearms and long guns give / draw (long guns needed their equip slots enabled). re/NOTES.md "Weapons".
-* Next: (1) done: long guns; (2) done: aim (re/NOTES.md "Aiming"): the yaw follows the remote's crosshair point;
-  open: whether the arm's pitch follows (not checked: the test point was level) and fire at a remote's target; (3) damage: local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON /
+* Next: (1) done: long guns; (2) aim (re/NOTES.md "Aiming"): aim mode, facing and the aim point are synced
+  (MTA-style: the remote's camera in the puppet's context, their body heading while aiming). OPEN: the arm's pitch (the
+  puppet aims level whatever the remote's pitch; the aim matrices are right now, so the pitch comes from somewhere else,
+  probably the aim parameters the camera writes for the local player only, FUN_14037da20); fire at a remote's target; (3) damage: local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON /
   GET_LAST_HIT_ZONE (now resolvable, scriptnatives.cpp) -> client `clientPlayerDamage` (cancellable: restore health;
   lethal hits need a hook on the damage function to cancel before death) and server `playerDamage`, killer on
   `playerWasted`; (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
   flag at playerInfo+0x104 bit 0x20000 is set while the wheel is open); (5) Tab is both the weapon wheel and the
   scoreboard's default bind.
-* Test aids: [debug] aim_hold=2 makes game copy 2 (toolsun_two.ps1) send the aim input held with its aim point 20 m
-  to its camera's side (aim_hold_side=1 / -1): watch copy 1's puppet aim, flip the side. [debug] weapon_probe=1 logs weapon names, input changes and the weapon in hand, and binds aim to K too
+* Test aids: [debug] aim_hold=2 makes game copy 2 hold its aim input (its player really aims; aim_hold_point=1 sends a
+  test point instead: aim_hold_yaw / aim_hold_sweep / aim_hold_pitch / aim_hold_pitch_swing); aim_trace=1 logs the puppet's
+  heading against the remote's every 100 ms; exec_watch=0x14... logs the first calls of a game function. Two copies:
+  start them from bash (`./RDMP.exe --server --connect 127.0.0.1:27015`, then `--instance 2 --connect ...`): this PC's
+  PowerShell policy refuses unsigned scripts, and Start-Process (ShellExecute) stops on Windows' unsigned-publisher
+  prompt. computer-use mouse moves reach the game only right after a click in it (the game re-centres the cursor). [debug] weapon_probe=1 logs weapon names, input changes and the weapon in hand, and binds aim to K too
   (automation cannot hold a mouse button and a key together).
 
 ## Next (chosen: horses first)

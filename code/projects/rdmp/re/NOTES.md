@@ -895,3 +895,29 @@ components on a puppet, which other threads read playerInfo during the swap.
   two copies, the aim point put to either side of the remote: the puppet aims at it.
 * playerInfo +0x3e4 bit 0 / +0x3e0 are set by the native next to it (0x140AD8640, a zoom / aim-camera toggle).
 
+### Aiming, part 2 (2026-11-24)
+* Drift-and-reset bug (puppet turned away for ~0.8 s every ~2.4 s, then snapped back): puppet_control.cpp's standing
+  "face snap" eased the puppet to the remote's synced body heading while weapons.cpp turned it to the aim yaw. Now both
+  use the synced (interpolated) body heading; while aiming it is applied each frame (MTA: SetTargetRotation in keysync).
+* The aim point is interpolated in remote_timeline.h Interpolate (same delay / smoothness as the position), not eased.
+* MTA (mtasa-blue CNetAPI / CClientPed): puresync every TICK_RATE carries arm angle (16 bit) and, while aim or fire is
+  held, origin + direction; keysync is sent on any button change or a > 0.05 rad aim change; the receiver interpolates
+  arm and target linearly over TICK_RATE_AIM (SetAimInterpolated / SetTargetTarget) and sets the camera rotation.
+* Camera exists twice, both rows right / up / back / position: frame camera *(*(0x142C45738)+8) +0x1d0 and camera
+  instance *(*(0x142C45738)+0x28) +0x10 (+0x130 a distance). puppet_player.cpp WithCamera swaps both around a puppet's
+  update while its remote aims (eye = remote position + 1.6 m, forward = towards their aim point).
+* Aim matrices of the +0xb8 player component: +0x3710 / +0x3750 / +0x3790 / +0x37d0 (+0x3740 = camera position),
+  written by FUN_140393550 (called first in FUN_140348600) from the camera INSTANCE; +0x3690.. +0x3700 derived
+  angles / sines (+0x36e4 = 90 deg + pitch). With both cameras swapped the puppet's matrices match the remote's view,
+  but its arm still aims level: the arm pitch comes from elsewhere. Candidate: FUN_14037da20 (camera update, vfunc
+  +0xf0 chain of the camera instance) writes aim parameters through *(*(camera+0x620)+0x30)+8 (+0x320 target point,
+  +0x330 target, +0x350 / +0x358 two angles) for the camera's target actor only.
+* Aim mode: RDR does not enter it from the aim button in the player code; the camera switches to its aim camera and the
+  player follows. With the button, the remote's camera swapped into every step and the body heading synced, a puppet
+  still stays in the "weapon ready" pose; playerInfo +0x3bc bit 0x02 (SET_FORCE_PLAYER_AIM_MODE) mirrors the remote's
+  aim state (on while they hold aim with a weapon in hand) and gives the real aim pose. (One run aimed without it, not
+  reproduced.)
+* Test tooling: [debug] aim_hold, aim_hold_point / _yaw / _sweep / _pitch / _pitch_swing, aim_trace, exec_watch;
+  watch.cpp ArmAccessWatch. Memory snapshots of the local actor 2 hops deep at three camera pitches showed no pitch
+  value there; findpitch-style search found the component block above.
+

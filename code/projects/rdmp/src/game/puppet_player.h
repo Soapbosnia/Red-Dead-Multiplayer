@@ -43,6 +43,10 @@ void SetLocalControlsOverride(const PlayerControls* controls);
 // (player-info +0x30) points from them to it, so the player code turns the puppet that way (aim yaw), and the point is
 // its reticle target point (its +0xb8 component +0x3800 / +0x3810 / +0x3820), written after its update (eased).
 void SetPlayerAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ);
+// Whether the remote has a weapon in hand (aiming needs one).
+void SetPlayerArmed(uint32_t goh, bool armed);
+// [debug] the local player's aim input held (a test copy aims without a mouse button).
+void SetLocalAimHeld(bool held);
 // Main thread, once per frame: runs every attached puppet's control update.
 void PuppetPlayerFrame();
 

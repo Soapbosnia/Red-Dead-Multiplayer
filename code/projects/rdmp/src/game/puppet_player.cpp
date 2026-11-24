@@ -70,7 +70,10 @@ struct Context {
     ULONGLONG lastMs = 0;
     float aimTarget[3] = {}, aim[3] = {};  // the remote's aim point / the eased one written into the puppet
     float aimFrom[3] = {};                 // where the remote stands
-    bool haveAim = false, aimStarted = false;
+    bool armed = false;                    // the remote has a weapon in hand (synced)
+    bool camAiming = false;                // this frame: the remote aims; their camera = camEye -> camFwd
+    float camEye[3] = {}, camFwd[3] = {};
+    bool haveAim = false;
 };
 
 std::map<uint32_t, Context*> g_byGoh;
@@ -79,9 +82,42 @@ using PlayerControlFn = void (*)(uintptr_t component, void* update);
 using ControlUpdateFn = void (*)(uintptr_t ctrl);
 ControlUpdateFn g_controlUpdateOrig = nullptr;  // FUN_1403726f0 through the trampoline
 bool g_localOverride = false;
+bool g_localAimHeld = false;  // [debug] aim_hold: the local player's aim input (0x19) held
 PlayerControls g_localControls;
 PlayerControlFn g_playerControlOrig = nullptr;
 std::atomic<int> g_switched{0};
+constexpr uintptr_t kCameraManager = 0x142C45738;  // *(+8) = the gameplay camera: +0x1d0 right, +0x1e0 up, +0x1f0 back, +0x200 position
+constexpr uintptr_t kReticleUpdate = 0x140348600;  // FUN_140348600(info): the reticle target point from the camera, and more
+constexpr uintptr_t kInfoAimUpdate = 0x14034A6D0;  // FUN_14034a6d0(info): the player-info aim update (reads the reticle point)
+
+// Runs fn with the gameplay camera looking from `eye` along `fwd` (unit) - the remote's view, as MTA swaps the camera
+// rotation into the context of a remote player - and puts the real camera back right after. The camera exists twice:
+// the frame camera *(manager+8) +0x1d0 (read by the control update, FUN_1403d9320) and the camera instance
+// *(manager+0x28) +0x10 (read by the aim-matrix update FUN_140393550 and the camera code); both are rows right, up,
+// back, position.
+template <typename Fn>
+void WithCamera(const float eye[3], const float fwd[3], Fn&& fn) {
+    const uintptr_t mgr = Ptr(GameAddr(kCameraManager));
+    const uintptr_t frame = mgr ? Ptr(mgr + 8) : 0, inst = mgr ? Ptr(mgr + 0x28) : 0;
+    float* mats[2] = {frame && IsReadable(frame + 0x1d0, 0x40) ? reinterpret_cast<float*>(frame + 0x1d0) : nullptr,
+                      inst && IsReadable(inst + 0x10, 0x40) ? reinterpret_cast<float*>(inst + 0x10) : nullptr};
+    const float b[3] = {-fwd[0], -fwd[1], -fwd[2]};
+    float r[3] = {b[2], 0.0f, -b[0]};  // up (0, 1, 0) x back
+    const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
+    if (rl < 1e-4f || (!mats[0] && !mats[1])) return fn();
+    r[0] /= rl, r[2] /= rl;
+    const float u[3] = {b[1] * r[2] - b[2] * r[1], b[2] * r[0] - b[0] * r[2], b[0] * r[1] - b[1] * r[0]};  // back x right
+    const float rows[4][3] = {{r[0], r[1], r[2]}, {u[0], u[1], u[2]}, {b[0], b[1], b[2]}, {eye[0], eye[1], eye[2]}};
+    float saved[2][16];
+    for (int k = 0; k < 2; ++k) {
+        if (!mats[k]) continue;
+        std::memcpy(saved[k], mats[k], sizeof(saved[k]));
+        for (int i = 0; i < 4; ++i) mats[k][i * 4] = rows[i][0], mats[k][i * 4 + 1] = rows[i][1], mats[k][i * 4 + 2] = rows[i][2];
+    }
+    fn();
+    for (int k = 0; k < 2; ++k)
+        if (mats[k]) std::memcpy(mats[k], saved[k], sizeof(saved[k]));
+}
 
 
 // The puppet's input records from its controller state, the way the game's mapper keeps them: [2] new value,
@@ -180,12 +216,23 @@ void PlayerControlHook(uintptr_t component, void* update) {
         g_playerControlOrig(component, update);
         return;
     }
-    InContext(*it->second, [&] { g_playerControlOrig(component, update); });
+    Context& c = *it->second;
+    auto run = [&] { InContext(c, [&] { g_playerControlOrig(component, update); }); };
+    if (c.camAiming) WithCamera(c.camEye, c.camFwd, run);
+    else run();
 }
 
 // FUN_1403726f0 for the local player's control object, with the autopilot's input written into its records first.
 void ControlUpdateHook(uintptr_t ctrl) {
     const uintptr_t info = Ptr(GameAddr(kPlayerInfoPtr));
+    if (g_localAimHeld && info && Ptr(info + 0x118) == ctrl) {
+        const uintptr_t set = Ptr(ctrl + 0x20), recs = set ? Ptr(set) : 0;
+        if (recs && IsReadable(recs + 0x19 * 16, 16)) {
+            uint8_t* r = reinterpret_cast<uint8_t*>(recs + 0x19 * 16);
+            r[3] = r[2];
+            r[2] = static_cast<uint8_t>(0xff ^ r[0]);
+        }
+    }
     const bool local = g_localOverride && info && Ptr(info + 0x118) == ctrl;
     if (local) {
         const uintptr_t set = Ptr(ctrl + 0x20), recs = set ? Ptr(set) : 0;
@@ -251,6 +298,13 @@ void DetachPlayerControl(uint32_t goh) {
 
 bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 
+void SetLocalAimHeld(bool held) { g_localAimHeld = held; }
+
+void SetPlayerArmed(uint32_t goh, bool armed) {
+    const auto it = g_byGoh.find(goh);
+    if (it != g_byGoh.end()) it->second->armed = armed;
+}
+
 void SetPlayerAim(uint32_t goh, float x, float y, float z, float fromX, float fromY, float fromZ) {
     const auto it = g_byGoh.find(goh);
     if (it == g_byGoh.end()) return;
@@ -300,42 +354,51 @@ void PuppetPlayerFrame() {
         At<uint64_t>(ctrl, 0x124) = 0;
         At<uint32_t>(ctrl, 0x120) = 0;
         At<uint32_t>(ctrl, 0x1a0) = 0;
-        const bool aiming = c->controls.valid && c->controls.value[0x19] > 0x7f && c->haveAim;
+        // MTA's context switch includes the remote's camera: while the remote aims, the puppet's update runs with the
+        // gameplay camera looking from the remote's eye to their aim point, so the game's own player code turns it into
+        // the aim (aim mode, the arm's yaw and pitch, the reticle) exactly as it does for the local player.
+        bool aiming = c->controls.valid && c->controls.value[0x19] > 0x7f && c->haveAim && c->armed;
+        const float eye[3] = {c->aimFrom[0], c->aimFrom[1] + 1.6f, c->aimFrom[2]};
+        float fwd[3] = {c->aimTarget[0] - eye[0], c->aimTarget[1] - eye[1], c->aimTarget[2] - eye[2]};
+        const float fl = std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+        if (fl < 0.5f) aiming = false;
+        else for (float& v : fwd) v /= fl;
+        c->camAiming = aiming;  // the actor's player-control update (PlayerControlHook) gets the same camera
+        std::memcpy(c->camEye, eye, sizeof(eye));
+        std::memcpy(c->camFwd, fwd, sizeof(fwd));
         const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
-        // The aim input alone does not put a puppet in aim mode (the local player's aim mode comes from its camera and
-        // per-frame player steps a puppet does not run): SET_FORCE_PLAYER_AIM_MODE's flag (playerInfo +0x3bc bit 0x02)
-        // does, while the remote holds aim (input 0x19).
-        uint8_t& mode = At<uint8_t>(pi, 0x3bc);
-        mode = aiming ? (mode | 2) : (mode & ~2);
-        // The camera forward the control update turns into the desired heading (FUN_1403d9320 copies the gameplay
-        // camera's into playerInfo +0x30 unless the byte at +0x50 is set): from the remote towards their aim point.
-        if (aiming) {
-            float d[3] = {c->aimTarget[0] - c->aimFrom[0], c->aimTarget[1] - (c->aimFrom[1] + 1.5f), c->aimTarget[2] - c->aimFrom[2]};
-            const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-            if (len > 0.5f) {
-                for (int i = 0; i < 3; ++i) At<float>(pi, 0x30 + i * 4) = d[i] / len;
-                At<uint8_t>(pi, 0x50) = 1;
-            }
-        }
-        InContext(*c, [&] {
-            using Fn = void (*)(uintptr_t);
-            if (g_controlUpdateOrig) g_controlUpdateOrig(ctrl);
-            else reinterpret_cast<Fn>(GameAddr(kControlUpdate))(ctrl);
-            // The stick is camera-relative: the puppet has no camera of the remote's, so its desired heading is the
-            // remote's own (captured after the remote's camera turned it into a world heading).
-            if (c->controls.valid && !aiming) {
-                At<float>(ctrl, 0x104) = c->controls.heading;
-                At<float>(ctrl, 0x100) = c->controls.heading;
-            } else if (aiming && At<float>(ctrl, 0x104) == 0.0f) {
-                At<float>(ctrl, 0x104) = At<float>(ctrl, 0x100);  // standing: face where the aim camera looks
-            }
-            reinterpret_cast<Fn>(Ptr(Ptr(ctrl) + 0x28))(ctrl);
-        });
-        // The remote's aim point, eased (it arrives at the send rate): the puppet's reticle target point.
+        // The remote's aim mode. RDR does not enter it from the aim button in the player code: the camera system switches
+        // to its aim camera (state of the local player's camera, which a puppet has none of) and the player follows. The
+        // game's own switch for a player's aim mode (playerInfo +0x3bc bit 0x02, what scripts set with
+        // SET_FORCE_PLAYER_AIM_MODE) mirrors the remote's state: on exactly while they aim.
+        uint8_t& aimMode = At<uint8_t>(pi, 0x3bc);
+        aimMode = aiming ? (aimMode | 2) : (aimMode & ~2);
+        auto update = [&] {
+            InContext(*c, [&] {
+                using Fn = void (*)(uintptr_t);
+                if (g_controlUpdateOrig) g_controlUpdateOrig(ctrl);
+                else reinterpret_cast<Fn>(GameAddr(kControlUpdate))(ctrl);
+                // Not aiming the puppet has no camera of the remote's, and the stick is camera-relative: its desired
+                // heading is the remote's own (captured after the remote's camera turned it into a world heading).
+                if (c->controls.valid && !aiming) {
+                    At<float>(ctrl, 0x104) = c->controls.heading;
+                    At<float>(ctrl, 0x100) = c->controls.heading;
+                } else if (aiming && At<float>(ctrl, 0x104) == 0.0f) {
+                    At<float>(ctrl, 0x104) = At<float>(ctrl, 0x100);  // aiming, standing: the body follows the camera
+                }
+                reinterpret_cast<Fn>(Ptr(Ptr(ctrl) + 0x28))(ctrl);
+                if (aiming) {  // the local player's aim steps (game loop 0x1401F8344 .. 0x1401F83CA)
+                    reinterpret_cast<Fn>(GameAddr(kReticleUpdate))(pi);
+                    reinterpret_cast<Fn>(GameAddr(kInfoAimUpdate))(pi);
+                }
+            });
+        };
+        if (aiming) WithCamera(eye, fwd, update);
+        else update();
+        // The remote's aim point (already interpolated on the remote's timeline): the puppet's reticle target point.
         const uintptr_t comp = Ptr(c->actor + 0xb8);
         if (c->haveAim && comp && IsReadable(comp + 0x3800, 0x30)) {
-            if (!c->aimStarted) std::memcpy(c->aim, c->aimTarget, sizeof(c->aim)), c->aimStarted = true;
-            for (int i = 0; i < 3; ++i) c->aim[i] += (c->aimTarget[i] - c->aim[i]) * 0.35f;
+            std::memcpy(c->aim, c->aimTarget, sizeof(c->aim));
             for (const size_t off : {size_t(0x3800), size_t(0x3810), size_t(0x3820)}) std::memcpy(reinterpret_cast<void*>(comp + off), c->aim, sizeof(c->aim));
         }
     }
@@ -344,8 +407,11 @@ void PuppetPlayerFrame() {
         nextLog = now + 10000;
         Log("puppet player: %zu puppet(s) under player control, %d context switches", g_byGoh.size(), g_switched.load());
         for (auto& [goh, c] : g_byGoh)
-            Log("puppet player: goh 0x%08x aim input %u, aim point (%.1f, %.1f, %.1f), aim mode %02x", goh, c->controls.value[0x19],
-                c->aim[0], c->aim[1], c->aim[2], At<uint8_t>(reinterpret_cast<uintptr_t>(c->info), 0x3bc));
+            Log("puppet player: goh 0x%08x aim input %u armed %d, aim point (%.1f, %.1f, %.1f), camera forward (%.2f, %.2f, %.2f), "
+                "aim mode %02x",
+                goh, c->controls.value[0x19], c->armed ? 1 : 0, c->aim[0], c->aim[1], c->aim[2],
+                At<float>(reinterpret_cast<uintptr_t>(c->info), 0x30), At<float>(reinterpret_cast<uintptr_t>(c->info), 0x34),
+                At<float>(reinterpret_cast<uintptr_t>(c->info), 0x38), At<uint8_t>(reinterpret_cast<uintptr_t>(c->info), 0x3bc));
     }
 }
 

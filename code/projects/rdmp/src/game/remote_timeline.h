@@ -86,7 +86,10 @@ inline float LerpAngleDeg(float a, float b, float t) {
 
 // Position at render time: linear interpolation between the two samples around it (clamped to the newest), plus the
 // remote's velocity (m/s, from the surrounding samples) for path-following.
-inline bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveInput& input, uint8_t* controls, Vec3& vel) {
+// aim (optional): the remote's aim point at render time (shared/types.h PlayerState::aimX), interpolated like the position
+// so a puppet's aim moves with the same delay and smoothness as its body; (0, 0, 0) = none.
+inline bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3& pos, float& heading, MoveInput& input, uint8_t* controls, Vec3& vel,
+                        Vec3* aim = nullptr) {
     if (samples.empty()) return false;
     size_t ia = 0, ib = samples.size() - 1;
     if (renderT <= samples[ia].t) {
@@ -107,6 +110,11 @@ inline bool Interpolate(const std::deque<Sample>& samples, double renderT, Vec3&
     const float t = b->t > a->t ? static_cast<float>((renderT - a->t) / (b->t - a->t)) : 1.0f;
     pos = Vec3{a->s.x + (b->s.x - a->s.x) * t, a->s.y + (b->s.y - a->s.y) * t, a->s.z + (b->s.z - a->s.z) * t};
     heading = LerpAngleDeg(a->s.heading, b->s.heading, t);
+    if (aim) {
+        const bool haveA = a->s.aimX != 0.0f || a->s.aimY != 0.0f || a->s.aimZ != 0.0f;
+        const PlayerState& from = haveA ? a->s : b->s;
+        *aim = Vec3{from.aimX + (b->s.aimX - from.aimX) * t, from.aimY + (b->s.aimY - from.aimY) * t, from.aimZ + (b->s.aimZ - from.aimZ) * t};
+    }
     input = b->s.input;
     std::memcpy(controls, b->s.controls, sizeof(b->s.controls));
     // velocity over a ~100 ms window ending at b (single-sample spans are too jittery)

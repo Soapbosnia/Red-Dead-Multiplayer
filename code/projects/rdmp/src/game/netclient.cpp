@@ -282,7 +282,7 @@ void NetFrame(float /*gameTime*/) {
         uint8_t controls[PlayerState::kControlCount];
         uint64_t vehicle;  // the vehicle the server has them on (newest state), 0 = on foot
         int weapon;        // the weapon in their hand (newest state), -1 = none
-        Vec3 aim;          // the world point their crosshair is on (newest state)
+        Vec3 aim;          // the world point their crosshair is on (interpolated like the position)
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -306,11 +306,9 @@ void NetFrame(float /*gameTime*/) {
         LocalWeapon(g_local.weapon, g_local.ammo);
         LocalAim(g_local.aimX, g_local.aimY, g_local.aimZ);
         if (CaptureLocalControls(controls)) std::memcpy(g_local.controls, controls.value, sizeof(g_local.controls));
-        if (AimHoldDebug()) {  // [debug] aim_hold: others see this copy aim, at a point 20 m to its camera's side
+        if (AimHoldDebug()) {  // [debug] aim_hold: others see this copy aim at a test point 20 m away (weapons.h)
             g_local.controls[0x19] = 0xff;
-            const float fx = g_local.aimX - pos.x, fz = g_local.aimZ - pos.z, len = std::sqrt(fx * fx + fz * fz);
-            const float side = AimHoldSide() * 20.0f;
-            if (len > 0.1f) g_local.aimX = pos.x + fz / len * side, g_local.aimY = pos.y + 1.0f, g_local.aimZ = pos.z - fx / len * side;
+            AimHoldPoint(pos, static_cast<double>(nowMs), g_local.aimX, g_local.aimY, g_local.aimZ);
         }
         float health = 0.0f;
         if (GetLocalPlayerHealth(health)) g_localHealth = health;
@@ -341,7 +339,7 @@ void NetFrame(float /*gameTime*/) {
             else r.offset += (target - r.offset) * 0.02;
             r.haveOffset = !r.transit.empty();
             View& v = views[nViews];
-            if (Interpolate(r.samples, renderT - r.offset, v.pos, v.heading, v.input, v.controls, v.vel)) {
+            if (Interpolate(r.samples, renderT - r.offset, v.pos, v.heading, v.input, v.controls, v.vel, &v.aim)) {
                 v.id = it->first;
                 v.name = r.name;
                 v.stale = stale;
@@ -350,7 +348,6 @@ void NetFrame(float /*gameTime*/) {
                 v.leadMs = LeadMsFor(r);
                 v.vehicle = r.samples.empty() ? 0 : r.samples.back().s.vehicle;
                 v.weapon = r.samples.empty() ? -1 : r.samples.back().s.weapon;
-                v.aim = r.samples.empty() ? Vec3{} : Vec3{r.samples.back().s.aimX, r.samples.back().s.aimY, r.samples.back().s.aimZ};
                 ++nViews;
             }
             ++it;
@@ -442,7 +439,7 @@ void NetFrame(float /*gameTime*/) {
         }
         p.hidden = false;
         SyncPuppetWeapon(p.goh, v.weapon);
-        SyncPuppetAim(p.goh, v.aim.x, v.aim.y, v.aim.z, v.pos.x, v.pos.y, v.pos.z, v.controls[0x19] > 0x7f);
+        SyncPuppetAim(p.goh, v.aim, v.pos, v.heading, v.controls[0x19] > 0x7f);
         // On a horse: the horse carries the puppet (no player control, no corrections of its own).
         if (const uint32_t horse = v.vehicle ? VehicleGoh(v.vehicle) : 0) {
             if (p.mountedOn != horse) {
