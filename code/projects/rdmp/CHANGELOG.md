@@ -8,7 +8,7 @@
   controls; locally remote players cannot be killed by your shots (their own game decides their damage, MTA-style).
   Every weapon type can be drawn (the story's disabled long-gun equip slots are enabled on give). Aiming is
   synced: a remote player aims (aim mode, facing, aim point) where their crosshair is (Player transform aim point,
-  fw_api v16), interpolated on the same timeline as their position; the arm's pitch is not synced yet.
+  fw_api v16), interpolated on the same timeline as their position. The arm's pitch follows too: up, down, as the remote aims.
   Full weapon state sync (fw_api v17): each player's game reports what it is doing with the weapon (aim state,
   weapon-ready countdown, drawn, reloading, clip, shots fired) and the puppet's own weapon state machine plays it:
   draw, weapon ready, aim, fire (shot for shot), reload (round for round), holster when the countdown runs out.

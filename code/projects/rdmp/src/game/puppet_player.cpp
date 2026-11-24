@@ -102,6 +102,8 @@ PlayerControlFn g_playerControlOrig = nullptr;
 std::atomic<int> g_switched{0};
 constexpr uintptr_t kCameraManager = 0x142C45738;  // *(+8) = the gameplay camera: +0x1d0 right, +0x1e0 up, +0x1f0 back, +0x200 position
 constexpr uintptr_t kReticleUpdate = 0x140348600;  // FUN_140348600(info): the reticle target point from the camera, and more
+constexpr uintptr_t kAimTaskVt = 0x141D47C18;      // the aim task (FUN_140d169a0 its update): *(*(motion+0xaa8)+8)
+constexpr uintptr_t kAimTaskSetTarget = 0x140D149D0;  // FUN_140d149d0(task, 1, handle, &position, 0, nullptr): aim at
 constexpr uintptr_t kPlayerActions = 0x14034B3D0;  // FUN_14034b3d0(info): the player's actions (fire, ...)
 constexpr uintptr_t kPlayerAfterWeapon = 0x140350900;  // FUN_140350900(info): after the weapon state machine
 constexpr uintptr_t kWeaponFrame = 0x14034CAE0;    // FUN_14034cae0(info, 0): the player's weapon state machine
@@ -261,6 +263,51 @@ void InContext(Context& c, Fn&& fn) {
     *global = local;
 }
 
+// The arm's aim, yaw and pitch. Every frame the player behaviour (FUN_140b63154 / FUN_140b63546) hands an actor's aim
+// task its target through FUN_140d149d0(task, hasPosition, handle, &position, ...). For the local player, with a
+// position, that puts the task in its aim-pose state (+0x3b8 = 5: the aim clip +0x3f8 and its pitch blend); for a
+// puppet it comes without one and the puppet aims level. While a puppet's remote aims, the call for its task carries
+// the remote's aim point, the way the local player's carries the reticle point (AimResetHook below keeps it).
+using AimTargetFn = void (*)(uintptr_t task, bool hasPosition, uint32_t handle, const float* position, uint32_t a5, void* a6);
+AimTargetFn g_aimTargetOrig = nullptr;
+// push rbx; sub rsp,60h; mov eax,r8d; mov rbx,rcx  (12 bytes, position independent)
+constexpr uint8_t kAimTargetPrologue[12] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x60, 0x41, 0x8B, 0xC0, 0x48, 0x8B, 0xD9};
+
+void AimTargetHook(uintptr_t task, bool hasPosition, uint32_t handle, const float* position, uint32_t a5, void* a6) {
+    const uintptr_t motion = IsReadable(task + 8, 8) ? Ptr(task + 8) : 0;
+    for (auto& [goh, c] : g_byGoh) {
+        if (!c->camAiming || !motion || Ptr(c->actor + 0x38) != motion) continue;
+        const float target[4] = {c->aimTarget[0], c->aimTarget[1], c->aimTarget[2], 0.0f};
+        g_aimTargetOrig(task, true, 0, target, 0, nullptr);
+        return;
+    }
+    g_aimTargetOrig(task, hasPosition, handle, position, a5, a6);
+}
+
+// FUN_140b62a50(behaviour, request, flag), every frame: for an actor that is not the player (actor +0x118 & 3 != 3)
+// whose aim task is in mode 8 / 12 it clears the task's aim target (+0x3b8 = 0) and resets it; for the player it does
+// nothing of that. An aiming puppet is treated as the player for this call only (the player bit set around it), so the
+// target it got above stays.
+using AimResetFn = void (*)(uintptr_t behaviour, void* request, uint8_t flag);
+AimResetFn g_aimResetOrig = nullptr;
+// mov [rsp+10h],rbx; mov [rsp+18h],rbp; mov [rsp+20h],rsi  (15 bytes, position independent)
+constexpr uint8_t kAimResetPrologue[15] = {0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20};
+constexpr uintptr_t kAimReset = 0x140B62A50;
+
+void AimResetHook(uintptr_t behaviour, void* request, uint8_t flag) {
+    const uintptr_t actor = IsReadable(behaviour + 8, 8) ? Ptr(behaviour + 8) : 0;
+    for (auto& [goh, c] : g_byGoh) {
+        if (!actor || c->actor != actor || !c->camAiming) continue;
+        uint8_t& flags = At<uint8_t>(actor, 0x118);
+        const uint8_t saved = flags;
+        flags |= 1;
+        g_aimResetOrig(behaviour, request, flag);
+        flags = static_cast<uint8_t>((flags & ~1) | (saved & 1));
+        return;
+    }
+    g_aimResetOrig(behaviour, request, flag);
+}
+
 void PlayerControlHook(uintptr_t component, void* update) {
     // component +0x60 -> +0x10 = its actor entry (+8 = actor handle)
     const uintptr_t a60 = Ptr(component + 0x60), a10 = a60 ? Ptr(a60 + 0x10) : 0;
@@ -319,6 +366,12 @@ void InstallPuppetPlayerHooks() {
     g_controlUpdateOrig = reinterpret_cast<ControlUpdateFn>(DetourPic(
         GameAddr(kControlUpdate), kControlUpdatePrologue, sizeof(kControlUpdatePrologue), reinterpret_cast<void*>(&ControlUpdateHook)));
     Log("puppet player: control-update hook %s", g_controlUpdateOrig ? "installed" : "FAILED (prologue differs)");
+    g_aimTargetOrig = reinterpret_cast<AimTargetFn>(DetourPic(
+        GameAddr(kAimTaskSetTarget), kAimTargetPrologue, sizeof(kAimTargetPrologue), reinterpret_cast<void*>(&AimTargetHook)));
+    Log("puppet player: aim-target hook %s", g_aimTargetOrig ? "installed" : "FAILED (prologue differs)");
+    g_aimResetOrig = reinterpret_cast<AimResetFn>(
+        DetourPic(GameAddr(kAimReset), kAimResetPrologue, sizeof(kAimResetPrologue), reinterpret_cast<void*>(&AimResetHook)));
+    Log("puppet player: aim-reset hook %s", g_aimResetOrig ? "installed" : "FAILED (prologue differs)");
 }
 
 bool AttachPlayerControl(uint32_t goh) {
@@ -437,9 +490,6 @@ void PuppetPlayerFrame() {
         std::memcpy(c->camEye, eye, sizeof(eye));
         std::memcpy(c->camFwd, fwd, sizeof(fwd));
         const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
-        // Arm pitch (open): the aim task FUN_140d169a0 does get the remote's target, pitch included (task +0x390, from the
-        // swapped camera), but the animation only applies pitch on its player branch (actor +0x118 & 3 == 3), and that
-        // branch also needs the local camera's aim state: with the player bit the puppet lowers its gun. See re/NOTES.md.
         if (c->haveWeapon) {
             // The remote's aim state (GET_PLAYER_ZOOM_STATE) and weapon-ready time, as their game has them: the puppet's
             // own weapon state machine (FUN_14034cae0, below) enters and leaves aim mode from the aim state, keeps the

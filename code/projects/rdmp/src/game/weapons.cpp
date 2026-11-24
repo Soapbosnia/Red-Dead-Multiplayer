@@ -34,6 +34,7 @@ float g_aimHoldYaw = 0.0f, g_aimHoldSweep = 0.0f, g_aimHoldPitch = 0.0f;  // [de
 bool g_aimHoldPitchSwing = false;
 bool g_aimHoldPoint = false;  // [debug] aim_hold_point=1: send a test point instead of the real crosshair
 bool g_pitchProbe = false;
+int g_autoWeapon = -1;  // [debug] auto_weapon
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
 uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
 bool g_aimTrace = false;  // [debug] aim_trace: log a puppet's wanted / actual heading every 100 ms while it aims
@@ -198,6 +199,7 @@ void InitWeapons(const wchar_t* iniPath) {
     g_aimTrace = GetPrivateProfileIntW(L"debug", L"aim_trace", 0, iniPath) != 0;
     g_stateProbe = GetPrivateProfileIntW(L"debug", L"state_probe", 0, iniPath) != 0;
     g_fireProbe = GetPrivateProfileIntW(L"debug", L"fire_probe", 0, iniPath);
+    g_autoWeapon = static_cast<int>(GetPrivateProfileIntW(L"debug", L"auto_weapon", static_cast<UINT>(-1), iniPath));
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
     wchar_t hex[32] = {};
     GetPrivateProfileStringW(L"debug", L"exec_watch", L"", hex, 32, iniPath);
@@ -220,6 +222,16 @@ void WeaponsFrame() {
         }
     }
     if (g_probe) ProbeFrame(actor);
+    // [debug] auto_weapon=<id>: give the local player that weapon in hand 3 s after spawning (tests without the UI)
+    static ULONGLONG autoAt = 0;
+    static bool autoDone = false;
+    if (g_autoWeapon >= 0 && !autoDone) {
+        if (!autoAt) autoAt = GetTickCount64() + 3000;
+        else if (GetTickCount64() > autoAt) {
+            autoDone = true;
+            GiveLocalWeapon(g_autoWeapon, 50, true);
+        }
+    }
     if (g_stateProbe) {
         StateProbeFrame(actor);
         for (auto& [goh, pw] : g_puppets) {  // the puppets' state, same format: the two copies' logs line up
@@ -404,7 +416,7 @@ void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
     z = pos.z - std::cos(yaw) * 20.0f;
     y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
 }
-bool AimHoldDebug() { return g_aimHold != 0 && g_aimHold == InstanceId(); }
+bool AimHoldDebug() { return g_aimHold != 0 && (g_aimHold == InstanceId() || g_aimHold < 0); }  // -1 = every copy
 
 void LocalWeaponState(WeaponState& out) {
     out = WeaponState{};

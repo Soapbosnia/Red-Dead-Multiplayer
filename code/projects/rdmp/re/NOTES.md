@@ -968,3 +968,20 @@ components on a puppet, which other threads read playerInfo during the swap.
   - pitch_probe=1 (watch the blend weight) and exec_watch helped here; the mouse only reaches a test copy right after
     a click in it, then often stops; aim_hold_point=1 with aim_hold_pitch gives a mouse-free test point.
 
+### Arm pitch, solved (2026-11-24, puppet_player.cpp AimTargetHook / AimResetHook)
+* Local vs puppet aim task (both aiming, aim_hold=-1 makes every copy hold aim): the local task has +0x3b8 = 5,
+  +0x5d7 bit 0x10, aim angles +0x370 / +0x374 (yaw / pitch, rad), clip +0x3f8, weights +0x400 / +0x404, state +0x410
+  = 2; the puppet's had all of it zero. The update (0x140d18097) enters the aim-pose state only with +0x3b8 != 0.
+* +0x3b8 = 5 comes from FUN_140d149d0(task, hasPosition = 1, handle, &position, a5, a6) (it starts by clearing
+  +0x3b8; with a position it copies it to +0x390 / +0x3a0 and sets 1 then 5; with a position the stack arguments are
+  unused). The player behaviour calls it every frame (0x140b632b7 / 0x140b63586); for a puppet without a position.
+* FUN_140b62a50(behaviour, request, flag) then clears +0x3b8 again every frame for any actor that is not the player
+  (actor +0x118 & 3 != 3) whose task is in mode +0x3bc = 8 / 12; for the player it skips that.
+* Fix: detour FUN_140d149d0 (prologue 40 53 48 83 EC 60 41 8B C0 48 8B D9): for the task of a puppet whose remote
+  aims, call it with the remote's aim point and hasPosition 1. Detour FUN_140b62a50 (prologue 48 89 5C 24 10 48 89 6C
+  24 18 48 89 74 24 20): for that puppet, set the player bit (actor +0x118 bit 0) around the call only. The task then
+  computes its yaw / pitch from the remote's point and the game poses the arm (checked: remote looking 66 deg down ->
+  puppet pitch -47 deg, gun at the floor in front; test point 40 deg up -> pitch +27 deg). Setting the player bit
+  permanently instead makes the puppet lower its gun (other player paths need the local camera).
+* Debug: [debug] auto_weapon=<id> gives the local player that weapon 3 s after spawning (tests without the UI).
+

@@ -151,8 +151,8 @@ Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop th
   controls. Sidearms and long guns give / draw (long guns needed their equip slots enabled). re/NOTES.md "Weapons".
 * Next: (1) done: long guns; (2) aim (re/NOTES.md "Aiming", "Weapon state sync"): the weapon state is synced (draw, ready, aim, fire, reload,
   holster: the puppet runs the game's own weapon state machine from the remote's real state); facing and aim point too;
-  puppets have private input mappers (no crosstalk from the local weapon wheel). OPEN: arm pitch (re/NOTES.md "arm
-  pitch": the aim task has the right target, the animation only pitches on its player branch)
+  puppets have private input mappers (no crosstalk from the local weapon wheel); the arm's pitch follows the remote
+  (re/NOTES.md "Arm pitch, solved": the aim task gets the remote's aim point the local player's way)
   (MTA-style: the remote's camera in the puppet's context, their body heading while aiming). OPEN: the arm's pitch (the
   puppet aims level whatever the remote's pitch; the aim matrices are right now, so the pitch comes from somewhere else,
   probably the aim parameters the camera writes for the local player only, FUN_14037da20); fire at a remote's target; (3) damage: local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON /
