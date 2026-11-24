@@ -132,3 +132,15 @@ the victim decides damage, bullet sync). Movement, aim and weapon switching foll
 weapon actions are forced into the puppet instead of coming from its own player code, damage is read after the fact
 instead of decided in the damage function, bullets lack MTA's start / end points, head look and melee are missing,
 and the testing has been too artificial to trust. Fix the testing first, then items 2 to 5.
+
+## Progress (2026-11-24, after the review)
+* Damage now decided in the damage function (item 3): done, verified.
+* Item 2 mapped: the on-foot frame (FUN_14034f700) is already run for puppets almost whole (input step, actions,
+  weapon state machine, after-weapon; only the inventory mapper's update is skipped, on purpose: weapon-wheel
+  crosstalk). What only the local player gets is the camera / targeting side of the game loop (FUN_14037d120,
+  FUN_14034a6d0, FUN_140392f00, FUN_140336810, FUN_140348600). There is one camera, so that part cannot simply run per
+  puppet: its results have to be synced instead, like the aim point already is. For melee that result is the lock-on
+  target. Where it is stored was not found: the automated test copy never really locks on (its camera is not on the
+  target), so this needs a session with real input.
+* Bullet start / end points (item 4): lower priority than written: the aim point travels in the same packet as the
+  shot counter, so a synced shot already goes at the shooter's crosshair point of that moment.
