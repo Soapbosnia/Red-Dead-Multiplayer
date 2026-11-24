@@ -33,6 +33,7 @@ int g_aimHold = 0;      // [debug] aim_hold: the game copy (InstanceId) that sen
 float g_aimHoldYaw = 0.0f, g_aimHoldSweep = 0.0f, g_aimHoldPitch = 0.0f;  // [debug] aim_hold_* (AimHoldPoint)
 bool g_aimHoldPitchSwing = false;
 bool g_aimHoldPoint = false;  // [debug] aim_hold_point=1: send a test point instead of the real crosshair
+bool g_pitchProbe = false;
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
 uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
 bool g_aimTrace = false;  // [debug] aim_trace: log a puppet's wanted / actual heading every 100 ms while it aims
@@ -197,6 +198,7 @@ void InitWeapons(const wchar_t* iniPath) {
     g_aimTrace = GetPrivateProfileIntW(L"debug", L"aim_trace", 0, iniPath) != 0;
     g_stateProbe = GetPrivateProfileIntW(L"debug", L"state_probe", 0, iniPath) != 0;
     g_fireProbe = GetPrivateProfileIntW(L"debug", L"fire_probe", 0, iniPath);
+    g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
     wchar_t hex[32] = {};
     GetPrivateProfileStringW(L"debug", L"exec_watch", L"", hex, 32, iniPath);
     g_execWatch = static_cast<uintptr_t>(wcstoull(hex, nullptr, 16));
@@ -248,6 +250,18 @@ void WeaponsFrame() {
         if (recs) {
             fireArmed = true;
             ArmAccessWatch(recs + g_fireProbe * 16, "inputRecord");
+        }
+    }
+    static bool pitchArmed = false;  // [debug] pitch_probe=1: who writes the aim blend weight *(*(motion+0x3b0)+0x150)+0x280
+    if (g_pitchProbe && !pitchArmed) {
+        const uintptr_t a = ActorFromGohHandle(actor);
+        const uintptr_t mot = a ? *reinterpret_cast<uintptr_t*>(a + 0x38) : 0;
+        const uintptr_t x = mot && IsReadable(mot + 0x3b0, 8) ? *reinterpret_cast<uintptr_t*>(mot + 0x3b0) : 0;
+        const uintptr_t y = x && IsReadable(x + 0x150, 8) ? *reinterpret_cast<uintptr_t*>(x + 0x150) : 0;
+        if (y && IsReadable(y + 0x280, 4)) {
+            pitchArmed = true;
+            Log("weapon probe: aim blend object %p", reinterpret_cast<void*>(y));
+            ArmAccessWatch(y + 0x280, "aimBlendWeight");
         }
     }
     static bool execArmed = false;

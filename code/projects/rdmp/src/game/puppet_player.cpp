@@ -62,6 +62,14 @@ struct Context {
     alignas(16) uint8_t info[kPlayerInfoSize];        // this puppet's player-info
     alignas(16) uint8_t control[kFootControlSize];    // its on-foot control object
     alignas(16) uint8_t sub410[0x28], sub418[0x20], sub420[0x10], sub408[0x10];
+    // Private copies of the local player's other input mappers the puppet's code reads (death +0x120, inventory +0x128:
+    // weapon wheel / weapon switch, camera +0x130), with a snapshot of their records: the puppet must never read the
+    // local player's keys through them.
+    struct Mapper {
+        alignas(16) uint8_t object[0x160];
+        alignas(16) uint8_t records[64 * 16];
+        uintptr_t recordSet[2] = {};
+    } mappers[3];
     alignas(16) uint8_t records[32 * 16];             // its input records
     uintptr_t recordSet[2] = {};                      // what control+0x20 points at: { records, 0 }
     PlayerControls controls;
@@ -188,6 +196,21 @@ bool BuildContext(Context& c) {
     clone(0x418, c.sub418, sizeof(c.sub418));
     clone(0x420, c.sub420, sizeof(c.sub420));
     clone(0x408, c.sub408, sizeof(c.sub408));
+    // object sizes from the allocations (death 0x70, inventory 0x150, camera 0xe0 apart): copy what each one spans
+    const size_t mapperOff[3] = {0x120, 0x128, 0x130}, mapperSize[3] = {0x70, 0x150, 0xe0};
+    for (int i = 0; i < 3; ++i) {
+        const uintptr_t src = Ptr(info + mapperOff[i]);
+        const uintptr_t srcSet = src ? Ptr(src + 0x20) : 0, srcRecs = srcSet ? Ptr(srcSet) : 0;
+        Context::Mapper& m = c.mappers[i];
+        if (!src || !IsReadable(src, mapperSize[i]) || !srcRecs || !IsReadable(srcRecs, sizeof(m.records))) continue;
+        std::memcpy(m.object, reinterpret_cast<void*>(src), mapperSize[i]);
+        std::memcpy(m.records, reinterpret_cast<void*>(srcRecs), sizeof(m.records));
+        const uintptr_t obj = reinterpret_cast<uintptr_t>(m.object);
+        m.recordSet[0] = reinterpret_cast<uintptr_t>(m.records);
+        At<uintptr_t>(obj, 0x20) = reinterpret_cast<uintptr_t>(m.recordSet);
+        At<uintptr_t>(obj, 0x40) = pi;
+        At<uintptr_t>(pi, mapperOff[i]) = obj;
+    }
     At<uintptr_t>(reinterpret_cast<uintptr_t>(c.sub410), 0) = pi;  // +0x410 points back at its player-info
     At<uintptr_t>(pi, 0x118) = pc;
     At<uint32_t>(pi, 0x5ec) = c.actorHandle;
@@ -414,6 +437,9 @@ void PuppetPlayerFrame() {
         std::memcpy(c->camEye, eye, sizeof(eye));
         std::memcpy(c->camFwd, fwd, sizeof(fwd));
         const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
+        // Arm pitch (open): the aim task FUN_140d169a0 does get the remote's target, pitch included (task +0x390, from the
+        // swapped camera), but the animation only applies pitch on its player branch (actor +0x118 & 3 == 3), and that
+        // branch also needs the local camera's aim state: with the player bit the puppet lowers its gun. See re/NOTES.md.
         if (c->haveWeapon) {
             // The remote's aim state (GET_PLAYER_ZOOM_STATE) and weapon-ready time, as their game has them: the puppet's
             // own weapon state machine (FUN_14034cae0, below) enters and leaves aim mode from the aim state, keeps the

@@ -946,3 +946,25 @@ components on a puppet, which other threads read playerInfo during the swap.
 * Open: arm pitch (puppet aims level); FUN_14034b3d0 / the inventory mapper at info+0x128 are the LOCAL player's
   objects shared through the copied player-info: check that a puppet does not react to the local weapon wheel.
 
+### Weapon-wheel crosstalk and arm pitch (2026-11-24)
+* Input mappers in playerInfo (all: +0x20 record set, +0x40 owner): +0x60 pushcart, +0x68 train, +0x70 boat, +0x78
+  car, +0x80 wagon, +0x118 foot, +0x120 death, +0x128 inventory, +0x130 camera, +0x138 horse, +0x140 minigame.
+  A puppet's copied player-info pointed at the LOCAL death / inventory / camera mappers, and the puppet now runs the
+  actions / weapon frame that read them: BuildContext gives each puppet private copies (object + a snapshot of the
+  records, never updated). Checked: the local weapon wheel (Tab = foot input 0x00) and reload do not change the
+  puppet's state.
+* Arm pitch, still open:
+  - The arm pose ends up in the skeleton (actor +0xc8 -> +0x8 -> +0x2a8: bone matrices); an aim blend weight sits in
+    the animation network (*(*(motion+0x3b0)+0x150)+0x280, 0 -> 1 from level to fully down), written via
+    FUN_140cd8d30 from the aim task (0x140D1D2BA, weight +0x404, clip +0x3f8, set at 0x140d16f41..).
+  - The aim task FUN_140d169a0 (task +8 = motion; reached from motion +0xaa8 -> +0x8) takes its target (+0x390) from
+    the actor's reticle point / aim matrices on its PLAYER branch (actor +0x118 & 3 == 3 and +0x112 & 1; local 0xa3,
+    puppet 0x02); other actors keep an AI-set target. The puppet's task target already points along the remote's
+    pitch (from the swapped camera), but its arm stays level.
+  - Setting the player bit on the puppet (with or without the aim-mode bit +0x3bc) makes it lower the gun to the hip:
+    the player branch also depends on the local camera's aim state. Next: what the player branch reads after the
+    target (0x140d16c10 on: [[motion+0xaa8]+0x20]+0x30 lock-on, [[motion+0xaa8]+0x28]+0x30 mode 2..4 camera path,
+    the 0x140d16f41 weight code), or drive the blend weight from the remote's pitch.
+  - pitch_probe=1 (watch the blend weight) and exec_watch helped here; the mouse only reaches a test copy right after
+    a click in it, then often stops; aim_hold_point=1 with aim_hold_pitch gives a mouse-free test point.
+
