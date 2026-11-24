@@ -130,7 +130,7 @@ Client scripts run on the game's main thread every frame.
 | `clientRender` | ms since the last frame; draw with `dx*` here (drawing lasts one frame) |
 | `clientKey` | key name, down (bool); only while the game has focus and the chat input is closed |
 | `clientClick` | button (`"left"` \| `"right"` \| `"middle"`), state (`"down"` \| `"up"`), x, y; while the cursor is shown |
-| `clientPlayerDamage` | attacker \| null, weapon, bodyPart, loss: the local player was hurt. Return `false` to cancel: the health goes back and the server hears nothing (a hit that kills cannot be cancelled) |
+| `clientPlayerDamage` | attacker \| null, weapon, bodyPart, loss: the local player was hurt. Return `false` to cancel: decided in the game's damage function before the hit lands, so nothing is applied (lethal hits too) and the server hears nothing. Damage that is not a hit (fall, fire) is put back instead and cannot be cancelled when lethal |
 
 ### Local player
 | Function | Notes |

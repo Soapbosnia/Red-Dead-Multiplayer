@@ -87,8 +87,9 @@ teleports it when more than 4 m off (`puppet_control.cpp`).
   goes to the server (`playerDamage`, killer on `playerWasted`).
 * **MTA:** also the victim's game, but `onClientPlayerDamage` runs **before** the damage is applied, so even a lethal
   hit can be cancelled, and attacker / weapon / body part come straight from the hit.
-* **Verdict:** right model, wrong place. We now know the game's damage function (FUN_140ae5a40); hooking it would
-  give the decision before the damage, lethal hits included, and exact hit data, instead of polling health.
+* **Verdict:** right model, wrong place. **Fixed:** hits are now decided in the game's damage function (FUN_140ae5a40)
+  before they land, lethal ones included, with the hit's own attacker / weapon / zone; polling only covers falls and
+  fire.
 
 ### Hit reactions
 * **Ours (new):** a puppet takes our hits through the damage function so the game plays its reaction; the damage is

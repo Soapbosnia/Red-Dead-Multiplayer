@@ -28,6 +28,7 @@
 #include "puppet_player.h"
 #include "remote_timeline.h"
 #include "vehicles.h"
+#include "shared/weapons.h"
 #include "shots.h"
 #include "weapons.h"
 #include "gameflow.h"
@@ -102,9 +103,25 @@ float LeadMsFor(const Remote& r) {
     return static_cast<float>(g_interpMs) + delay;
 }
 std::map<uint16_t, Puppet> g_puppetsById;
+ULONGLONG g_hookHitUntil = 0;  // a hit the damage function decided: its health drop is not reported again until then
+
 
 // ---- the framework client: rdmp_client.dll (C table, shared/fw_api.h), pumped once per frame ----
 fw::Api g_api{};
+
+// The game's damage function is about to apply a hit to the local player (shots.cpp): ask the client, which raises
+// clientPlayerDamage (cancellable) and reports the hit to the server (playerDamage, the killer on playerWasted).
+bool LocalDamageFromHook(uint32_t attackerHandle, int weapon, int zone, float damage, float health) {
+    uint64_t attacker = 0;
+    for (const auto& [id, pp] : g_puppetsById)
+        if (attackerHandle && ActorHandleFromGohHandle(pp.goh) == attackerHandle) attacker = id;
+    const float loss = damage < health ? damage : health;
+    Log("damage: %.1f -> %.1f (attacker 0x%08x = player %llu, weapon %d, zone %d)", health, health - loss, attackerHandle,
+        static_cast<unsigned long long>(attacker), weapon, zone);
+    if (g_api.local_damage && !g_api.local_damage(attacker, weapons::Valid(weapon) ? weapon : -1, zone, loss, health - loss)) return false;
+    g_hookHitUntil = GetTickCount64() + 250;
+    return true;
+}
 bool g_fwUp = false;
 fw::Conn g_conn = fw::Conn::Connecting;
 // We joined a server from the native menus and have not left it (the menus show the in-game entries).
@@ -353,16 +370,18 @@ void NetFrame(float /*gameTime*/) {
             // Damage: the local player's own game decided it (a remote's puppet shot them here, a fall, ...). Who did it:
             // the remote whose puppet is the game's last attacker.
             LocalHit hit;
-            if (PollLocalHit(health, hit)) {
+            if (PollLocalHit(health, hit) && GetTickCount64() > g_hookHitUntil) {
+                // A drop the damage function did not decide (fall, fire, drowning): reported as it is; it already landed,
+                // so a script's cancel puts the health back (and a lethal one cannot be undone).
                 uint64_t attacker = 0;
                 for (const auto& [id, pp] : g_puppetsById)
                     if (hit.attacker && pp.goh == hit.attacker) attacker = id;
-                Log("damage: %.1f -> %.1f (attacker goh 0x%08x = player %llu, weapon %d, zone %d)", hit.before, hit.health, hit.attacker,
-                    static_cast<unsigned long long>(attacker), hit.weapon, hit.bodyPart);
+                Log("damage (no hit): %.1f -> %.1f (attacker player %llu, weapon %d)", hit.before, hit.health,
+                    static_cast<unsigned long long>(attacker), hit.weapon);
                 if (g_api.local_damage && !g_api.local_damage(attacker, hit.weapon, hit.bodyPart, hit.loss, hit.health) && hit.health > 0.0f) {
-                    ScriptSetPlayerHealth(hit.before);  // a script cancelled it (clientPlayerDamage)
+                    ScriptSetPlayerHealth(hit.before);
                     g_localHealth = hit.before;
-                    PollLocalHit(hit.before, hit);      // re-baseline at the restored health
+                    PollLocalHit(hit.before, hit);  // re-baseline at the restored health
                 }
             }
         }
@@ -608,6 +627,7 @@ void StartNetClient(const wchar_t* ini) {
     LoadVehicleConfig(ini);
     g_puppetPlayerTest = GetPrivateProfileIntW(L"debug", L"puppet_player_test", 0, ini) != 0;
     InitWeapons(ini);
+    SetLocalDamageHandler(&LocalDamageFromHook);
     GetPrivateProfileStringW(L"net", L"puppet_mode", L"player", w, 64, ini);
     g_puppetPlayerMode = _wcsicmp(w, L"desire") != 0;
     GetPrivateProfileStringW(L"net", L"lead_ms", L"auto", w, 64, ini);

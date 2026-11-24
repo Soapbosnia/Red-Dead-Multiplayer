@@ -38,6 +38,13 @@ uint32_t WeaponOwner(uintptr_t weapon) { return IsReadable(weapon + 0x20, 4) ? *
 
 std::unordered_map<uint32_t, uint32_t> g_puppetByActorHandle;  // actor handle -> goh, puppets with bullet sync
 
+uintptr_t ActorOfHandle(uint32_t handle) {  // actor handle -> actor (*0x142C457F8 entries: object, generation)
+    const uintptr_t table = Ptr(GameAddr(0x142C457F8));
+    const uintptr_t e = table ? table + static_cast<uintptr_t>(handle & 0xffff) * 16 : 0;
+    if (!e || !IsReadable(e, 16) || *reinterpret_cast<uint16_t*>(e + 8) != static_cast<uint16_t>(handle >> 16)) return 0;
+    return Ptr(e);
+}
+
 // FUN_140ae5a40(health component, damage, attacker, ...): applies a hit's damage to an actor that is not invulnerable
 // (the caller, 0x140ae798a, skips it for health component +0x150 bit 0x100) and plays its hit reaction. A puppet takes
 // our hits through it, so it reacts the way the game reacts to a hit, but it keeps its health: what really happens to
@@ -57,8 +64,27 @@ bool IsPuppetHealth(uintptr_t health) {
     return false;
 }
 
+LocalDamageFn g_localDamage = nullptr;
+
 void ApplyDamageHook(uintptr_t health, float damage, uint32_t attacker, uintptr_t a4, uint32_t a5, void* a6, uint8_t a7, uint32_t a8,
                      void* hit) {
+    // The local player: the hit is decided here, before the game applies it (MTA's onClientPlayerDamage), so a script
+    // can cancel any hit, a lethal one too. a8 = the weapon (what GET_LAST_HIT_WEAPON reads back, health +0x140); the
+    // hit zone is already in health +0x120 (valid when +0x138 is set, GET_LAST_HIT_ZONE).
+    const uintptr_t info = Ptr(GameAddr(0x1422DAF30));
+    const uint32_t localHandle = info && IsReadable(info + 0x5ec, 4) ? *reinterpret_cast<uint32_t*>(info + 0x5ec) : 0;
+    const uintptr_t localActor = localHandle ? ActorOfHandle(localHandle) : 0;
+    if (g_localDamage && localActor && Ptr(localActor + 0x60) == health && IsReadable(health + 0x20, 0x120)) {
+        float& hp = *reinterpret_cast<float*>(health + 0x20);
+        const float before = hp;
+        const int zone = *reinterpret_cast<uint8_t*>(health + 0x138) ? *reinterpret_cast<int*>(health + 0x120) : -1;
+        if (!g_localDamage(attacker, static_cast<int>(a8), zone, damage, before)) {
+            if (g_probe) Log("shots: local hit (%.1f, weapon %d, zone %d, attacker 0x%08x) cancelled", damage, static_cast<int>(a8), zone, attacker);
+            return;
+        }
+        g_applyDamageOrig(health, damage, attacker, a4, a5, a6, a7, a8, hit);
+        return;
+    }
     if (!IsPuppetHealth(health) || !IsReadable(health + 0x20, 4)) {
         g_applyDamageOrig(health, damage, attacker, a4, a5, a6, a7, a8, hit);
         return;
@@ -73,13 +99,6 @@ void ApplyDamageHook(uintptr_t health, float damage, uint32_t attacker, uintptr_
 
 bool g_dbgTarget = false;  // [debug] aim_hold_target: the local player's own shots go at this point
 float g_dbgPoint[3] = {};
-
-uintptr_t ActorOfHandle(uint32_t handle) {  // actor handle -> actor (*0x142C457F8 entries: object, generation)
-    const uintptr_t table = Ptr(GameAddr(0x142C457F8));
-    const uintptr_t e = table ? table + static_cast<uintptr_t>(handle & 0xffff) * 16 : 0;
-    if (!e || !IsReadable(e, 16) || *reinterpret_cast<uint16_t*>(e + 8) != static_cast<uint16_t>(handle >> 16)) return 0;
-    return Ptr(e);
-}
 
 void ShootHook(uintptr_t weapon, uintptr_t event) {
     const uint32_t owner = WeaponOwner(weapon);
@@ -148,6 +167,8 @@ void SetDebugShotTarget(bool on, float x, float y, float z) {
     g_dbgTarget = on;
     g_dbgPoint[0] = x, g_dbgPoint[1] = y, g_dbgPoint[2] = z;
 }
+
+void SetLocalDamageHandler(LocalDamageFn fn) { g_localDamage = fn; }
 
 void SetBulletSync(uint32_t goh, uint32_t actorHandle, bool on) {
     if (on) g_puppetByActorHandle[actorHandle] = goh;

@@ -1049,6 +1049,14 @@ components on a puppet, which other threads read playerInfo during the swap.
   verified: in the automatic test the copies' real cameras never face each other, so no melee target is locked and no
   punch connects at all (0 hits either way at 1 m); needs a test with real mouse input.
 
+### Damage decided in the damage function (2026-11-24, shots.cpp ApplyDamageHook, netclient LocalDamageFromHook)
+* The local player's hits go through FUN_140ae5a40 too: the hook asks the client first (clientPlayerDamage, then the
+  report to the server) and skips the call when it is cancelled, so a lethal hit can be cancelled and nothing lands.
+  Hit data from the health component: weapon = the 8th argument (+0x140 afterwards, GET_LAST_HIT_WEAPON), zone =
+  +0x120 when +0x138 is set (GET_LAST_HIT_ZONE), attacker = the 3rd argument (an actor handle; +0xa0 afterwards).
+  Verified: 14 hits cancelled in a row, health stayed 100, nothing reached the server. The health poll still reports
+  drops no hit explains (falls, fire), skipping the 250 ms after a decided hit.
+
 ### Hit reactions (2026-11-24, shots.cpp ApplyDamageHook)
 * Damage: the hit handler (chunk 0x140ae7640) skips FUN_140ae5a40 for an invulnerable victim (health component +0x150
   bit 0x100: only the hit is recorded) and otherwise calls FUN_140ae5a40(health component, damage, attacker, ...),

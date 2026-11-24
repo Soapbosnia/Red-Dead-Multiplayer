@@ -220,8 +220,8 @@ namespace {
     }
 
     int LocalDamage(uint64_t attacker, int32_t weapon, int32_t bodyPart, float loss, float health) {
-        if (!RDMP::ClientApi::EmitClientPlayerDamage(attacker, weapon, bodyPart, loss) && health > 0.0f) {
-            return 0;  // cancelled by a script (a hit that killed is reported anyway: it cannot be undone)
+        if (!RDMP::ClientApi::EmitClientPlayerDamage(attacker, weapon, bodyPart, loss)) {
+            return 0;  // cancelled by a script (the game side undoes it, or keeps it when it cannot)
         }
         ++g_hit.seq;
         g_hit.attacker = attacker;

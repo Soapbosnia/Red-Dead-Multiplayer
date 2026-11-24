@@ -463,6 +463,8 @@ bool AimHoldAtRemote() { return g_aimHoldTarget; }
 void FaceLocalPlayerAt(const Vec3& from, const Vec3& to) {  // [debug] aim_hold_target: the player faces the target
     const float dx = to.x - from.x, dz = to.z - from.z;
     if (dx * dx + dz * dz < 0.04f) return;
+    // only without a gun (melee): while aiming the camera turns the player, and turning it as well makes it twitch
+    if (weapons::IsGun(InHand(LocalActor()))) return;
     const float want = std::atan2(-dx, -dz) * 57.2957795f;  // the engine's heading faces (-sin h, -cos h)
     float err = want - ActorHeadingDeg(ActorFromGohHandle(LocalActor()));
     while (err > 180.0f) err -= 360.0f;
