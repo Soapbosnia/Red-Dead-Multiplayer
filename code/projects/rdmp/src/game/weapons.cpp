@@ -21,6 +21,7 @@
 #include "patch.h"
 #include "puppet_player.h"
 #include "sandbox.h"
+#include "shots.h"
 #include "scriptnatives.h"
 #include "shared/weapons.h"
 #include "watch.h"
@@ -123,6 +124,8 @@ struct PuppetWeapon {
     int lastAsked = -2;     // the remote weapon last applied
     ULONGLONG nextTry = 0;  // throttles equip / holster attempts
     bool setUp = false;     // invulnerable (damage is decided in the victim's own game)
+    bool haveShots = false;  // bullet sync: the remote's shot count already fired here
+    uint8_t shots = 0;
 };
 std::unordered_map<uint32_t, PuppetWeapon> g_puppets;
 
@@ -237,9 +240,11 @@ void WeaponsFrame() {
         }
     }
     if (g_probe) ProbeFrame(actor);
-    // [debug] auto_weapon=<id>: give the local player that weapon in hand 3 s after spawning (tests without the UI)
+    // [debug] auto_weapon=<id>: give the local player that weapon in hand 3 s after each spawn (tests without the UI)
     static ULONGLONG autoAt = 0;
     static bool autoDone = false;
+    static uint32_t autoActor = 0;
+    if (actor != autoActor) autoActor = actor, autoDone = false, autoAt = 0;  // again after every (re)spawn
     if (g_autoWeapon >= 0 && !autoDone) {
         if (!autoAt) autoAt = GetTickCount64() + 3000;
         else if (GetTickCount64() > autoAt) {
@@ -381,6 +386,7 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
         NativeCall inv;
         inv.Uint(goh).Bool(true);
         inv.Call(NativeHash("SET_ACTOR_INVULNERABILITY"));
+        SetBulletSync(goh, ActorHandleFromGohHandle(goh), true);
     }
     const ULONGLONG now = GetTickCount64();
     if (weapon != p.lastAsked) {
@@ -417,6 +423,7 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
 }
 
 void ForgetPuppetWeapon(uint32_t goh) {
+    SetBulletSync(goh, ActorHandleFromGohHandle(goh), false);
     g_puppets.erase(goh);
 }
 
@@ -526,6 +533,17 @@ void LocalWeaponState(WeaponState& out) {
 void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state) {
     SetPlayerWeaponState(goh, state);
     if (!HasPlayerControl(goh) || !weapons::Valid(weapon) || InHand(goh) != weapon) return;
+    // Bullet sync: one bullet from the puppet per shot the remote's game fired (shots.cpp), with a round in the clip
+    // for it.
+    PuppetWeapon& pw = g_puppets[goh];
+    // A jump of more than a few shots is a counter that started over (or a long gap), not shots to replay.
+    if (!pw.haveShots || static_cast<uint8_t>(state.shots - pw.shots) > 8) pw.haveShots = true, pw.shots = state.shots;
+    while (pw.shots != state.shots) {
+        ++pw.shots;
+        const uintptr_t wobj = WeaponObject(ActorFromGohHandle(goh));
+        if (wobj && *reinterpret_cast<float*>(wobj + 0x12c) < 1.0f) *reinterpret_cast<float*>(wobj + 0x12c) = 1.0f;
+        FirePuppetShot(goh);
+    }
     const int want = state.clip + PendingPuppetShots(goh);
     NativeCall a;
     a.Uint(goh).Int(weapon);

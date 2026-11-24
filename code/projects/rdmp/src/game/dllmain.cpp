@@ -13,6 +13,7 @@
 #include "instancediag.h"
 #include "locomotion.h"
 #include "puppet_player.h"
+#include "shots.h"
 #include "log.h"
 #include "mainthread.h"
 
@@ -64,6 +65,12 @@ DWORD WINAPI InitThread(LPVOID) {
     rdmp::InstallMainThreadHook();
     rdmp::InstallLocomotionHook();
     rdmp::InstallPuppetPlayerHooks();
+    {
+        wchar_t ini[MAX_PATH];
+        GetModuleFileNameW(g_self, ini, MAX_PATH);
+        if (wchar_t* slash = wcsrchr(ini, L'\\')) wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - ini), L"rdmp.ini");
+        rdmp::InstallShotHooks(GetPrivateProfileIntW(L"debug", L"shot_probe", 0, ini) != 0);
+    }
     rdmp::StartEventLogger();
     {
         // Old reverse-engineering hotkeys (F5..F11: loader/camera/actor probes, puppets). Off by default: F7..F9

@@ -156,8 +156,8 @@ Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop th
   (MTA-style: the remote's camera in the puppet's context, their body heading while aiming); (3) damage: done
   (re/NOTES.md "Damage sync"): local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON / GET_LAST_HIT_ZONE ->
   client `clientPlayerDamage` (cancellable; a lethal hit is not) -> server `playerDamage`, killer on `playerWasted`.
-  OPEN: one copy's puppet sometimes fires only part of the remote's shots (which copy varies per run; what was ruled
-  out is in NOTES); (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
+  Bullet sync (shots.cpp, re/NOTES.md "Bullet sync"): each remote shot is fired from the puppet's weapon object
+  directly, the puppet's animation shots are dropped. Not yet sent: the shooter's exact bullet origin / target; (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
   flag at playerInfo+0x104 bit 0x20000 is set while the wheel is open); (5) Tab is both the weapon wheel and the
   scoreboard's default bind.
 * Test aids: [debug] aim_hold=2 makes game copy 2 hold its aim input (-1 = every copy; aim_hold_target=1 aims at the

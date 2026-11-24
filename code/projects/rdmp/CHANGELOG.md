@@ -18,8 +18,8 @@
   server `playerDamage(player, attacker, weapon, bodyPart, loss)`; `playerWasted` now carries killer, weapon and body
   part (the last hit within 5 s). A script's `setElementHealth` is not damage. The spawner spreads joining players
   4 m apart (two players on one spot cannot shoot each other); `wasted` names the killer; devtools F4 god mode and a
-  server log of every hit. Known issue: on one PC with two copies, one copy's puppet sometimes fires only part of
-  the remote's shots. devtools:
+  server log of every hit. **Bullet sync** (MTA-style): every shot a player fires is fired from their puppet in the
+  other games, one bullet per shot (their puppet's own fire animation used to miss shots). devtools:
   `/weapon name [ammo]`, `/weapons`, `/disarm`. fw_api v15. Player entity gains weapon / ammo (netcode: MAJOR).
 * **New chat box and nametags** (drawn by the mod, hud.cpp): chat top-left with outlined text that fades when idle,
   a dark panel with a red edge and a "Say:" line while typing (Up / Down history, Esc cancels; "chatSend" still lets

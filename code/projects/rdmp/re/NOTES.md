@@ -1006,9 +1006,28 @@ components on a puppet, which other threads read playerInfo during the swap.
   delegate) calls FUN_140302090 per shot, which fills a bullet record (FUN_140320180). Puppets go through the same
   path with their own weapon object. FIRE_PROJECTILE (0x1403BECB0 -> FUN_1403ba970, weapon name string) made no
   damaging bullet from a puppet.
-* OPEN: in a two-copy test one copy's puppet often fires only part of the remote's shots (sometimes none) while the
+* FIXED by bullet sync (shots.cpp, below). Was: in a two-copy test one copy's puppet often fired only part of the remote's shots (sometimes none) while the
   other copy's fires every one; which copy varies by run. Not the puppet's clip (kept +1 for 400 ms after a press now),
   not frame rate, not local hits on the puppet, not when its player context was copied, not the fire-gate fields
   (sub410 +0x14/+0x18/+0x1c/+0x20, info +0x1c8/+0x244/+0x3bc..+0x3be identical in both), not a longer press. The
   press reaches the fire code (FUN_1403489ae: 0x140348d10) and the mode-2 path (0x140349115) runs; the drop is after.
   [debug] exec_bps=0x..,0x.. arms up to 4 execute breakpoints (logs rcx / rdx / r8 / rax / return / playerInfo).
+
+### Bullet sync (2026-11-24, shots.cpp)
+* FUN_140302090(weapon object, fire event) is one shot: owner actor handle at weapon +0x20; for a non-player actor
+  (+0x118 & 2 clear) it fires only while its aim task is in mode 2..4; the clip (+0x12c, float) must hold the event's
+  cost (+0x64) or the shot is skipped (the event index is parked, +0x140); it takes the round, returns early when
+  +0x120 bit 8 is set (bit 9 then), takes a bullet record (FUN_1403073a0), fills it (FUN_140320180: the event's
+  projectile list +0x70, count +0x78), spreads each pellet (random, the weapon's +0x310.. muzzle data) and launches
+  them (FUN_140302a50). The fire animation's dispatcher (FUN_1403019b0) calls it through the delegate at +0x8f8 with
+  an event from the clip definition (*(+0x28) +0x30[+0x30 index]: events +0x98, count +0xa0).
+* The weapon object: actor +0x70 -> +0x80 (the weapon in hand; +0x460 when none) -> vfunc +0xd8 -> +0xa0 (what
+  IS_ACTOR_SHOOTING tests, +0x120 bit 0).
+* Like MTA's bullet sync, each remote shot (the shots counter in their weapon state) is fired from their puppet by
+  calling FUN_140302090 with its weapon object and first fire event (a round put in the clip if it is empty); the
+  puppet's own animation calls are dropped by a detour, so there is exactly one bullet per shot. The bullet leaves
+  the puppet's gun, which points where the remote aims (aim sync). Two copies: 12 of 20 and 26 of 38 synced shots hit,
+  the misses mostly while the target was dead or respawning. Not checked by eye (screen locked): muzzle flash and
+  sound of synced shots. [debug] shot_probe=1 logs every shot event and synced shot.
+* Not yet MTA's full bullet sync: the origin and target of the shooter's own bullet are not sent, the puppet's aim
+  stands in for them.
