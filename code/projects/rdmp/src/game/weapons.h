@@ -27,7 +27,10 @@ void ForgetPuppetWeapon(uint32_t goh);
 void LocalWeaponState(WeaponState& out);
 // A remote's weapon state onto their puppet, every frame (main thread): the state itself (puppet_player.cpp) and the
 // puppet's clip (the remote's rounds plus the shots it still has to fire, so it fires and reloads when they do).
-void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state);
+// Bullet sync: each new shot is fired from the puppet along the remote's shot line (camera position -> crosshair).
+void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state, const Vec3& shotFrom, const Vec3& shotTo);
+// The local camera's position (where the local player's shots start).
+void LocalCamera(float& x, float& y, float& z);
 // Damage the local player took since the last call (health drop): who hit them (the attacker's actor, a goh handle; 0 =
 // none), with what (shared/weapons.h, -1 = none), where (the game's hit zone, -1 = unknown) and how much. The game's own
 // record of the hit (GET_LAST_ATTACKER and co.) is cleared after reading.

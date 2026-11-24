@@ -45,6 +45,9 @@ struct PlayerState {
     // Where the player's crosshair points: the world point their camera aims at (the game's reticle target point,
     // camera position + 200 m along its forward or the hit under the crosshair). Puppets aim their weapon at it.
     float aimX = 0, aimY = 0, aimZ = 0;
+    // Where the player's shots start: their camera's position (a player's bullet flies from the camera through the
+    // crosshair point above). The receiver fires a synced shot along camX.. -> aimX.. (MTA's bullet sync start / end).
+    float camX = 0, camY = 0, camZ = 0;
     // The weapon state, read from the player's own game every frame (game/weapons.cpp LocalWeaponState) and put on their
     // puppet as it is (game/puppet_player.cpp): what the player is doing with the weapon, not which buttons they press.
     uint8_t aimState = 0;     // *(playerInfo + 0x410) + 0x14: 0 = not aiming, 2 = aiming (GET_PLAYER_ZOOM_STATE)

@@ -9,6 +9,7 @@
 
 #include <windows.h>
 
+#include <cmath>
 #include <cstring>
 #include <unordered_map>
 
@@ -100,22 +101,60 @@ void ApplyDamageHook(uintptr_t health, float damage, uint32_t attacker, uintptr_
 bool g_dbgTarget = false;  // [debug] aim_hold_target: the local player's own shots go at this point
 float g_dbgPoint[3] = {};
 
+// For one shot: the gameplay camera (both matrices: rows right, up, back, position) looks from `from` (nullptr = where it
+// is) at `to`, and the shooter's reticle point (actor +0xb8 component +0x3800 .. +0x3820) is `to`: a player's shot
+// flies from the camera through the reticle point. Put back by Restore.
+struct ShotLine {
+    float* mats[2] = {};
+    float savedCam[2][16] = {};
+    float* reticle = nullptr;
+    float savedReticle[12] = {};
+
+    ShotLine(uintptr_t actor, const float* from, const float to[3]) {
+        const uintptr_t mgr = Ptr(GameAddr(0x142C45738));
+        const uintptr_t frame = mgr ? Ptr(mgr + 8) : 0, inst = mgr ? Ptr(mgr + 0x28) : 0;
+        mats[0] = frame && IsReadable(frame + 0x1d0, 0x40) ? reinterpret_cast<float*>(frame + 0x1d0) : nullptr;
+        mats[1] = inst && IsReadable(inst + 0x10, 0x40) ? reinterpret_cast<float*>(inst + 0x10) : nullptr;
+        for (int k = 0; k < 2; ++k) {
+            float* m = mats[k];
+            if (!m) continue;
+            std::memcpy(savedCam[k], m, sizeof(savedCam[k]));
+            const float eye[3] = {from ? from[0] : m[12], from ? from[1] : m[13], from ? from[2] : m[14]};
+            float b[3] = {eye[0] - to[0], eye[1] - to[1], eye[2] - to[2]};
+            const float bl = std::sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+            if (bl < 0.3f) continue;
+            for (float& v : b) v /= bl;
+            float r[3] = {b[2], 0.0f, -b[0]};
+            const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
+            if (rl < 1e-4f) continue;
+            r[0] /= rl, r[2] /= rl;
+            const float u[3] = {b[1] * r[2] - b[2] * r[1], b[2] * r[0] - b[0] * r[2], b[0] * r[1] - b[1] * r[0]};
+            const float* rows[4] = {r, u, b, eye};
+            for (int i = 0; i < 4; ++i) m[i * 4] = rows[i][0], m[i * 4 + 1] = rows[i][1], m[i * 4 + 2] = rows[i][2];
+        }
+        const uintptr_t comp = actor ? Ptr(actor + 0xb8) : 0;
+        if (comp && IsReadable(comp + 0x3800, 0x30)) {
+            reticle = reinterpret_cast<float*>(comp + 0x3800);
+            std::memcpy(savedReticle, reticle, sizeof(savedReticle));
+            for (int i = 0; i < 3; ++i) reticle[i * 4] = to[0], reticle[i * 4 + 1] = to[1], reticle[i * 4 + 2] = to[2];
+        }
+    }
+    ~ShotLine() {
+        for (int k = 0; k < 2; ++k)
+            if (mats[k]) std::memcpy(mats[k], savedCam[k], sizeof(savedCam[k]));
+        if (reticle) std::memcpy(reticle, savedReticle, sizeof(savedReticle));
+    }
+};
+
 void ShootHook(uintptr_t weapon, uintptr_t event) {
     const uint32_t owner = WeaponOwner(weapon);
     const uintptr_t info = Ptr(GameAddr(0x1422DAF30));
     if (g_dbgTarget && info && IsReadable(info + 0x5ec, 4) && *reinterpret_cast<uint32_t*>(info + 0x5ec) == owner) {
         // [debug] a test copy's player really shoots at the other player (its camera does not turn there): its reticle
         // point is the target for the shot
-        const uintptr_t actor = ActorOfHandle(owner), comp = actor ? Ptr(actor + 0xb8) : 0;
-        if (comp && IsReadable(comp + 0x3800, 0x30)) {
-            float saved[12];
-            float* r = reinterpret_cast<float*>(comp + 0x3800);
-            std::memcpy(saved, r, sizeof(saved));
-            for (int i = 0; i < 3; ++i) r[i * 4] = g_dbgPoint[0], r[i * 4 + 1] = g_dbgPoint[1], r[i * 4 + 2] = g_dbgPoint[2];
-            g_shootOrig(weapon, event);
-            std::memcpy(r, saved, sizeof(saved));
-            return;
-        }
+        ShotLine line(ActorOfHandle(owner), nullptr, g_dbgPoint);
+        g_shootOrig(weapon, event);
+        return;
     }
     const auto it = g_puppetByActorHandle.find(owner);
     const bool puppet = it != g_puppetByActorHandle.end();
@@ -175,7 +214,7 @@ void SetBulletSync(uint32_t goh, uint32_t actorHandle, bool on) {
     else g_puppetByActorHandle.erase(actorHandle);
 }
 
-bool FirePuppetShot(uint32_t goh) {
+bool FirePuppetShot(uint32_t goh, const Vec3& from, const Vec3& to) {
     if (!g_shootOrig) return false;
     const uintptr_t actor = ActorFromGohHandle(goh);
     const uintptr_t weapon = actor ? WeaponObject(actor) : 0;
@@ -185,8 +224,16 @@ bool FirePuppetShot(uint32_t goh) {
         return false;
     }
     if (g_probe) Log("shots: puppet 0x%08x fires a synced shot (clip %.0f)", goh, *reinterpret_cast<float*>(weapon + 0x12c));
+    // the remote's own shot line (their camera -> their crosshair point), as their game fired it (MTA's bullet sync)
+    const float f[3] = {from.x, from.y, from.z}, t[3] = {to.x, to.y, to.z};
+    const bool haveLine = (from.x != 0.0f || from.z != 0.0f) && (to.x != 0.0f || to.z != 0.0f);
     g_firing = true;
-    g_shootOrig(weapon, event);
+    if (haveLine) {
+        ShotLine line(actor, f, t);
+        g_shootOrig(weapon, event);
+    } else {
+        g_shootOrig(weapon, event);
+    }
     g_firing = false;
     return true;
 }

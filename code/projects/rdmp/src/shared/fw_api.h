@@ -28,7 +28,8 @@ namespace rdmp::fw {
 // v16: PlayerState aim point (aimX / aimY / aimZ).
 // v17: PlayerState weapon state (aimState, weaponFlags, readyTicks, shots, clip).
 // v18: Api::local_damage (damage the local player took: client event + report to the server).
-constexpr uint32_t kApiVersion = 18;
+// v19: PlayerState camera position (camX / camY / camZ): where the player's shots start (bullet sync).
+constexpr uint32_t kApiVersion = 19;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };

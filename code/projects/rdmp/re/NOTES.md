@@ -1078,3 +1078,16 @@ components on a puppet, which other threads read playerInfo during the swap.
   local player punches into the puppet's body, but only 1 punch in ~90 s reached FUN_140ae5a40 (punch damage seems to
   go another way), and the puppet stays relaxed (no fist stance, no punches) although its records get the attack and
   aim presses (465 / 2500 frames). Two pieces left: the player's fist mode for a puppet, and the punch damage path.
+
+### Duel test and bullet start points (2026-11-24)
+* resources/spawner DUEL_DISTANCE > 0 (testing): the first two players spawn facing each other along the platform
+  (6 m, the second 1.5 m to the side so each camera sees the other). Real crosshairs, no faked aim: the debug
+  aim_hold_target fakes the sent aim point and must stay off for sync tests (it made one game count hits the other
+  never saw).
+* A player's bullet starts at their camera, over the shoulder, not at their gun. Replaying a remote's shot from the
+  puppet's gun toward their crosshair point hit players the shooter missed (the camera ray passed beside them, the
+  gun ray went through). Now (fw_api v19) every state carries the camera position (camX..) and a synced shot is fired
+  with the camera swapped to that position, looking at the crosshair point, and the puppet's reticle point set to it
+  (shots.cpp ShotLine): MTA's bullet sync start / end. Duel, real aim: the shooter's hits on the puppet at 24.5, 30.6,
+  32.1, 38.1 s matched the victim's damage at 24.6, 30.6, 32.2, 38.2 s; about half of the shooter's other hits were
+  not hits in the victim's game (both bodies stagger on their own after a hit, so they stand apart for a moment).

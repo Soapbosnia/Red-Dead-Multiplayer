@@ -142,5 +142,6 @@ and the testing has been too artificial to trust. Fix the testing first, then it
   puppet: its results have to be synced instead, like the aim point already is. For melee that result is the lock-on
   target. Where it is stored was not found: the automated test copy never really locks on (its camera is not on the
   target), so this needs a session with real input.
-* Bullet start / end points (item 4): lower priority than written: the aim point travels in the same packet as the
-  shot counter, so a synced shot already goes at the shooter's crosshair point of that moment.
+* Bullet start / end points (item 4): done after all, it mattered: a player's bullet starts at the camera, and a
+  replay from the puppet's gun hit players the shooter missed. Synced shots now fly the shooter's camera -> crosshair
+  line; in the duel test the shooter's hits and the victim's damage line up (about 70 ms apart).

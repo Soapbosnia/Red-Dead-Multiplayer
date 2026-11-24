@@ -558,7 +558,15 @@ void LocalWeaponState(WeaponState& out) {
     out.clip = static_cast<uint8_t>(clip < 0 ? 0 : clip > 255 ? 255 : clip);
 }
 
-void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state) {
+void LocalCamera(float& x, float& y, float& z) {
+    const uintptr_t mgr = *reinterpret_cast<uintptr_t*>(GameAddr(0x142C45738));
+    const uintptr_t frame = mgr && IsReadable(mgr + 8, 8) ? *reinterpret_cast<uintptr_t*>(mgr + 8) : 0;
+    if (!frame || !IsReadable(frame + 0x200, 12)) return;
+    const float* p = reinterpret_cast<const float*>(frame + 0x200);
+    x = p[0], y = p[1], z = p[2];
+}
+
+void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state, const Vec3& shotFrom, const Vec3& shotTo) {
     SetPlayerWeaponState(goh, state);
     if (!HasPlayerControl(goh) || !weapons::IsGun(weapon) || InHand(goh) != weapon) return;
     // Bullet sync: one bullet from the puppet per shot the remote's game fired (shots.cpp), with a round in the clip
@@ -570,7 +578,7 @@ void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state) {
         ++pw.shots;
         const uintptr_t wobj = WeaponObject(ActorFromGohHandle(goh));
         if (wobj && *reinterpret_cast<float*>(wobj + 0x12c) < 1.0f) *reinterpret_cast<float*>(wobj + 0x12c) = 1.0f;
-        FirePuppetShot(goh);
+        FirePuppetShot(goh, shotFrom, shotTo);
     }
     const int want = state.clip + PendingPuppetShots(goh);
     NativeCall a;

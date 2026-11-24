@@ -176,6 +176,7 @@ namespace {
                     me->weapon       = g_local.weapon;
                     me->ammo         = g_local.ammo;
                     me->aimX = g_local.aimX, me->aimY = g_local.aimY, me->aimZ = g_local.aimZ;
+                    me->camX = g_local.camX, me->camY = g_local.camY, me->camZ = g_local.camZ;
                     me->dmgSeq = g_hit.seq, me->dmgAttacker = g_hit.attacker, me->dmgWeapon = g_hit.weapon;
                     me->dmgBodyPart = g_hit.bodyPart, me->dmgLoss = g_hit.loss;
                     me->aimState = g_local.aimState, me->weaponFlags = g_local.weaponFlags, me->readyTicks = g_local.readyTicks;
@@ -266,6 +267,7 @@ namespace {
             remote.s.weapon  = player->weapon;
             remote.s.ammo    = player->ammo;
             remote.s.aimX = player->aimX, remote.s.aimY = player->aimY, remote.s.aimZ = player->aimZ;
+            remote.s.camX = player->camX, remote.s.camY = player->camY, remote.s.camZ = player->camZ;
             remote.s.aimState = player->aimState, remote.s.weaponFlags = player->weaponFlags, remote.s.readyTicks = player->readyTicks;
             remote.s.shots = player->shots, remote.s.clip = player->clip;
         });

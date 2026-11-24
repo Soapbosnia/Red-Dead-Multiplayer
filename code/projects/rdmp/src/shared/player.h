@@ -60,6 +60,8 @@ namespace RDMP::Shared {
         uint8_t controls[kControls] = {};
         // The world point the player's crosshair is on (shared/types.h PlayerState::aimX): remote puppets aim at it.
         float aimX = 0.0f, aimY = 0.0f, aimZ = 0.0f;
+        // Their camera's position: where their shots start (shared/types.h PlayerState::camX).
+        float camX = 0.0f, camY = 0.0f, camZ = 0.0f;
         // The weapon state as the owner's game has it (shared/types.h PlayerState::aimState): sent with every transform so
         // aiming, firing and reloading reach the puppet with the position's delay, no later.
         uint8_t aimState = 0, weaponFlags = 0, readyTicks = 0, shots = 0, clip = 0;
@@ -137,6 +139,9 @@ namespace RDMP::Shared {
             fields.FloatBits(aimX, kWorldMin, kWorldMax, kPosBits);
             fields.FloatBits(aimY, kWorldMin, kWorldMax, kPosBits);
             fields.FloatBits(aimZ, kWorldMin, kWorldMax, kPosBits);
+            fields.FloatBits(camX, kWorldMin, kWorldMax, kPosBits);
+            fields.FloatBits(camY, kWorldMin, kWorldMax, kPosBits);
+            fields.FloatBits(camZ, kWorldMin, kWorldMax, kPosBits);
             fields.BitsRange<uint8_t>(aimState, 0, 7);
             fields.BitsRange<uint8_t>(weaponFlags, 0, 3);
             fields.BitsRange<uint8_t>(readyTicks, 0, 255);

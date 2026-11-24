@@ -305,6 +305,7 @@ void NetFrame(float /*gameTime*/) {
         int weapon;        // the weapon in their hand (newest state), -1 = none
         Vec3 aim;          // the world point their crosshair is on (interpolated like the position)
         WeaponState weaponState;  // their weapon state (newest)
+        Vec3 shotFrom, shotTo;    // their shot line (newest): camera position -> crosshair point
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -327,6 +328,7 @@ void NetFrame(float /*gameTime*/) {
         g_local.vehicle = LocalVehicle();
         LocalWeapon(g_local.weapon, g_local.ammo);
         LocalAim(g_local.aimX, g_local.aimY, g_local.aimZ);
+        LocalCamera(g_local.camX, g_local.camY, g_local.camZ);
         {
             WeaponState ws;
             LocalWeaponState(ws);
@@ -424,6 +426,8 @@ void NetFrame(float /*gameTime*/) {
                 if (!r.samples.empty()) {
                     const PlayerState& n = r.samples.back().s;
                     v.weaponState = WeaponState{n.aimState, n.weaponFlags, n.readyTicks, n.shots, n.clip};
+                    v.shotFrom = Vec3{n.camX, n.camY, n.camZ};
+                    v.shotTo = Vec3{n.aimX, n.aimY, n.aimZ};
                 }
                 ++nViews;
             }
@@ -516,7 +520,7 @@ void NetFrame(float /*gameTime*/) {
         }
         p.hidden = false;
         SyncPuppetWeapon(p.goh, v.weapon);
-        SyncPuppetWeaponState(p.goh, v.weapon, v.weaponState);
+        SyncPuppetWeaponState(p.goh, v.weapon, v.weaponState, v.shotFrom, v.shotTo);
         SyncPuppetAim(p.goh, v.aim, v.pos, v.heading, v.weaponState.aimState != 0);
         // On a horse: the horse carries the puppet (no player control, no corrections of its own).
         if (const uint32_t horse = v.vehicle ? VehicleGoh(v.vehicle) : 0) {
