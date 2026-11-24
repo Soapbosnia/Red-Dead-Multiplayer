@@ -1031,3 +1031,19 @@ components on a puppet, which other threads read playerInfo during the swap.
   sound of synced shots. [debug] shot_probe=1 logs every shot event and synced shot.
 * Not yet MTA's full bullet sync: the origin and target of the shooter's own bullet are not sent, the puppet's aim
   stands in for them.
+
+### Melee (2026-11-24, open)
+* A puppet never raises its fists or punches: its records do get the remote's fire / aim presses (diag line "fire
+  frames / aim frames", 300 / 1700 a minute in a fist test) and its aim mode is 0x48, but the player code starts no
+  melee. Fixed on the way: fire / reload came from the shot counter for any remote with a weapon state (fists and
+  knife have no shots, so no punch ever reached the puppet): now only with a firearm (weapons::IsGun); and a press is
+  reported for at least 120 ms (the state goes out at the network rate, a tap between two sends was lost).
+* Fist stance is not the gun aim state (the remote reports aim state 0 while in it). Not it either: FUN_140ac8df0 in
+  the local-player part of the game loop (copies the player position into *0x142ad1cc0 + 0x1be0). Not yet run for
+  puppets there: FUN_140392f00(actor +0xb8 component, aim state == 2 || aim task +0x80 -> +0x555 & 1).
+* The game has its own multiplayer melee: strings NetMelee::RemoteDamageEvent / RemoteKnockoutEvent, MPMeleeDamage,
+  PlayerMeleeTargeting, FindMeleeTarget*Weight (camera angle, faction, distance), eCameraMeleeTargeting.
+* [debug] aim_hold_period_ms=N holds the test aim only the first half of every N ms (to snapshot in / out of a
+  stance in one process).
+* Hit reactions: a remote player's puppet is invulnerable here, so it shows no hit reaction to our hits; the victim's
+  own game plays it on their side only. Open.

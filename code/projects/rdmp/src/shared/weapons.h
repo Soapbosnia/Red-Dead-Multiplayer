@@ -24,6 +24,12 @@ inline bool Valid(int id) {
     return id >= 0 && id < kCount;
 }
 
+// A firearm (shoots rounds from a clip): pistols to sniper rifles, the turrets, the bow and the anti-tank rifle. Not the
+// lasso, the knife or the thrown weapons.
+inline bool IsGun(int id) {
+    return (id >= 0 && id <= 20) || id == 26 || id == 27 || id == 28 || id == 30 || id == 31;
+}
+
 inline const char* Name(int id) {
     return Valid(id) ? kNames[id] : "";
 }

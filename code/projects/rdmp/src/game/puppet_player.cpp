@@ -81,6 +81,8 @@ struct Context {
     bool armed = false;                    // the remote has a weapon in hand (synced)
     WeaponState weapon;                    // the remote's weapon state (newest)
     bool haveWeapon = false;
+    bool gun = false;
+    uint32_t fireFrames = 0, aimFrames = 0;  // [debug] frames the puppet's records had fire / aim pressed  // the remote holds a firearm: fire / reload come from their shots / reloads, not their buttons
     uint8_t shotsDone = 0;                 // remote shots the puppet has fired
     int firePhase = 0;                     // frames left of the current fire press (+) / release (-)
     ULONGLONG lastFireMs = 0;              // when the puppet last pressed fire
@@ -154,8 +156,11 @@ void FillRecords(Context& c, ULONGLONG now) {
         uint8_t v = c.controls.valid ? c.controls.value[id] : static_cast<uint8_t>(analog ? 0x7f : 0);
         // Fire and reload come from the remote's weapon state (shots fired, reloading), not their buttons: a one-frame
         // press can fall between two network updates, a shot count cannot.
-        if (c.haveWeapon && (id == 0x09 || id == 0x0d)) v = c.firePhase > 0 ? 0xff : 0;
-        if (c.haveWeapon && (id == 0x0a || id == 0x0e || id == 0x17)) v = c.reloadFrames > 0 ? 0xff : 0;
+        // (With fists, a knife or a thrown weapon there are no shots: their buttons are the punches, stabs and throws.)
+        if (c.haveWeapon && c.gun && (id == 0x09 || id == 0x0d)) v = c.firePhase > 0 ? 0xff : 0;
+        if (c.haveWeapon && c.gun && (id == 0x0a || id == 0x0e || id == 0x17)) v = c.reloadFrames > 0 ? 0xff : 0;
+        if (id == 0x09 && v) ++c.fireFrames;
+        if (id == 0x19 && v) ++c.aimFrames;
         r[0] = 0;  // no invert: the value already is the effective one
         r[3] = r[2];
         r[2] = v;
@@ -444,6 +449,11 @@ int PendingPuppetShots(uint32_t goh) {
     return static_cast<uint8_t>(c.weapon.shots - c.shotsDone) + (inFlight ? 1 : 0);
 }
 
+void SetPlayerGun(uint32_t goh, bool gun) {
+    const auto it = g_byGoh.find(goh);
+    if (it != g_byGoh.end()) it->second->gun = gun;
+}
+
 void SetPlayerArmed(uint32_t goh, bool armed) {
     const auto it = g_byGoh.find(goh);
     if (it != g_byGoh.end()) it->second->armed = armed;
@@ -512,7 +522,7 @@ void PuppetPlayerFrame() {
         std::memcpy(c->camEye, eye, sizeof(eye));
         std::memcpy(c->camFwd, fwd, sizeof(fwd));
         const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
-        if (c->haveWeapon) {
+        if (c->haveWeapon && c->gun) {  // (fists, knife, thrown: their own state machine runs from the buttons)
             // The remote's aim state (GET_PLAYER_ZOOM_STATE) and weapon-ready time, as their game has them: the puppet's
             // own weapon state machine (FUN_14034cae0, below) enters and leaves aim mode from the aim state, keeps the
             // weapon ready and holsters it when the countdown runs out, exactly as for the local player.
@@ -572,10 +582,10 @@ void PuppetPlayerFrame() {
         for (auto& [goh, c] : g_byGoh) {
             const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
             Log("puppet player: goh 0x%08x remote weapon state aim %u flags %u ready %u shots %u (fired %u) clip %u | armed %d, "
-                "aim point (%.1f, %.1f, %.1f), camera forward (%.2f, %.2f, %.2f), aim mode %02x, ready %.2f",
+                "aim point (%.1f, %.1f, %.1f), camera forward (%.2f, %.2f, %.2f), aim mode %02x, ready %.2f, gun %d, fire frames %u, aim frames %u",
                 goh, c->weapon.aimState, c->weapon.flags, c->weapon.readyTicks, c->weapon.shots, c->shotsDone, c->weapon.clip,
                 c->armed ? 1 : 0, c->aim[0], c->aim[1], c->aim[2], At<float>(pi, 0x30), At<float>(pi, 0x34), At<float>(pi, 0x38),
-                At<uint8_t>(pi, 0x3bc), At<float>(pi, 0x3e0));
+                At<uint8_t>(pi, 0x3bc), At<float>(pi, 0x3e0), c->gun ? 1 : 0, c->fireFrames, c->aimFrames);
         }
     }
 }

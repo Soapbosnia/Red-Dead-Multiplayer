@@ -37,6 +37,7 @@ bool g_aimHoldPoint = false;  // [debug] aim_hold_point=1: send a test point ins
 bool g_pitchProbe = false;
 int g_autoWeapon = -1;  // [debug] auto_weapon
 int g_aimHoldFireMs = 0;  // [debug] aim_hold_fire_ms
+int g_aimHoldPeriodMs = 0;  // [debug] aim_hold_period_ms
 bool g_aimHoldTarget = false;  // [debug] aim_hold_target=1: aim at the first remote player
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
 uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
@@ -208,6 +209,7 @@ void InitWeapons(const wchar_t* iniPath) {
     g_fireProbe = GetPrivateProfileIntW(L"debug", L"fire_probe", 0, iniPath);
     g_autoWeapon = static_cast<int>(GetPrivateProfileIntW(L"debug", L"auto_weapon", static_cast<UINT>(-1), iniPath));
     g_aimHoldFireMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_fire_ms", 0, iniPath));
+    g_aimHoldPeriodMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_period_ms", 0, iniPath));
     g_aimHoldTarget = GetPrivateProfileIntW(L"debug", L"aim_hold_target", 0, iniPath) != 0;
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
     wchar_t hex[32] = {};
@@ -378,6 +380,7 @@ void PutLocalWeaponInHand(int weapon) {
 void SyncPuppetWeapon(uint32_t goh, int weapon) {
     if (!goh) return;
     SetPlayerArmed(goh, weapons::Valid(weapon));
+    SetPlayerGun(goh, weapons::IsGun(weapon));
     PuppetWeapon& p = g_puppets[goh];
     if (!p.setUp) {
         p.setUp = true;
@@ -449,7 +452,10 @@ void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
     y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
 }
 bool AimHoldAtRemote() { return g_aimHoldTarget; }
-bool AimHoldDebug() { return g_aimHold != 0 && (g_aimHold == InstanceId() || g_aimHold < 0); }  // -1 = every copy
+bool AimHoldDebug() {  // -1 = every copy; aim_hold_period_ms: held the first half of each period only
+    if (g_aimHold == 0 || (g_aimHold != InstanceId() && g_aimHold > 0)) return false;
+    return g_aimHoldPeriodMs <= 0 || GetTickCount64() % static_cast<ULONGLONG>(g_aimHoldPeriodMs) < static_cast<ULONGLONG>(g_aimHoldPeriodMs / 2);
+}
 
 namespace {
 float g_expectHealth = -1.0f;  // a health a script set (ExpectLocalHealth): reaching it is no hit
@@ -532,7 +538,7 @@ void LocalWeaponState(WeaponState& out) {
 
 void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state) {
     SetPlayerWeaponState(goh, state);
-    if (!HasPlayerControl(goh) || !weapons::Valid(weapon) || InHand(goh) != weapon) return;
+    if (!HasPlayerControl(goh) || !weapons::IsGun(weapon) || InHand(goh) != weapon) return;
     // Bullet sync: one bullet from the puppet per shot the remote's game fired (shots.cpp), with a round in the clip
     // for it.
     PuppetWeapon& pw = g_puppets[goh];

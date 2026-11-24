@@ -57,6 +57,8 @@ void SetPlayerArmed(uint32_t goh, bool armed);
 // The remote's weapon state, put on the puppet each frame: aim state and weapon-ready time into its player-info, one
 // fire press per new shot, a reload press when they start reloading.
 void SetPlayerWeaponState(uint32_t goh, const WeaponState& state);
+// Whether that weapon is a firearm (fire / reload presses then come from the remote's shots / reloads).
+void SetPlayerGun(uint32_t goh, bool gun);
 // Shots the puppet still has to fire (its clip must hold that many on top of the remote's).
 int PendingPuppetShots(uint32_t goh);
 // [debug] the local player's aim input held (a test copy aims without a mouse button).

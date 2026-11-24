@@ -315,7 +315,23 @@ void NetFrame(float /*gameTime*/) {
             g_local.aimState = ws.aimState, g_local.weaponFlags = ws.flags, g_local.readyTicks = ws.readyTicks;
             g_local.shots = ws.shots, g_local.clip = ws.clip;
         }
-        if (CaptureLocalControls(controls)) std::memcpy(g_local.controls, controls.value, sizeof(g_local.controls));
+        if (CaptureLocalControls(controls)) {
+            // A button press is reported for at least kMinPressMs: the state goes out at the network rate, and a tap
+            // (a punch, a jump) between two sends would never reach the others (MTA sends keys on change for this).
+            constexpr double kMinPressMs = 120.0;
+            static double pressedAt[kInputCount] = {};
+            static uint8_t held[kInputCount] = {};
+            for (int id = 0; id < kInputCount; ++id) {
+                const bool analog = id == 0x11 || id == 0x12;  // the stick: as it is
+                if (analog || controls.value[id]) {
+                    held[id] = controls.value[id];
+                    pressedAt[id] = nowMs;
+                } else if (nowMs - pressedAt[id] >= kMinPressMs) {
+                    held[id] = 0;
+                }
+                g_local.controls[id] = held[id];
+            }
+        }
         if (AimHoldDebug()) {  // [debug] aim_hold: others see this copy aim at a test point 20 m away (weapons.h)
             g_local.controls[0x19] = 0xff;
             AimHoldPoint(pos, static_cast<double>(nowMs), g_local.aimX, g_local.aimY, g_local.aimZ);
