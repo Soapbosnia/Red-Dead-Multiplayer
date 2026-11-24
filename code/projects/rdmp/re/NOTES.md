@@ -1045,5 +1045,16 @@ components on a puppet, which other threads read playerInfo during the swap.
   PlayerMeleeTargeting, FindMeleeTarget*Weight (camera angle, faction, distance), eCameraMeleeTargeting.
 * [debug] aim_hold_period_ms=N holds the test aim only the first half of every N ms (to snapshot in / out of a
   stance in one process).
-* Hit reactions: a remote player's puppet is invulnerable here, so it shows no hit reaction to our hits; the victim's
-  own game plays it on their side only. Open.
+* Puppets with fists now take the melee lock-on path (the remote's aim button, camera swap, reticle / aim steps), not
+  verified: in the automatic test the copies' real cameras never face each other, so no melee target is locked and no
+  punch connects at all (0 hits either way at 1 m); needs a test with real mouse input.
+
+### Hit reactions (2026-11-24, shots.cpp ApplyDamageHook)
+* Damage: the hit handler (chunk 0x140ae7640) skips FUN_140ae5a40 for an invulnerable victim (health component +0x150
+  bit 0x100: only the hit is recorded) and otherwise calls FUN_140ae5a40(health component, damage, attacker, ...),
+  which applies it and plays the reaction. Puppets are no longer invulnerable; a detour lets our hit run (damage
+  clamped below lethal) and puts the health back, so the puppet shows the game's own hit reaction (seen: clutching the
+  wound) and never dies here. The player's faction treats each puppet as hostile
+  (SET_FACTION_STATUS_TO_INDIVIDUAL_ACTOR(2, puppet, [debug] puppet_faction_status, default 0)).
+* [debug] aim_hold_target also steers the test copy's own shots at the other player (its reticle point, comp +0x3800
+  .. +0x3820, for the shot): its camera does not turn there, so without it no local shot ever hits a puppet.

@@ -28,6 +28,7 @@
 #include "puppet_player.h"
 #include "remote_timeline.h"
 #include "vehicles.h"
+#include "shots.h"
 #include "weapons.h"
 #include "gameflow.h"
 #include "events.h"
@@ -340,6 +341,7 @@ void NetFrame(float /*gameTime*/) {
                     if (rr.samples.empty()) continue;
                     const PlayerState& o = rr.samples.back().s;
                     g_local.aimX = o.x, g_local.aimY = o.y + 1.1f, g_local.aimZ = o.z;
+                    SetDebugShotTarget(true, g_local.aimX, g_local.aimY, g_local.aimZ);
                     break;
                 }
             }

@@ -9,6 +9,7 @@
 
 #include <windows.h>
 
+#include <cstring>
 #include <unordered_map>
 
 #include "log.h"
@@ -37,8 +38,66 @@ uint32_t WeaponOwner(uintptr_t weapon) { return IsReadable(weapon + 0x20, 4) ? *
 
 std::unordered_map<uint32_t, uint32_t> g_puppetByActorHandle;  // actor handle -> goh, puppets with bullet sync
 
+// FUN_140ae5a40(health component, damage, attacker, ...): applies a hit's damage to an actor that is not invulnerable
+// (the caller, 0x140ae798a, skips it for health component +0x150 bit 0x100) and plays its hit reaction. A puppet takes
+// our hits through it, so it reacts the way the game reacts to a hit, but it keeps its health: what really happens to
+// the remote player is decided in their own game (and comes back through sync).
+constexpr uintptr_t kApplyDamage = 0x140AE5A40;
+// mov [rsp+20h],rbx; mov [rsp+18h],r8d; push rbp; push rsi; push rdi; push r12  (15 bytes, position independent)
+constexpr uint8_t kApplyDamagePrologue[15] = {0x48, 0x89, 0x5C, 0x24, 0x20, 0x44, 0x89, 0x44, 0x24, 0x18, 0x55, 0x56, 0x57, 0x41, 0x54};
+using ApplyDamageFn = void (*)(uintptr_t health, float damage, uint32_t attacker, uintptr_t a4, uint32_t a5, void* a6, uint8_t a7,
+                               uint32_t a8, void* hit);
+ApplyDamageFn g_applyDamageOrig = nullptr;
+
+bool IsPuppetHealth(uintptr_t health) {
+    for (const auto& [handle, goh] : g_puppetByActorHandle) {
+        const uintptr_t actor = ActorFromGohHandle(goh);
+        if (actor && Ptr(actor + 0x60) == health) return true;
+    }
+    return false;
+}
+
+void ApplyDamageHook(uintptr_t health, float damage, uint32_t attacker, uintptr_t a4, uint32_t a5, void* a6, uint8_t a7, uint32_t a8,
+                     void* hit) {
+    if (!IsPuppetHealth(health) || !IsReadable(health + 0x20, 4)) {
+        g_applyDamageOrig(health, damage, attacker, a4, a5, a6, a7, a8, hit);
+        return;
+    }
+    float& hp = *reinterpret_cast<float*>(health + 0x20);
+    const float before = hp;
+    if (damage > before - 1.0f) damage = before > 1.0f ? before - 1.0f : 0.0f;  // never a lethal hit here
+    if (g_probe) Log("shots: our hit on a puppet: %.1f damage (health %.1f), reaction only", damage, before);
+    g_applyDamageOrig(health, damage, attacker, a4, a5, a6, a7, a8, hit);
+    hp = before;
+}
+
+bool g_dbgTarget = false;  // [debug] aim_hold_target: the local player's own shots go at this point
+float g_dbgPoint[3] = {};
+
+uintptr_t ActorOfHandle(uint32_t handle) {  // actor handle -> actor (*0x142C457F8 entries: object, generation)
+    const uintptr_t table = Ptr(GameAddr(0x142C457F8));
+    const uintptr_t e = table ? table + static_cast<uintptr_t>(handle & 0xffff) * 16 : 0;
+    if (!e || !IsReadable(e, 16) || *reinterpret_cast<uint16_t*>(e + 8) != static_cast<uint16_t>(handle >> 16)) return 0;
+    return Ptr(e);
+}
+
 void ShootHook(uintptr_t weapon, uintptr_t event) {
     const uint32_t owner = WeaponOwner(weapon);
+    const uintptr_t info = Ptr(GameAddr(0x1422DAF30));
+    if (g_dbgTarget && info && IsReadable(info + 0x5ec, 4) && *reinterpret_cast<uint32_t*>(info + 0x5ec) == owner) {
+        // [debug] a test copy's player really shoots at the other player (its camera does not turn there): its reticle
+        // point is the target for the shot
+        const uintptr_t actor = ActorOfHandle(owner), comp = actor ? Ptr(actor + 0xb8) : 0;
+        if (comp && IsReadable(comp + 0x3800, 0x30)) {
+            float saved[12];
+            float* r = reinterpret_cast<float*>(comp + 0x3800);
+            std::memcpy(saved, r, sizeof(saved));
+            for (int i = 0; i < 3; ++i) r[i * 4] = g_dbgPoint[0], r[i * 4 + 1] = g_dbgPoint[1], r[i * 4 + 2] = g_dbgPoint[2];
+            g_shootOrig(weapon, event);
+            std::memcpy(r, saved, sizeof(saved));
+            return;
+        }
+    }
     const auto it = g_puppetByActorHandle.find(owner);
     const bool puppet = it != g_puppetByActorHandle.end();
     if (g_probe) {
@@ -57,6 +116,9 @@ void InstallShotHooks(bool probe) {
     g_shootOrig = reinterpret_cast<ShootFn>(
         DetourPic(GameAddr(kShootEvent), kShootPrologue, sizeof(kShootPrologue), reinterpret_cast<void*>(&ShootHook)));
     Log("shots: shot hook %s", g_shootOrig ? "installed" : "FAILED (prologue differs)");
+    g_applyDamageOrig = reinterpret_cast<ApplyDamageFn>(DetourPic(GameAddr(kApplyDamage), kApplyDamagePrologue, sizeof(kApplyDamagePrologue),
+                                                                  reinterpret_cast<void*>(&ApplyDamageHook)));
+    Log("shots: damage hook %s", g_applyDamageOrig ? "installed" : "FAILED (prologue differs)");
 }
 
 uintptr_t WeaponObject(uintptr_t actor) {
@@ -80,6 +142,11 @@ uintptr_t FireEvent(uintptr_t weapon) {
     if (!def) def = Ptr(defs + 0x30);
     if (!def || !IsReadable(def + 0x98, 0x10) || *reinterpret_cast<int*>(def + 0xa0) <= 0) return 0;
     return Ptr(Ptr(def + 0x98));
+}
+
+void SetDebugShotTarget(bool on, float x, float y, float z) {
+    g_dbgTarget = on;
+    g_dbgPoint[0] = x, g_dbgPoint[1] = y, g_dbgPoint[2] = z;
 }
 
 void SetBulletSync(uint32_t goh, uint32_t actorHandle, bool on) {

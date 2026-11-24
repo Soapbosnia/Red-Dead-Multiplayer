@@ -38,6 +38,7 @@ bool g_pitchProbe = false;
 int g_autoWeapon = -1;  // [debug] auto_weapon
 int g_aimHoldFireMs = 0;  // [debug] aim_hold_fire_ms
 int g_aimHoldPeriodMs = 0;  // [debug] aim_hold_period_ms
+int g_puppetFactionStatus = 0;  // [debug] puppet_faction_status: the player faction's status toward a puppet
 bool g_aimHoldTarget = false;  // [debug] aim_hold_target=1: aim at the first remote player
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
 uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
@@ -210,6 +211,7 @@ void InitWeapons(const wchar_t* iniPath) {
     g_autoWeapon = static_cast<int>(GetPrivateProfileIntW(L"debug", L"auto_weapon", static_cast<UINT>(-1), iniPath));
     g_aimHoldFireMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_fire_ms", 0, iniPath));
     g_aimHoldPeriodMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_period_ms", 0, iniPath));
+    g_puppetFactionStatus = static_cast<int>(GetPrivateProfileIntW(L"debug", L"puppet_faction_status", 0, iniPath));
     g_aimHoldTarget = GetPrivateProfileIntW(L"debug", L"aim_hold_target", 0, iniPath) != 0;
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
     wchar_t hex[32] = {};
@@ -384,11 +386,16 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
     PuppetWeapon& p = g_puppets[goh];
     if (!p.setUp) {
         p.setUp = true;
-        // Invulnerable: our shots must not hurt a remote player here, their own game decides their damage (as in MTA).
-        // It does not stop the puppet's own bullets from hurting us.
+        // Not invulnerable, so our hits play the game's hit reaction on it; the damage hook (shots.cpp) keeps its health:
+        // the remote player's own game decides their damage (as in MTA).
         NativeCall inv;
-        inv.Uint(goh).Bool(true);
+        inv.Uint(goh).Bool(false);
         inv.Call(NativeHash("SET_ACTOR_INVULNERABILITY"));
+        // The player's faction (2) treats this actor as hostile: a remote player is the puppet's faction too, and the
+        // game drops a player's hits on its own faction (no damage call, no reaction).
+        NativeCall fs;
+        fs.Int(2).Uint(goh).Int(g_puppetFactionStatus);
+        fs.Call(NativeHash("SET_FACTION_STATUS_TO_INDIVIDUAL_ACTOR"));
         SetBulletSync(goh, ActorHandleFromGohHandle(goh), true);
     }
     const ULONGLONG now = GetTickCount64();

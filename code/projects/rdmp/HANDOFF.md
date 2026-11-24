@@ -158,7 +158,8 @@ Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop th
   client `clientPlayerDamage` (cancellable; a lethal hit is not) -> server `playerDamage`, killer on `playerWasted`.
   Bullet sync (shots.cpp, re/NOTES.md "Bullet sync"): each remote shot is fired from the puppet's weapon object
   directly, the puppet's animation shots are dropped. Not yet sent: the shooter's exact bullet origin / target.
-  OPEN: melee (puppets never punch, re/NOTES.md "Melee"), hit reactions on puppets; Framework 44.1.2 is out but its
+  Hit reactions on puppets: done (re/NOTES.md "Hit reactions"). OPEN: melee (re/NOTES.md "Melee": needs a real-input
+  test); Framework 44.1.2 is out but its
   SDK needs MSVC 19.52 (this PC has 19.51: update the VS Build Tools, then raise cmake/FrameworkPin.cmake); (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
   flag at playerInfo+0x104 bit 0x20000 is set while the wheel is open); (5) Tab is both the weapon wheel and the
   scoreboard's default bind.

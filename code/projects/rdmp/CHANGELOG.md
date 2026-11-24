@@ -21,7 +21,9 @@
   server log of every hit. **Bullet sync** (MTA-style): every shot a player fires is fired from their puppet in the
   other games, one bullet per shot (their puppet's own fire animation used to miss shots). Button taps (jump,
   punch) reach the others: a press is reported for at least 120 ms. With fists, a knife or a thrown weapon the
-  puppet gets the remote's attack button (it only got gun shots before); melee itself is not synced yet. devtools:
+  puppet gets the remote's attack button (it only got gun shots before); melee itself is not synced yet. **Hit
+  reactions:** your hits on another player now play the game's hit reaction on them (they no longer stand still);
+  their health stays as their own game decides. devtools:
   `/weapon name [ammo]`, `/weapons`, `/disarm`. fw_api v15. Player entity gains weapon / ammo (netcode: MAJOR).
 * **New chat box and nametags** (drawn by the mod, hud.cpp): chat top-left with outlined text that fades when idle,
   a dark panel with a red edge and a "Say:" line while typing (Up / Down history, Esc cancels; "chatSend" still lets

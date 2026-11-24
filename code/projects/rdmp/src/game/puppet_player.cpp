@@ -512,7 +512,10 @@ void PuppetPlayerFrame() {
         // MTA's context switch includes the remote's camera: while the remote aims, the puppet's update runs with the
         // gameplay camera looking from the remote's eye to their aim point, so the game's own player code builds the aim
         // from their view (aim matrices, reticle). Aiming = the remote's aim state, not their aim button.
-        bool aiming = (c->haveWeapon ? c->weapon.aimState != 0 : c->controls.valid && c->controls.value[0x19] > 0x7f) && c->haveAim && c->armed;
+        // With fists (or a knife) aiming is the melee lock-on: their aim button, no weapon needed.
+        const bool gunAim = c->haveWeapon && c->gun;
+        bool aiming = (gunAim ? c->weapon.aimState != 0 : c->controls.valid && c->controls.value[0x19] > 0x7f) && c->haveAim &&
+                      (c->armed || !c->gun);
         const float eye[3] = {c->aimFrom[0], c->aimFrom[1] + 1.6f, c->aimFrom[2]};
         float fwd[3] = {c->aimTarget[0] - eye[0], c->aimTarget[1] - eye[1], c->aimTarget[2] - eye[2]};
         const float fl = std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
