@@ -168,6 +168,8 @@ namespace {
                     me->weapon       = g_local.weapon;
                     me->ammo         = g_local.ammo;
                     me->aimX = g_local.aimX, me->aimY = g_local.aimY, me->aimZ = g_local.aimZ;
+                    me->aimState = g_local.aimState, me->weaponFlags = g_local.weaponFlags, me->readyTicks = g_local.readyTicks;
+                    me->shots = g_local.shots, me->clip = g_local.clip;
                 }
             }
 
@@ -242,6 +244,8 @@ namespace {
             remote.s.weapon  = player->weapon;
             remote.s.ammo    = player->ammo;
             remote.s.aimX = player->aimX, remote.s.aimY = player->aimY, remote.s.aimZ = player->aimZ;
+            remote.s.aimState = player->aimState, remote.s.weaponFlags = player->weaponFlags, remote.s.readyTicks = player->readyTicks;
+            remote.s.shots = player->shots, remote.s.clip = player->clip;
         });
         return n;
     }

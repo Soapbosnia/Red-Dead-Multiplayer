@@ -71,6 +71,12 @@ struct Context {
     float aimTarget[3] = {}, aim[3] = {};  // the remote's aim point / the eased one written into the puppet
     float aimFrom[3] = {};                 // where the remote stands
     bool armed = false;                    // the remote has a weapon in hand (synced)
+    WeaponState weapon;                    // the remote's weapon state (newest)
+    bool haveWeapon = false;
+    uint8_t shotsDone = 0;                 // remote shots the puppet has fired
+    int firePhase = 0;                     // frames left of the current fire press (+) / release (-)
+    int reloadFrames = 0;                  // frames left of a reload press
+    bool wasReloading = false;
     bool camAiming = false;                // this frame: the remote aims; their camera = camEye -> camFwd
     float camEye[3] = {}, camFwd[3] = {};
     bool haveAim = false;
@@ -88,6 +94,10 @@ PlayerControlFn g_playerControlOrig = nullptr;
 std::atomic<int> g_switched{0};
 constexpr uintptr_t kCameraManager = 0x142C45738;  // *(+8) = the gameplay camera: +0x1d0 right, +0x1e0 up, +0x1f0 back, +0x200 position
 constexpr uintptr_t kReticleUpdate = 0x140348600;  // FUN_140348600(info): the reticle target point from the camera, and more
+constexpr uintptr_t kPlayerActions = 0x14034B3D0;  // FUN_14034b3d0(info): the player's actions (fire, ...)
+constexpr uintptr_t kPlayerAfterWeapon = 0x140350900;  // FUN_140350900(info): after the weapon state machine
+constexpr uintptr_t kWeaponFrame = 0x14034CAE0;    // FUN_14034cae0(info, 0): the player's weapon state machine
+                                                    // (weapon-ready countdown at +0x3e0, holster, aim mode)
 constexpr uintptr_t kInfoAimUpdate = 0x14034A6D0;  // FUN_14034a6d0(info): the player-info aim update (reads the reticle point)
 
 // Runs fn with the gameplay camera looking from `eye` along `fwd` (unit) - the remote's view, as MTA swaps the camera
@@ -128,7 +138,11 @@ void FillRecords(Context& c, ULONGLONG now) {
     for (int id = 0; id < kInputCount; ++id) {
         uint8_t* r = c.records + id * 16;
         const bool analog = id == 0x11 || id == 0x12;
-        const uint8_t v = c.controls.valid ? c.controls.value[id] : static_cast<uint8_t>(analog ? 0x7f : 0);
+        uint8_t v = c.controls.valid ? c.controls.value[id] : static_cast<uint8_t>(analog ? 0x7f : 0);
+        // Fire and reload come from the remote's weapon state (shots fired, reloading), not their buttons: a one-frame
+        // press can fall between two network updates, a shot count cannot.
+        if (c.haveWeapon && (id == 0x09 || id == 0x0d)) v = c.firePhase > 0 ? 0xff : 0;
+        if (c.haveWeapon && (id == 0x0a || id == 0x0e || id == 0x17)) v = c.reloadFrames > 0 ? 0xff : 0;
         r[0] = 0;  // no invert: the value already is the effective one
         r[3] = r[2];
         r[2] = v;
@@ -137,6 +151,23 @@ void FillRecords(Context& c, ULONGLONG now) {
         c.lastValue[id] = v;
         r[1] = static_cast<uint8_t>(c.heldMs[id] / 4 > 255 ? 255 : c.heldMs[id] / 4);
     }
+}
+
+// Next frame of the remote's shots and reloads: each new shot is a 2-frame fire press and a 2-frame release.
+void StepWeaponInputs(Context& c) {
+    if (!c.haveWeapon) return;
+    if (c.firePhase > 0) {
+        if (--c.firePhase == 0) c.firePhase = -2;
+    } else if (c.firePhase < 0) {
+        ++c.firePhase;
+    } else if (static_cast<uint8_t>(c.weapon.shots - c.shotsDone) != 0) {
+        ++c.shotsDone;
+        c.firePhase = 2;
+    }
+    const bool reloading = (c.weapon.flags & 2) != 0;
+    if (reloading && !c.wasReloading) c.reloadFrames = 3;
+    else if (c.reloadFrames > 0) --c.reloadFrames;
+    c.wasReloading = reloading;
 }
 
 // Copies the local player's player-info / control object into the context and points them at the puppet.
@@ -300,6 +331,21 @@ bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 
 void SetLocalAimHeld(bool held) { g_localAimHeld = held; }
 
+void SetPlayerWeaponState(uint32_t goh, const WeaponState& state) {
+    const auto it = g_byGoh.find(goh);
+    if (it == g_byGoh.end()) return;
+    Context& c = *it->second;
+    if (!c.haveWeapon) c.shotsDone = state.shots;  // shots from before we saw them are not replayed
+    c.weapon = state;
+    c.haveWeapon = true;
+}
+
+int PendingPuppetShots(uint32_t goh) {
+    const auto it = g_byGoh.find(goh);
+    if (it == g_byGoh.end() || !it->second->haveWeapon) return 0;
+    return static_cast<uint8_t>(it->second->weapon.shots - it->second->shotsDone) + (it->second->firePhase > 0 ? 1 : 0);
+}
+
 void SetPlayerArmed(uint32_t goh, bool armed) {
     const auto it = g_byGoh.find(goh);
     if (it != g_byGoh.end()) it->second->armed = armed;
@@ -341,6 +387,7 @@ void PuppetPlayerFrame() {
         // the actor instance changes on stream out / in: follow it (the context is rebuilt by the caller then)
         if (ActorFromGohHandle(goh) != c->actor) continue;
         ActivateMarstonBehave(c->actor);
+        StepWeaponInputs(*c);
         FillRecords(*c, now);
         const uintptr_t ctrl = reinterpret_cast<uintptr_t>(c->control);
         // The local player's frame (FUN_14034c830 -> FUN_14034f700), for the puppet's control object: the per-frame
@@ -355,9 +402,9 @@ void PuppetPlayerFrame() {
         At<uint32_t>(ctrl, 0x120) = 0;
         At<uint32_t>(ctrl, 0x1a0) = 0;
         // MTA's context switch includes the remote's camera: while the remote aims, the puppet's update runs with the
-        // gameplay camera looking from the remote's eye to their aim point, so the game's own player code turns it into
-        // the aim (aim mode, the arm's yaw and pitch, the reticle) exactly as it does for the local player.
-        bool aiming = c->controls.valid && c->controls.value[0x19] > 0x7f && c->haveAim && c->armed;
+        // gameplay camera looking from the remote's eye to their aim point, so the game's own player code builds the aim
+        // from their view (aim matrices, reticle). Aiming = the remote's aim state, not their aim button.
+        bool aiming = (c->haveWeapon ? c->weapon.aimState != 0 : c->controls.valid && c->controls.value[0x19] > 0x7f) && c->haveAim && c->armed;
         const float eye[3] = {c->aimFrom[0], c->aimFrom[1] + 1.6f, c->aimFrom[2]};
         float fwd[3] = {c->aimTarget[0] - eye[0], c->aimTarget[1] - eye[1], c->aimTarget[2] - eye[2]};
         const float fl = std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
@@ -367,12 +414,18 @@ void PuppetPlayerFrame() {
         std::memcpy(c->camEye, eye, sizeof(eye));
         std::memcpy(c->camFwd, fwd, sizeof(fwd));
         const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
-        // The remote's aim mode. RDR does not enter it from the aim button in the player code: the camera system switches
-        // to its aim camera (state of the local player's camera, which a puppet has none of) and the player follows. The
-        // game's own switch for a player's aim mode (playerInfo +0x3bc bit 0x02, what scripts set with
-        // SET_FORCE_PLAYER_AIM_MODE) mirrors the remote's state: on exactly while they aim.
-        uint8_t& aimMode = At<uint8_t>(pi, 0x3bc);
-        aimMode = aiming ? (aimMode | 2) : (aimMode & ~2);
+        if (c->haveWeapon) {
+            // The remote's aim state (GET_PLAYER_ZOOM_STATE) and weapon-ready time, as their game has them: the puppet's
+            // own weapon state machine (FUN_14034cae0, below) enters and leaves aim mode from the aim state, keeps the
+            // weapon ready and holsters it when the countdown runs out, exactly as for the local player.
+            if (const uintptr_t s410 = Ptr(pi + 0x410)) At<int>(s410, 0x14) = aiming ? c->weapon.aimState : 0;
+            // The game holsters when this countdown runs out (crosses 0 while it counts down), so the puppet's is only
+            // ever set ahead of zero: the remote's while they have time left, and when they have no weapon out any more
+            // (put away by the wheel or a script) just above zero, to run out on the puppet's next frame.
+            float& ready = At<float>(pi, 0x3e0);
+            if (!aiming && c->weapon.readyTicks > 0) ready = c->weapon.readyTicks / 20.0f;
+            else if (!aiming && !c->armed && ready > 0.05f) ready = 0.05f;
+        }
         auto update = [&] {
             InContext(*c, [&] {
                 using Fn = void (*)(uintptr_t);
@@ -387,6 +440,18 @@ void PuppetPlayerFrame() {
                     At<float>(ctrl, 0x104) = At<float>(ctrl, 0x100);  // aiming, standing: the body follows the camera
                 }
                 reinterpret_cast<Fn>(Ptr(Ptr(ctrl) + 0x28))(ctrl);
+                // The rest of the local player's on-foot frame (FUN_14034f700 0x14034FB60..0x14034FC3A), for the puppet:
+                // the actions (firing), the weapon state machine (the game itself counts the weapon-ready time down,
+                // holsters, enters and leaves aim mode) and what follows it. The player-info frame runs these for the
+                // local player only.
+                if (const uintptr_t s410 = Ptr(pi + 0x410)) {
+                    uint32_t& flags = At<uint32_t>(s410, 0xc);
+                    flags = At<uint32_t>(ctrl, 0x10c) == 4 ? (flags | 4) : (flags & ~4u);
+                }
+                reinterpret_cast<Fn>(GameAddr(kPlayerActions))(pi);
+                using WeaponFrameFn = void (*)(uintptr_t, int);
+                reinterpret_cast<WeaponFrameFn>(GameAddr(kWeaponFrame))(pi, 0);
+                reinterpret_cast<Fn>(GameAddr(kPlayerAfterWeapon))(pi);
                 if (aiming) {  // the local player's aim steps (game loop 0x1401F8344 .. 0x1401F83CA)
                     reinterpret_cast<Fn>(GameAddr(kReticleUpdate))(pi);
                     reinterpret_cast<Fn>(GameAddr(kInfoAimUpdate))(pi);
@@ -406,12 +471,14 @@ void PuppetPlayerFrame() {
     if (!g_byGoh.empty() && now > nextLog) {
         nextLog = now + 10000;
         Log("puppet player: %zu puppet(s) under player control, %d context switches", g_byGoh.size(), g_switched.load());
-        for (auto& [goh, c] : g_byGoh)
-            Log("puppet player: goh 0x%08x aim input %u armed %d, aim point (%.1f, %.1f, %.1f), camera forward (%.2f, %.2f, %.2f), "
-                "aim mode %02x",
-                goh, c->controls.value[0x19], c->armed ? 1 : 0, c->aim[0], c->aim[1], c->aim[2],
-                At<float>(reinterpret_cast<uintptr_t>(c->info), 0x30), At<float>(reinterpret_cast<uintptr_t>(c->info), 0x34),
-                At<float>(reinterpret_cast<uintptr_t>(c->info), 0x38), At<uint8_t>(reinterpret_cast<uintptr_t>(c->info), 0x3bc));
+        for (auto& [goh, c] : g_byGoh) {
+            const uintptr_t pi = reinterpret_cast<uintptr_t>(c->info);
+            Log("puppet player: goh 0x%08x remote weapon state aim %u flags %u ready %u shots %u (fired %u) clip %u | armed %d, "
+                "aim point (%.1f, %.1f, %.1f), camera forward (%.2f, %.2f, %.2f), aim mode %02x, ready %.2f",
+                goh, c->weapon.aimState, c->weapon.flags, c->weapon.readyTicks, c->weapon.shots, c->shotsDone, c->weapon.clip,
+                c->armed ? 1 : 0, c->aim[0], c->aim[1], c->aim[2], At<float>(pi, 0x30), At<float>(pi, 0x34), At<float>(pi, 0x38),
+                At<uint8_t>(pi, 0x3bc), At<float>(pi, 0x3e0));
+        }
     }
 }
 

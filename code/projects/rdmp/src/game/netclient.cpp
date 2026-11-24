@@ -283,6 +283,7 @@ void NetFrame(float /*gameTime*/) {
         uint64_t vehicle;  // the vehicle the server has them on (newest state), 0 = on foot
         int weapon;        // the weapon in their hand (newest state), -1 = none
         Vec3 aim;          // the world point their crosshair is on (interpolated like the position)
+        WeaponState weaponState;  // their weapon state (newest)
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -305,6 +306,12 @@ void NetFrame(float /*gameTime*/) {
         g_local.vehicle = LocalVehicle();
         LocalWeapon(g_local.weapon, g_local.ammo);
         LocalAim(g_local.aimX, g_local.aimY, g_local.aimZ);
+        {
+            WeaponState ws;
+            LocalWeaponState(ws);
+            g_local.aimState = ws.aimState, g_local.weaponFlags = ws.flags, g_local.readyTicks = ws.readyTicks;
+            g_local.shots = ws.shots, g_local.clip = ws.clip;
+        }
         if (CaptureLocalControls(controls)) std::memcpy(g_local.controls, controls.value, sizeof(g_local.controls));
         if (AimHoldDebug()) {  // [debug] aim_hold: others see this copy aim at a test point 20 m away (weapons.h)
             g_local.controls[0x19] = 0xff;
@@ -348,6 +355,10 @@ void NetFrame(float /*gameTime*/) {
                 v.leadMs = LeadMsFor(r);
                 v.vehicle = r.samples.empty() ? 0 : r.samples.back().s.vehicle;
                 v.weapon = r.samples.empty() ? -1 : r.samples.back().s.weapon;
+                if (!r.samples.empty()) {
+                    const PlayerState& n = r.samples.back().s;
+                    v.weaponState = WeaponState{n.aimState, n.weaponFlags, n.readyTicks, n.shots, n.clip};
+                }
                 ++nViews;
             }
             ++it;
@@ -439,7 +450,8 @@ void NetFrame(float /*gameTime*/) {
         }
         p.hidden = false;
         SyncPuppetWeapon(p.goh, v.weapon);
-        SyncPuppetAim(p.goh, v.aim, v.pos, v.heading, v.controls[0x19] > 0x7f);
+        SyncPuppetWeaponState(p.goh, v.weapon, v.weaponState);
+        SyncPuppetAim(p.goh, v.aim, v.pos, v.heading, v.weaponState.aimState != 0);
         // On a horse: the horse carries the puppet (no player control, no corrections of its own).
         if (const uint32_t horse = v.vehicle ? VehicleGoh(v.vehicle) : 0) {
             if (p.mountedOn != horse) {

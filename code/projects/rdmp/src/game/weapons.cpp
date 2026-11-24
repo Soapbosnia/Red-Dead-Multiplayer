@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -32,6 +33,7 @@ int g_aimHold = 0;      // [debug] aim_hold: the game copy (InstanceId) that sen
 float g_aimHoldYaw = 0.0f, g_aimHoldSweep = 0.0f, g_aimHoldPitch = 0.0f;  // [debug] aim_hold_* (AimHoldPoint)
 bool g_aimHoldPitchSwing = false;
 bool g_aimHoldPoint = false;  // [debug] aim_hold_point=1: send a test point instead of the real crosshair
+int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
 uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
 bool g_aimTrace = false;  // [debug] aim_trace: log a puppet's wanted / actual heading every 100 ms while it aims
 
@@ -118,11 +120,51 @@ struct PuppetWeapon {
 };
 std::unordered_map<uint32_t, PuppetWeapon> g_puppets;
 
+// [debug] state_probe=1: the local player's weapon state, logged on every change (what full state sync must carry).
+bool g_stateProbe = false;
+int NativeInt(const char* name, uint32_t actor) {
+    NativeCall n;
+    n.Uint(actor);
+    return n.Call(NativeHash(name)) ? n.ResultInt() : -99;
+}
+void StateProbeFrame(uint32_t actor) {
+    const uintptr_t info = *reinterpret_cast<uintptr_t*>(GameAddr(0x1422DAF30));
+    if (!info) return;
+    const uintptr_t s410 = *reinterpret_cast<uintptr_t*>(info + 0x410);
+    char line[256];
+    sprintf_s(line, "zoom %d | 3bc %02x 3e4 %02x 3e0 %.2f | inhand %d drawn %d holstered %d shooting %d reloading %d blind %d",
+              s410 ? *reinterpret_cast<int*>(s410 + 0x14) : -1, *reinterpret_cast<uint8_t*>(info + 0x3bc),
+              *reinterpret_cast<uint8_t*>(info + 0x3e4), *reinterpret_cast<float*>(info + 0x3e0), InHand(actor),
+              NativeInt("IS_WEAPON_DRAWN", actor) & 0xff, NativeInt("ACTOR_IS_HOLSTERED", actor) & 0xff,
+              NativeInt("IS_ACTOR_SHOOTING", actor) & 0xff, NativeInt("IS_ACTOR_RELOADING", actor) & 0xff,
+              NativeInt("IS_ACTOR_BLINDFIRING", actor) & 0xff);
+    const int w = InHand(actor);
+    if (weapons::Valid(w)) {
+        NativeCall a, i;
+        a.Uint(actor).Int(w);
+        i.Uint(actor).Int(AmmoTypeOf(w)).Bool(false);
+        const float clip = a.Call(NativeHash("ACTOR_GET_WEAPON_AMMO")) ? a.ResultFloat() : -1.0f;
+        const float inv = i.Call(NativeHash("ACTOR_GET_INV_AMMO")) ? i.ResultFloat() : -1.0f;
+        const size_t len = strlen(line);
+        sprintf_s(line + len, sizeof(line) - len, " | weapon ammo %.0f inv %.0f", clip, inv);
+    }
+    static std::string last;
+    // the timer at +0x3e0 changes every frame: compare without it
+    std::string key = line;
+    const size_t t = key.find("3e0 "), e = key.find(" |", t);
+    if (t != std::string::npos && e != std::string::npos) key.erase(t, e - t);
+    if (key != last) {
+        last = key;
+        Log("state probe: %s", line);
+    }
+}
+
 void ProbeFrame(uint32_t actor) {
     static bool listed = false;
     if (!listed) {
         listed = true;
         SetGameBinding("@GENERIC.TARGET", 1, 2, 0x25);  // aim also on K (automation cannot hold a mouse button and a key)
+        SetGameBinding("@GENERIC.FIRE", 1, 2, 0x26);    // fire also on L
         for (int i = 0; i < weapons::kCount + 8; ++i) {
             NativeCall n;
             n.Int(i);
@@ -153,6 +195,8 @@ void InitWeapons(const wchar_t* iniPath) {
     g_probe = GetPrivateProfileIntW(L"debug", L"weapon_probe", 0, iniPath) != 0;
     g_aimHold = GetPrivateProfileIntW(L"debug", L"aim_hold", 0, iniPath);
     g_aimTrace = GetPrivateProfileIntW(L"debug", L"aim_trace", 0, iniPath) != 0;
+    g_stateProbe = GetPrivateProfileIntW(L"debug", L"state_probe", 0, iniPath) != 0;
+    g_fireProbe = GetPrivateProfileIntW(L"debug", L"fire_probe", 0, iniPath);
     wchar_t hex[32] = {};
     GetPrivateProfileStringW(L"debug", L"exec_watch", L"", hex, 32, iniPath);
     g_execWatch = static_cast<uintptr_t>(wcstoull(hex, nullptr, 16));
@@ -174,6 +218,38 @@ void WeaponsFrame() {
         }
     }
     if (g_probe) ProbeFrame(actor);
+    if (g_stateProbe) {
+        StateProbeFrame(actor);
+        for (auto& [goh, pw] : g_puppets) {  // the puppets' state, same format: the two copies' logs line up
+            char line[200];
+            const int w = InHand(goh);
+            float clip = -1.0f;
+            if (weapons::Valid(w)) {
+                NativeCall a;
+                a.Uint(goh).Int(w);
+                if (a.Call(NativeHash("ACTOR_GET_WEAPON_AMMO"))) clip = a.ResultFloat();
+            }
+            sprintf_s(line, "inhand %d drawn %d holstered %d shooting %d reloading %d | weapon ammo %.0f", w,
+                      NativeInt("IS_WEAPON_DRAWN", goh) & 0xff, NativeInt("ACTOR_IS_HOLSTERED", goh) & 0xff,
+                      NativeInt("IS_ACTOR_SHOOTING", goh) & 0xff, NativeInt("IS_ACTOR_RELOADING", goh) & 0xff, clip);
+            static std::unordered_map<uint32_t, std::string> last;
+            if (last[goh] != line) {
+                last[goh] = line;
+                Log("state probe: puppet 0x%08x %s", goh, line);
+            }
+        }
+    }
+    static bool fireArmed = false;  // [debug] fire_probe=1: log the code reading the local fire input record (0x09)
+    if (g_fireProbe && !fireArmed) {
+        const uintptr_t info = *reinterpret_cast<uintptr_t*>(GameAddr(0x1422DAF30));
+        const uintptr_t ctrl = info ? *reinterpret_cast<uintptr_t*>(info + 0x118) : 0;
+        const uintptr_t set = ctrl ? *reinterpret_cast<uintptr_t*>(ctrl + 0x20) : 0;
+        const uintptr_t recs = set ? *reinterpret_cast<uintptr_t*>(set) : 0;
+        if (recs) {
+            fireArmed = true;
+            ArmAccessWatch(recs + g_fireProbe * 16, "inputRecord");
+        }
+    }
     static bool execArmed = false;
     if (g_execWatch && !execArmed && !g_puppets.empty()) {  // once a puppet is around
         execArmed = true;
@@ -269,9 +345,16 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
             p.given |= 1u << weapon;
             return;  // the item exists from the next frame
         }
-        NativeCall a;  // unlimited for the puppet: the remote's own game counts their ammo
-        a.Uint(goh).Int(weapon);
-        if (a.Call(NativeHash("ACTOR_GET_WEAPON_AMMO")) && a.ResultFloat() < 200.0f) SetAmmo(goh, weapon, 999.0f);
+        // unlimited reserve for the puppet (the remote's own game counts their ammo); the clip follows the remote's
+        // (SyncPuppetWeaponState)
+        const int type = AmmoTypeOf(weapon);
+        NativeCall a;
+        a.Uint(goh).Int(type).Bool(false);
+        if (type >= 0 && a.Call(NativeHash("ACTOR_GET_INV_AMMO")) && a.ResultFloat() < 200.0f) {
+            NativeCall inv;
+            inv.Uint(goh).Int(type).Float(999.0f).Bool(false);
+            inv.Call(NativeHash("ACTOR_SET_INV_AMMO"));
+        }
         if (inHand != weapon) {
             const bool ok = PutInHand(goh, weapon, true);
             if (g_aimTrace) Log("aim trace: puppet 0x%08x in hand %d, put %d in hand -> %d", goh, inHand, weapon, ok ? 1 : 0);
@@ -308,6 +391,48 @@ void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
     y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
 }
 bool AimHoldDebug() { return g_aimHold != 0 && g_aimHold == InstanceId(); }
+
+void LocalWeaponState(WeaponState& out) {
+    out = WeaponState{};
+    const uint32_t actor = LocalActor();
+    const uintptr_t info = *reinterpret_cast<uintptr_t*>(GameAddr(0x1422DAF30));
+    if (!actor || !info) return;
+    const uintptr_t s410 = *reinterpret_cast<uintptr_t*>(info + 0x410);
+    const int aim = s410 && IsReadable(s410 + 0x14, 4) ? *reinterpret_cast<int*>(s410 + 0x14) : 0;
+    out.aimState = static_cast<uint8_t>(aim < 0 ? 0 : aim > 7 ? 7 : aim);
+    const float ready = *reinterpret_cast<float*>(info + 0x3e0) * 20.0f;
+    out.readyTicks = static_cast<uint8_t>(ready <= 0.0f ? 0.0f : ready >= 255.0f ? 255.0f : ready + 0.5f);
+    const int w = InHand(actor);
+    const bool reloading = (NativeInt("IS_ACTOR_RELOADING", actor) & 0xff) != 0;
+    if ((NativeInt("IS_WEAPON_DRAWN", actor) & 0xff) != 0) out.flags |= 1;
+    if (reloading) out.flags |= 2;
+    static int lastWeapon = -1, lastClip = -1;
+    static uint8_t shots = 0;
+    int clip = -1;
+    if (weapons::Valid(w)) {
+        NativeCall a;
+        a.Uint(actor).Int(w);
+        if (a.Call(NativeHash("ACTOR_GET_WEAPON_AMMO"))) clip = static_cast<int>(a.ResultFloat() + 0.5f);
+    }
+    if (w == lastWeapon && clip >= 0 && lastClip >= 0 && clip < lastClip && !reloading) shots += static_cast<uint8_t>(lastClip - clip);
+    lastWeapon = w;
+    lastClip = clip;
+    out.shots = shots;
+    out.clip = static_cast<uint8_t>(clip < 0 ? 0 : clip > 255 ? 255 : clip);
+}
+
+void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state) {
+    SetPlayerWeaponState(goh, state);
+    if (!HasPlayerControl(goh) || !weapons::Valid(weapon) || InHand(goh) != weapon) return;
+    const int want = state.clip + PendingPuppetShots(goh);
+    NativeCall a;
+    a.Uint(goh).Int(weapon);
+    if (a.Call(NativeHash("ACTOR_GET_WEAPON_AMMO")) && static_cast<int>(a.ResultFloat() + 0.5f) != want && !(state.flags & 2)) {
+        NativeCall s;
+        s.Uint(goh).Int(weapon).Float(static_cast<float>(want));
+        s.Call(NativeHash("ACTOR_SET_WEAPON_AMMO"));
+    }
+}
 
 void LocalAim(float& x, float& y, float& z) {
     if (const uintptr_t comp = AimComponent(LocalActor())) {

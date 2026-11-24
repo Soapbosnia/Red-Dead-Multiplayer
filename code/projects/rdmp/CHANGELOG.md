@@ -8,7 +8,11 @@
   controls; locally remote players cannot be killed by your shots (their own game decides their damage, MTA-style).
   Every weapon type can be drawn (the story's disabled long-gun equip slots are enabled on give). Aiming is
   synced: a remote player aims (aim mode, facing, aim point) where their crosshair is (Player transform aim point,
-  fw_api v16), interpolated on the same timeline as their position; the arm's pitch is not synced yet. Damage events are next. devtools:
+  fw_api v16), interpolated on the same timeline as their position; the arm's pitch is not synced yet.
+  Full weapon state sync (fw_api v17): each player's game reports what it is doing with the weapon (aim state,
+  weapon-ready countdown, drawn, reloading, clip, shots fired) and the puppet's own weapon state machine plays it:
+  draw, weapon ready, aim, fire (shot for shot), reload (round for round), holster when the countdown runs out.
+  Measured with two copies on one PC: 30-60 ms for draw / holster / aim, 100-200 ms for shots and reloads. Damage events are next. devtools:
   `/weapon name [ammo]`, `/weapons`, `/disarm`. fw_api v15. Player entity gains weapon / ammo (netcode: MAJOR).
 * **New chat box and nametags** (drawn by the mod, hud.cpp): chat top-left with outlined text that fades when idle,
   a dark panel with a red edge and a "Say:" line while typing (Up / Down history, Esc cancels; "chatSend" still lets

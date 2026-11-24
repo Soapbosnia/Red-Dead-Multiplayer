@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "actors.h"
+#include "puppet_player.h"
 
 namespace rdmp {
 
@@ -21,6 +22,12 @@ void PutLocalWeaponInHand(int weapon);  // -1 = holster
 // Per frame for each streamed-in remote puppet: arm it with the remote's weapon in hand (-1 = holstered).
 void SyncPuppetWeapon(uint32_t goh, int weapon);
 void ForgetPuppetWeapon(uint32_t goh);
+// The local player's weapon state, from their own game (aim state, weapon-ready time, drawn, reloading, clip; a shot is
+// counted when the clip goes down outside a reload).
+void LocalWeaponState(WeaponState& out);
+// A remote's weapon state onto their puppet, every frame (main thread): the state itself (puppet_player.cpp) and the
+// puppet's clip (the remote's rounds plus the shots it still has to fire, so it fires and reloads when they do).
+void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state);
 // The local player's aim point (the reticle target point: where the camera's crosshair is in the world).
 void LocalAim(float& x, float& y, float& z);
 // [debug] aim_hold=N: game copy N holds its aim input (its player aims, no mouse button needed). Two-copy tests.

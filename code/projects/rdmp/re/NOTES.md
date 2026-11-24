@@ -921,3 +921,28 @@ components on a puppet, which other threads read playerInfo during the swap.
   watch.cpp ArmAccessWatch. Memory snapshots of the local actor 2 hops deep at three camera pitches showed no pitch
   value there; findpitch-style search found the component block above.
 
+### Weapon state sync (2026-11-24, puppet_player.cpp / weapons.cpp, [debug] state_probe)
+* A player's weapon state, as the game keeps it (state_probe while drawing, firing, reloading, aiming, holstering):
+  - aim state: *(playerInfo + 0x410) + 0x14 (GET_PLAYER_ZOOM_STATE, handler 0x140AD86A0): 0 none, 2 aiming (set the
+    frame the aim input goes down);
+  - weapon-ready countdown: playerInfo + 0x3e0 (seconds): 3.0 on draw / shot / aim release, counts down, negative while
+    aiming; when it runs out the game holsters (GET_WEAPON_IN_HAND -1, ACTOR_IS_HOLSTERED 1 ~0.6 s later);
+  - IS_WEAPON_DRAWN, IS_ACTOR_RELOADING (one round per ~0.25 s), IS_ACTOR_SHOOTING (one frame per shot);
+  - clip: ACTOR_GET_WEAPON_AMMO (weapon ammo = rounds in the clip); reserve ACTOR_GET_INV_AMMO by ammo type;
+  - inputs: fire 0x09 + 0x0d, aim 0x19, reload 0x0a + 0x0e + 0x17 (R); a hip-fire press without aim does nothing.
+  These natives are not registered in retail: scriptnatives.cpp kUnregistered.
+* GET_PLAYER_COMBATMODE = camera instance +0x8f8 (a camera setting, not the weapon state).
+* The local player's on-foot player-info frame (FUN_14034f700, from FUN_14034c830) after the control update:
+  inventory input mapper (info+0x128) vfunc +0x28, control vfunc +0x28, sub410+0xc bit 4 from control +0x10c == 4,
+  FUN_14034b3d0(info) (actions: the fire input is read here, 0x140348D07), FUN_14034cae0(info, 0) (weapon state
+  machine: +0x3e0 countdown, holster, aim mode from the aim state, +0x504 weapon state 0..4), FUN_140350900(info).
+  Puppets now run these three in their context (the countdown never moved and nothing fired before).
+* Sync: PlayerState / Player transform aimState, weaponFlags (drawn, reloading), readyTicks (1/20 s), shots (counter:
+  clip went down outside a reload), clip. The puppet gets the aim state in its sub410+0x14, the countdown in +0x3e0
+  (only ever ahead of zero: the game holsters when its own countdown crosses zero; a remote without a weapon out sets
+  it to 0.05), one 2-frame fire press per new shot (clip set to the remote's + pending shots), a reload press when
+  the remote starts reloading. Aim mode then follows from the game's own state machine: the +0x3bc force bit is gone.
+* Measured with two copies (~20 fps each on one PC): holster / draw / aim 30-60 ms, shots 110-160 ms, reload 95-210 ms.
+* Open: arm pitch (puppet aims level); FUN_14034b3d0 / the inventory mapper at info+0x128 are the LOCAL player's
+  objects shared through the copied player-info: check that a puppet does not react to the local weapon wheel.
+

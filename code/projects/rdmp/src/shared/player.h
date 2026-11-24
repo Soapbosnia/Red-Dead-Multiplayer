@@ -60,6 +60,9 @@ namespace RDMP::Shared {
         uint8_t controls[kControls] = {};
         // The world point the player's crosshair is on (shared/types.h PlayerState::aimX): remote puppets aim at it.
         float aimX = 0.0f, aimY = 0.0f, aimZ = 0.0f;
+        // The weapon state as the owner's game has it (shared/types.h PlayerState::aimState): sent with every transform so
+        // aiming, firing and reloading reach the puppet with the position's delay, no later.
+        uint8_t aimState = 0, weaponFlags = 0, readyTicks = 0, shots = 0, clip = 0;
 
         // --- reliable delta fields -----------------------------------------
         uint8_t flags  = kAlive; // server field
@@ -126,6 +129,11 @@ namespace RDMP::Shared {
             fields.FloatBits(aimX, kWorldMin, kWorldMax, kPosBits);
             fields.FloatBits(aimY, kWorldMin, kWorldMax, kPosBits);
             fields.FloatBits(aimZ, kWorldMin, kWorldMax, kPosBits);
+            fields.BitsRange<uint8_t>(aimState, 0, 7);
+            fields.BitsRange<uint8_t>(weaponFlags, 0, 3);
+            fields.BitsRange<uint8_t>(readyTicks, 0, 255);
+            fields.BitsRange<uint8_t>(shots, 0, 255);
+            fields.BitsRange<uint8_t>(clip, 0, 255);
         }
 
         void SerializeFields(FieldSerializer &fields) override {

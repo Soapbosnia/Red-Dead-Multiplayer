@@ -45,6 +45,14 @@ struct PlayerState {
     // Where the player's crosshair points: the world point their camera aims at (the game's reticle target point,
     // camera position + 200 m along its forward or the hit under the crosshair). Puppets aim their weapon at it.
     float aimX = 0, aimY = 0, aimZ = 0;
+    // The weapon state, read from the player's own game every frame (game/weapons.cpp LocalWeaponState) and put on their
+    // puppet as it is (game/puppet_player.cpp): what the player is doing with the weapon, not which buttons they press.
+    uint8_t aimState = 0;     // *(playerInfo + 0x410) + 0x14: 0 = not aiming, 2 = aiming (GET_PLAYER_ZOOM_STATE)
+    uint8_t weaponFlags = 0;  // kWeaponDrawn, kWeaponReloading
+    uint8_t readyTicks = 0;   // playerInfo + 0x3e0: weapon-ready time left, 1/20 s (at 0 the game holsters)
+    uint8_t shots = 0;        // shots fired so far (wraps): the receiver fires the new ones
+    uint8_t clip = 0;         // rounds in the clip
+    static constexpr uint8_t kWeaponDrawn = 1, kWeaponReloading = 2;
 };
 
 }  // namespace rdmp::net

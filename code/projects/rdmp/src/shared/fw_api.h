@@ -26,7 +26,8 @@ namespace rdmp::fw {
 // v14: Host quit, get_bindings / set_binding (the game's key bindings, for the menu's Binds settings).
 // v15: weapons: PlayerState weapon / ammo, weapon actions.
 // v16: PlayerState aim point (aimX / aimY / aimZ).
-constexpr uint32_t kApiVersion = 16;
+// v17: PlayerState weapon state (aimState, weaponFlags, readyTicks, shots, clip).
+constexpr uint32_t kApiVersion = 17;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
