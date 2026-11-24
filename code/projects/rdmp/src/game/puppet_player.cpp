@@ -332,6 +332,71 @@ void PlayerControlHook(uintptr_t component, void* update) {
     else run();
 }
 
+// The character controller's ground probe, FUN_14057f5a0(probe = controller + 0x648, ...), called from its update
+// FUN_140553340(controller + 0x20) every frame; it sets the on-ground flag (controller +0x716) that the player code
+// reads. For a puppet (no player bit) it never hit ground: it runs with the puppet's player bit set ([net]
+// puppet_full_update=1, the default).
+using GroundProbeFn = void (*)(uintptr_t probe, uintptr_t a2, uintptr_t a3, uintptr_t a4, void* a5, uint8_t a6);
+GroundProbeFn g_groundProbeOrig = nullptr;
+// mov rax,rsp; mov [rax+8],rbx; mov [rax+10h],rsi; mov [rax+18h],rdi  (15 bytes, position independent)
+constexpr uint8_t kGroundProbePrologue[15] = {0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08, 0x48, 0x89, 0x70, 0x10, 0x48, 0x89, 0x78, 0x18};
+constexpr uintptr_t kGroundProbe = 0x14057F5A0;
+bool g_probePlayerBit = false;
+
+void GroundProbeHook(uintptr_t probe, uintptr_t a2, uintptr_t a3, uintptr_t a4, void* a5, uint8_t a6) {
+    static ULONGLONG nextLog = 0;
+    if (g_probePlayerBit && GetTickCount64() > nextLog) {  // which controllers come through here, and the puppets'
+        nextLog = GetTickCount64() + 5000;
+        for (auto& [goh, c] : g_byGoh) {
+            const uintptr_t cc = IsReadable(c->actor + 0x88, 8) ? Ptr(c->actor + 0x88) : 0;
+            Log("ground probe: call for %p; puppet 0x%08x controller %p (+0x658 = %d)", reinterpret_cast<void*>(probe - 0x648), goh,
+                reinterpret_cast<void*>(cc), cc ? At<uint8_t>(cc, 0x658) : -1);
+        }
+    }
+    if (g_probePlayerBit) {
+        const uintptr_t controller = probe - 0x648;
+        for (auto& [goh, c] : g_byGoh) {
+            if (!IsReadable(c->actor + 0x88, 8) || Ptr(c->actor + 0x88) != controller) continue;
+            uint8_t& flags = At<uint8_t>(c->actor, 0x118);
+            const uint8_t saved = flags;
+            flags |= 1;
+            g_groundProbeOrig(probe, a2, a3, a4, a5, a6);
+            static int n = 0;
+            if (++n % 600 == 1)
+                Log("ground probe: puppet 0x%08x probed (%d), distance %.2f, on ground %d", goh, n, At<float>(controller, 0x708),
+                    At<uint8_t>(controller, 0x716));
+            flags = static_cast<uint8_t>((flags & ~1) | (saved & 1));
+            return;
+        }
+    }
+    g_groundProbeOrig(probe, a2, a3, a4, a5, a6);
+}
+
+// FUN_140ac1350(?, actor, ...): the per-frame decision whether an actor runs at full update (its result becomes actor
+// +0x112 bit 6; a change switches the character controller's mode, FUN_140ac8280, and coming back resets its ground
+// state). A puppet standing still got the reduced update, in which its controller never probes for ground (the game
+// thought it was in the air); like the player, a puppet always gets the full update ([net] puppet_full_update).
+using UpdateLevelFn = uint8_t (*)(uintptr_t a1, uintptr_t actor, uint8_t a3, uint32_t a4, void* a5, void* a6, void* a7);
+UpdateLevelFn g_updateLevelOrig = nullptr;
+// mov [rsp+18h],r8b; mov [rsp+8],rcx; push rbx; push rsi; push rdi  (13 bytes, position independent)
+constexpr uint8_t kUpdateLevelPrologue[13] = {0x44, 0x88, 0x44, 0x24, 0x18, 0x48, 0x89, 0x4C, 0x24, 0x08, 0x53, 0x56, 0x57};
+constexpr uintptr_t kUpdateLevel = 0x140AC1350;
+
+uint8_t UpdateLevelHook(uintptr_t a1, uintptr_t actor, uint8_t a3, uint32_t a4, void* a5, void* a6, void* a7) {
+    if (g_probePlayerBit) {
+        for (auto& [goh, c] : g_byGoh) {
+            if (c->actor != actor) continue;
+            uint8_t& flags = At<uint8_t>(actor, 0x118);
+            const uint8_t saved = flags;
+            flags |= 1;
+            g_updateLevelOrig(a1, actor, a3, a4, a5, a6, a7);
+            flags = static_cast<uint8_t>((flags & ~1) | (saved & 1));
+            return 1;  // always the full update, like the player (the reduced one skips the ground probe)
+        }
+    }
+    return g_updateLevelOrig(a1, actor, a3, a4, a5, a6, a7);
+}
+
 // FUN_1403726f0 for the local player's control object, with the autopilot's input written into its records first.
 void ControlUpdateHook(uintptr_t ctrl) {
     const uintptr_t info = Ptr(GameAddr(kPlayerInfoPtr));
@@ -391,6 +456,12 @@ void InstallPuppetPlayerHooks() {
     g_aimTargetOrig = reinterpret_cast<AimTargetFn>(DetourPic(
         GameAddr(kAimTaskSetTarget), kAimTargetPrologue, sizeof(kAimTargetPrologue), reinterpret_cast<void*>(&AimTargetHook)));
     Log("puppet player: aim-target hook %s", g_aimTargetOrig ? "installed" : "FAILED (prologue differs)");
+    g_groundProbeOrig = reinterpret_cast<GroundProbeFn>(
+        DetourPic(GameAddr(kGroundProbe), kGroundProbePrologue, sizeof(kGroundProbePrologue), reinterpret_cast<void*>(&GroundProbeHook)));
+    Log("puppet player: ground-probe hook %s", g_groundProbeOrig ? "installed" : "FAILED (prologue differs)");
+    g_updateLevelOrig = reinterpret_cast<UpdateLevelFn>(
+        DetourPic(GameAddr(kUpdateLevel), kUpdateLevelPrologue, sizeof(kUpdateLevelPrologue), reinterpret_cast<void*>(&UpdateLevelHook)));
+    Log("puppet player: update-level hook %s", g_updateLevelOrig ? "installed" : "FAILED (prologue differs)");
     g_aimResetOrig = reinterpret_cast<AimResetFn>(
         DetourPic(GameAddr(kAimReset), kAimResetPrologue, sizeof(kAimResetPrologue), reinterpret_cast<void*>(&AimResetHook)));
     Log("puppet player: aim-reset hook %s", g_aimResetOrig ? "installed" : "FAILED (prologue differs)");
@@ -429,6 +500,7 @@ bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 
 void SetLocalAimHeld(bool held) { g_localAimHeld = held; }
 void SetLocalFirePulse(uint32_t ms) { g_localFirePulseMs = ms; }
+void SetProbePlayerBit(bool on) { g_probePlayerBit = on; }
 
 void SetPlayerWeaponState(uint32_t goh, const WeaponState& state) {
     const auto it = g_byGoh.find(goh);

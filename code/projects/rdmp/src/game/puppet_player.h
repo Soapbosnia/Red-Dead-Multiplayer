@@ -65,6 +65,7 @@ int PendingPuppetShots(uint32_t goh);
 void SetLocalAimHeld(bool held);
 // [debug] the local player fires every `ms` (0 = off), with aim held.
 void SetLocalFirePulse(uint32_t ms);
+void SetProbePlayerBit(bool on);  // [net] puppet_full_update: full update + ground probe like the player
 // Main thread, once per frame: runs every attached puppet's control update.
 void PuppetPlayerFrame();
 

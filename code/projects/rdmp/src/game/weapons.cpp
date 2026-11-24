@@ -40,7 +40,7 @@ int g_aimHoldFireMs = 0;  // [debug] aim_hold_fire_ms
 int g_aimHoldPeriodMs = 0;  // [debug] aim_hold_period_ms
 bool g_syncProbe = false;  // [debug] sync_probe
 int g_moveTest = 0;        // [debug] move_test
-bool g_groundWatch = false;  // [debug] ground_watch
+int g_groundWatch = 0;  // [debug] ground_watch
 int g_puppetFactionStatus = 0;  // [debug] puppet_faction_status: the player faction's status toward a puppet
 bool g_aimHoldTarget = false;  // [debug] aim_hold_target=1: aim at the first remote player
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
@@ -216,7 +216,8 @@ void InitWeapons(const wchar_t* iniPath) {
     g_aimHoldPeriodMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_period_ms", 0, iniPath));
     g_syncProbe = GetPrivateProfileIntW(L"debug", L"sync_probe", 0, iniPath) != 0;
     g_moveTest = static_cast<int>(GetPrivateProfileIntW(L"debug", L"move_test", 0, iniPath));
-    g_groundWatch = GetPrivateProfileIntW(L"debug", L"ground_watch", 0, iniPath) != 0;
+    g_groundWatch = static_cast<int>(GetPrivateProfileIntW(L"debug", L"ground_watch", 0, iniPath));  // 1 local, 2 a puppet
+    SetProbePlayerBit(GetPrivateProfileIntW(L"net", L"puppet_full_update", 1, iniPath) != 0);
     g_puppetFactionStatus = static_cast<int>(GetPrivateProfileIntW(L"debug", L"puppet_faction_status", 0, iniPath));
     g_aimHoldTarget = GetPrivateProfileIntW(L"debug", L"aim_hold_target", 0, iniPath) != 0;
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
@@ -276,9 +277,13 @@ void SyncProbeLine(const char* who, uint32_t actor, uint32_t goh, ULONGLONG tick
         if (cc && IsReadable(cc + 0x670, 0xa8)) gy = *reinterpret_cast<float*>(cc + 0x684), gd = *reinterpret_cast<float*>(cc + 0x708);
     }
     uintptr_t ccp = 0;
-    if (const uintptr_t a = ActorFromGohHandle(goh)) ccp = IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
-    Log("SP %s %llu pos %.3f %.3f %.3f h %.1f hp %.1f inhand %d aim %.2f %.2f %.2f f %s ground %.3f %.3f cc %p", who, tick, pos.x, pos.y,
-        pos.z, heading, hp, InHand(actor), aim[0], aim[1], aim[2], flags, gy, gd, reinterpret_cast<void*>(ccp));
+    unsigned b112 = 0, b118 = 0, f148 = 0;
+    if (const uintptr_t a = ActorFromGohHandle(goh)) {
+        ccp = IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
+        b112 = *reinterpret_cast<uint8_t*>(a + 0x112), b118 = *reinterpret_cast<uint8_t*>(a + 0x118), f148 = *reinterpret_cast<uint32_t*>(a + 0x148);
+    }
+    Log("SP %s %llu pos %.3f %.3f %.3f h %.1f hp %.1f inhand %d aim %.2f %.2f %.2f f %s ground %.3f %.3f cc %p a112 %02x a118 %02x a148 %08x", who, tick,
+        pos.x, pos.y, pos.z, heading, hp, InHand(actor), aim[0], aim[1], aim[2], flags, gy, gd, reinterpret_cast<void*>(ccp), b112, b118, f148);
 }
 
 void SyncProbeFrame() {
@@ -312,8 +317,8 @@ void MoveTestFrame() {
 void WeaponsFrame() {
     if (g_syncProbe) SyncProbeFrame();
     static bool groundWatched = false;  // [debug] ground_watch=1: who writes the local player's on-ground flag
-    if (g_groundWatch && !groundWatched) {
-        const uintptr_t a = ActorFromGohHandle(LocalActor()), cc = a && IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
+    if (g_groundWatch && !groundWatched && (g_groundWatch == 1 || !g_puppets.empty())) {
+        const uintptr_t a = ActorFromGohHandle(g_groundWatch == 2 ? g_puppets.begin()->first : LocalActor()), cc = a && IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
         if (cc && IsReadable(cc + 0x714, 4)) {
             groundWatched = true;
             ArmWriteWatch(cc + 0x714, "on_ground");
@@ -483,6 +488,19 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
         fs.Int(2).Uint(goh).Int(g_puppetFactionStatus);
         fs.Call(NativeHash("SET_FACTION_STATUS_TO_INDIVIDUAL_ACTOR"));
         SetBulletSync(goh, ActorHandleFromGohHandle(goh), true);
+        // The update priority the local player has (an NPC's lower one let the game switch the puppet between update
+        // levels, resetting its character controller each time: re/NOTES.md "Measuring the sync")
+        NativeCall lp, pp;
+        lp.Uint(LocalActor());
+        pp.Uint(goh);
+        const int localPrio = lp.Call(NativeHash("GET_ACTOR_UPDATE_PRIORITY")) ? lp.ResultInt() : -99;
+        const int puppetPrio = pp.Call(NativeHash("GET_ACTOR_UPDATE_PRIORITY")) ? pp.ResultInt() : -99;
+        if (localPrio != -99) {
+            NativeCall sp;
+            sp.Uint(goh).Int(localPrio);
+            sp.Call(NativeHash("SET_ACTOR_UPDATE_PRIORITY"));
+        }
+        Log("weapons: puppet 0x%08x update priority %d -> %d (the local player's)", goh, puppetPrio, localPrio);
     }
     const ULONGLONG now = GetTickCount64();
     if (weapon != p.lastAsked) {

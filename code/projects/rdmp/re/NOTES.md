@@ -1108,3 +1108,14 @@ components on a puppet, which other threads read playerInfo during the swap.
     (+0x6f0..+0x714) stays "no hit" (distance -1, ground -1000) even at the right height; the player's holds the hit
     (distance 0.40 = its origin above the ground). The player code reads that flag (input gate 0x1403dc210, actions
     0x14034b3d0, 0x140350580): a puppet's own player code believes it is in the air. OPEN: why its probe misses.
+
+### Puppets on the ground (2026-11-24, puppet_player.cpp UpdateLevelHook / GroundProbeHook)
+* Each frame the actor update (FUN_140abf77d) asks FUN_140ac1350(?, actor, ...) whether the actor gets the full update;
+  the answer goes to actor +0x112 bit 6 and +0x148 bit 0x08000000, and a change switches the character controller's
+  mode (FUN_140ac8280; coming back resets its ground state, FUN_1405528e0). In the reduced update the controller never
+  probes for ground (probe block distance -1): a standing puppet got it, so its player code thought it was in the air.
+  The player always gets the full update. Puppets now always do too (the decision returns 1 for them), and their
+  ground probe (FUN_14057f5a0) runs with their player bit set (without it the probe never hit, even at the right
+  height). [net] puppet_full_update=0 turns both off.
+* Moving puppet (move_test): position error median 1.15 -> 0.19 m, height -0.47 -> -0.01 m, on ground 5% -> 58%. A
+  standing puppet next to the crates at the spawn still sits 0.66 m high (pushed on top of them?), on ground 2%: open.
