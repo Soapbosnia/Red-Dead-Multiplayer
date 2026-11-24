@@ -38,6 +38,9 @@ bool g_pitchProbe = false;
 int g_autoWeapon = -1;  // [debug] auto_weapon
 int g_aimHoldFireMs = 0;  // [debug] aim_hold_fire_ms
 int g_aimHoldPeriodMs = 0;  // [debug] aim_hold_period_ms
+bool g_syncProbe = false;  // [debug] sync_probe
+int g_moveTest = 0;        // [debug] move_test
+bool g_groundWatch = false;  // [debug] ground_watch
 int g_puppetFactionStatus = 0;  // [debug] puppet_faction_status: the player faction's status toward a puppet
 bool g_aimHoldTarget = false;  // [debug] aim_hold_target=1: aim at the first remote player
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
@@ -211,6 +214,9 @@ void InitWeapons(const wchar_t* iniPath) {
     g_autoWeapon = static_cast<int>(GetPrivateProfileIntW(L"debug", L"auto_weapon", static_cast<UINT>(-1), iniPath));
     g_aimHoldFireMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_fire_ms", 0, iniPath));
     g_aimHoldPeriodMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_period_ms", 0, iniPath));
+    g_syncProbe = GetPrivateProfileIntW(L"debug", L"sync_probe", 0, iniPath) != 0;
+    g_moveTest = static_cast<int>(GetPrivateProfileIntW(L"debug", L"move_test", 0, iniPath));
+    g_groundWatch = GetPrivateProfileIntW(L"debug", L"ground_watch", 0, iniPath) != 0;
     g_puppetFactionStatus = static_cast<int>(GetPrivateProfileIntW(L"debug", L"puppet_faction_status", 0, iniPath));
     g_aimHoldTarget = GetPrivateProfileIntW(L"debug", L"aim_hold_target", 0, iniPath) != 0;
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
@@ -233,7 +239,87 @@ void InitWeapons(const wchar_t* iniPath) {
     g_aimHoldPoint = GetPrivateProfileIntW(L"debug", L"aim_hold_point", 0, iniPath) != 0;
 }
 
+// [debug] sync_probe=1: every 100 ms tick of the shared clock (two copies on one PC see the same GetTickCount64), the
+// local player's state and every puppet's, the same fields, so tools/syncdiff.py can compare a player with their
+// puppet in the other copy field by field.
+void SyncProbeLine(const char* who, uint32_t actor, uint32_t goh, ULONGLONG tick) {
+    Vec3 pos{};
+    float heading = 0.0f;
+    GetPuppetPose(goh, pos, heading);
+    float hp = -1.0f;
+    {
+        NativeCall h;
+        h.Uint(actor);
+        if (h.Call(NativeHash("GET_ACTOR_HEALTH"))) hp = h.ResultFloat();
+    }
+    float aim[3] = {};
+    if (const uintptr_t a = ActorFromGohHandle(goh)) {
+        const uintptr_t comp = IsReadable(a + 0xb8, 8) ? *reinterpret_cast<uintptr_t*>(a + 0xb8) : 0;
+        if (comp && IsReadable(comp + 0x3810, 12)) std::memcpy(aim, reinterpret_cast<const void*>(comp + 0x3810), 12);
+    }
+    static const char* kFlags[] = {"IS_ACTOR_ON_GROUND", "IS_ACTOR_JUMPING", "IS_ACTOR_CROUCHING", "IS_ACTOR_USING_COVER",
+                                   "IS_ACTOR_RAGDOLL", "IS_ACTOR_REACTING", "IS_ACTOR_SHOOTING", "IS_ACTOR_RELOADING",
+                                   "IS_WEAPON_DRAWN", "ACTOR_IS_HOLSTERED", "IS_ACTOR_USING_LEDGE", "IS_ACTOR_DEAD",
+                                   "GET_ACTOR_GAIT_TYPE", "GET_ACTOR_POSTURE"};
+    char flags[96];
+    int k = 0;
+    for (const char* f : kFlags) {
+        NativeCall c;
+        c.Uint(actor);
+        const int v = c.Call(NativeHash(f)) ? (c.ResultInt() & 0xff) : -9;
+        k += sprintf_s(flags + k, sizeof(flags) - k, "%d,", v);
+    }
+    // the character controller's ground probe (actor +0x88 -> +0x670: +0x10 contact point, +0x98 distance, +0xa6 on ground)
+    float gy = 0.0f, gd = 0.0f;
+    if (const uintptr_t a = ActorFromGohHandle(goh)) {
+        const uintptr_t cc = IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
+        if (cc && IsReadable(cc + 0x670, 0xa8)) gy = *reinterpret_cast<float*>(cc + 0x684), gd = *reinterpret_cast<float*>(cc + 0x708);
+    }
+    uintptr_t ccp = 0;
+    if (const uintptr_t a = ActorFromGohHandle(goh)) ccp = IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
+    Log("SP %s %llu pos %.3f %.3f %.3f h %.1f hp %.1f inhand %d aim %.2f %.2f %.2f f %s ground %.3f %.3f cc %p", who, tick, pos.x, pos.y,
+        pos.z, heading, hp, InHand(actor), aim[0], aim[1], aim[2], flags, gy, gd, reinterpret_cast<void*>(ccp));
+}
+
+void SyncProbeFrame() {
+    static ULONGLONG last = 0;
+    const ULONGLONG tick = GetTickCount64() / 100;
+    if (tick == last) return;
+    last = tick;
+    const uint32_t local = LocalActor();
+    if (local) SyncProbeLine("L", local, local, tick);
+    for (const auto& [goh, pw] : g_puppets) SyncProbeLine("P", goh, goh, tick);
+}
+
+// [debug] move_test=<copy>: that copy's player runs a fixed input pattern (12 s loop): walk 3 s, sprint 3 s (tapped),
+// stop, a jump press (0x18 held), crouch (0x10 tap), walk while turning. Its real inputs, so the game moves it the way a
+// player would and the other copy's puppet can be compared with it (sync_probe).
+void MoveTestFrame() {
+    static PlayerControls c;
+    const double t = std::fmod(GetTickCount64() / 1000.0, 12.0);
+    std::memset(c.value, 0, sizeof(c.value));
+    c.value[0x11] = c.value[0x12] = 0x7f;  // the stick, centred
+    if (t < 6.0 || (t >= 9.5 && t < 12.0)) c.value[0x12] = 0x00;           // forward
+    if (t >= 3.0 && t < 6.0) c.value[0x18] = std::fmod(t, 0.4) < 0.2 ? 0xff : 0;  // sprint: tapped
+    if (t >= 6.8 && t < 7.0) c.value[0x18] = 0xff;                          // a press standing: jump
+    if ((t >= 8.0 && t < 8.15) || (t >= 9.2 && t < 9.35)) c.value[0x10] = 0xff;  // crouch on, off
+    if (t >= 9.5) c.value[0x11] = 0xff;                                     // and turning right
+    c.heading = 0.0f;
+    c.valid = true;
+    SetLocalControlsOverride(&c);
+}
+
 void WeaponsFrame() {
+    if (g_syncProbe) SyncProbeFrame();
+    static bool groundWatched = false;  // [debug] ground_watch=1: who writes the local player's on-ground flag
+    if (g_groundWatch && !groundWatched) {
+        const uintptr_t a = ActorFromGohHandle(LocalActor()), cc = a && IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
+        if (cc && IsReadable(cc + 0x714, 4)) {
+            groundWatched = true;
+            ArmWriteWatch(cc + 0x714, "on_ground");
+        }
+    }
+    if (g_moveTest && g_moveTest == InstanceId()) MoveTestFrame();
     const uint32_t actor = LocalActor();
     if (!actor) return;
     if (g_pendingWeapon >= 0) {

@@ -32,7 +32,7 @@ constexpr float kCorrectTau = 0.12f;          // moving pull time constant (s): 
 constexpr float kCorrectTauStanding = 0.6f;   // standing: a slow drift into place (no animation to fight, nothing snaps)
 constexpr double kSettleMs = 800.0;           // standing this long (the stop animation is over) before any correction
 constexpr float kTeleport = 4.0f;      // larger gaps are teleported
-constexpr float kLevel = 0.5f;         // a height difference above this = the remote is on another level (crate, step)
+float g_level = 0.5f;  // a height difference above this = the remote is on another level (crate, step); [net] puppet_level_m
 
 float WrapPi(float a) {
     while (a > kPi) a -= 2.0f * kPi;
@@ -126,6 +126,11 @@ MoveInput MoveInputFromDesire(const uint8_t* desire) {
 
 void LoadPuppetControlConfig(const wchar_t* ini) {
     g_corrections = GetPrivateProfileIntW(L"net", L"puppet_nudge", 1, ini) != 0;
+    {
+        wchar_t lv[32];
+        GetPrivateProfileStringW(L"net", L"puppet_level_m", L"0.5", lv, 32, ini);
+        g_level = std::clamp(static_cast<float>(_wtof(lv)), 0.02f, 4.0f);
+    }
     wchar_t w[32];
     GetPrivateProfileStringW(L"net", L"puppet_correct_m", L"0.6", w, 32, ini);
     g_correctMoving = std::clamp(static_cast<float>(_wtof(w)), 0.1f, kTeleport);
@@ -218,7 +223,7 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
 
     // On another level than the remote (it stepped onto a crate / ledge, or the puppet fell off one) for 0.2 s: the
     // puppet can't climb, so the pull includes height.
-    const bool otherLevel = std::fabs(r.dy) > kLevel;
+    const bool otherLevel = std::fabs(r.dy) > g_level;
     if (!otherLevel) st.heightOffSince = 0;
     else if (!st.heightOffSince) st.heightOffSince = nowMs;
     const bool followHeight = otherLevel && nowMs - st.heightOffSince > 200.0;

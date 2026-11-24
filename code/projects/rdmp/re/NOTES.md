@@ -1091,3 +1091,20 @@ components on a puppet, which other threads read playerInfo during the swap.
   (shots.cpp ShotLine): MTA's bullet sync start / end. Duel, real aim: the shooter's hits on the puppet at 24.5, 30.6,
   32.1, 38.1 s matched the victim's damage at 24.6, 30.6, 32.2, 38.2 s; about half of the shooter's other hits were
   not hits in the victim's game (both bodies stagger on their own after a hit, so they stand apart for a moment).
+
+### Measuring the sync (2026-11-24, [debug] sync_probe, move_test, tools/syncdiff.py)
+* sync_probe=1 logs every 100 ms tick of the shared clock the local player's and each puppet's state (position,
+  heading, health, weapon, reticle point, 14 state natives, ground probe, controller); tools/syncdiff.py pairs a player
+  with their puppet in the other copy at the best-fitting lag. move_test=<copy> drives that copy's player with a 12 s
+  input pattern (walk, sprint, stop, a 0x18 press, crouch 0x10, turning); the jump and crouch ids in it are wrong
+  (neither triggered).
+* First results (copy 1 running the pattern, copy 2 standing):
+  - moving: best lag 200-700 ms, median error 1.15 m (0.47 m of it height), gait differs 25-42%;
+  - standing: the puppet 0.49 m above the player (under the 0.5 m "other level" threshold, never corrected);
+    [net] puppet_level_m=0.05 brings it to +0.05 m;
+  - the puppet is practically never "on ground" (IS_ACTOR_ON_GROUND = character controller actor +0x88 -> +0x716),
+    standing or moving, while the player is 99%. The controller (same class, vt 0x141CC97D0) is updated for the puppet
+    (FUN_140553340, which runs the ground probe FUN_14057f5a0 and writes +0x716 at 0x14057F6D7), but its probe block
+    (+0x6f0..+0x714) stays "no hit" (distance -1, ground -1000) even at the right height; the player's holds the hit
+    (distance 0.40 = its origin above the ground). The player code reads that flag (input gate 0x1403dc210, actions
+    0x14034b3d0, 0x140350580): a puppet's own player code believes it is in the air. OPEN: why its probe misses.
