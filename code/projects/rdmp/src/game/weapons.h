@@ -47,6 +47,7 @@ void LocalAim(float& x, float& y, float& z);
 // [debug] aim_hold=N: game copy N holds its aim input (its player aims, no mouse button needed). Two-copy tests.
 bool AimHoldDebug();
 bool AimHoldAtRemote();  // [debug] aim_hold_target=1: the held aim point is the first remote player's chest
+void FaceLocalPlayerAt(const Vec3& from, const Vec3& to);  // [debug] aim_hold_target: the local player turns to face it
 // [debug] aim_hold_point=1: the point that copy sends instead of its crosshair: 20 m away at a world yaw (aim_hold_yaw,
 // degrees) turning at aim_hold_sweep deg/s, up / down by aim_hold_pitch degrees (swinging when aim_hold_pitch_swing=1).
 void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z);

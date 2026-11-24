@@ -1058,3 +1058,15 @@ components on a puppet, which other threads read playerInfo during the swap.
   (SET_FACTION_STATUS_TO_INDIVIDUAL_ACTOR(2, puppet, [debug] puppet_faction_status, default 0)).
 * [debug] aim_hold_target also steers the test copy's own shots at the other player (its reticle point, comp +0x3800
   .. +0x3820, for the shot): its camera does not turn there, so without it no local shot ever hits a puppet.
+
+### Test harness aiming (2026-11-24) and melee, continued
+* [debug] aim_hold_target=1 now also turns the test copy's player to face the other player (SET_ACTOR_HEADING when more
+  than 20 deg off; every frame cancels punches) and steers its own shots at them (reticle point for the shot).
+* The camera cannot be pointed from outside: both camera matrices are rebuilt every frame (writes do not stick), the
+  camera instance +0x7e4 (= atan2(-fx, -fz), with a position at +0x7d0 and a direction at +0x7c0) is derived, and the
+  camera mapper (info +0x130, update FUN_1403f60a0 = vfunc +0x20) leaves its look rate at +0x68 / +0x6c (stick -1..1;
+  mouse mode FUN_1403f61b0: the mouse counts) but overwriting it after the update moved nothing while aiming.
+* Melee at 0.8 m (spawn spacing; note the build re-stages resources/spawner, so edit build/bin after building): the
+  local player punches into the puppet's body, but only 1 punch in ~90 s reached FUN_140ae5a40 (punch damage seems to
+  go another way), and the puppet stays relaxed (no fist stance, no punches) although its records get the attack and
+  aim presses (465 / 2500 frames). Two pieces left: the player's fist mode for a puppet, and the punch damage path.

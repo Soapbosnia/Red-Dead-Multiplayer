@@ -459,6 +459,19 @@ void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
     y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
 }
 bool AimHoldAtRemote() { return g_aimHoldTarget; }
+
+void FaceLocalPlayerAt(const Vec3& from, const Vec3& to) {  // [debug] aim_hold_target: the player faces the target
+    const float dx = to.x - from.x, dz = to.z - from.z;
+    if (dx * dx + dz * dz < 0.04f) return;
+    const float want = std::atan2(-dx, -dz) * 57.2957795f;  // the engine's heading faces (-sin h, -cos h)
+    float err = want - ActorHeadingDeg(ActorFromGohHandle(LocalActor()));
+    while (err > 180.0f) err -= 360.0f;
+    while (err < -180.0f) err += 360.0f;
+    if (std::fabs(err) < 20.0f) return;  // close enough: leave the animations alone
+    NativeCall h;
+    h.Uint(LocalActor()).Float(want).Bool(false);
+    h.Call(NativeHash("SET_ACTOR_HEADING"));
+}
 bool AimHoldDebug() {  // -1 = every copy; aim_hold_period_ms: held the first half of each period only
     if (g_aimHold == 0 || (g_aimHold != InstanceId() && g_aimHold > 0)) return false;
     return g_aimHoldPeriodMs <= 0 || GetTickCount64() % static_cast<ULONGLONG>(g_aimHoldPeriodMs) < static_cast<ULONGLONG>(g_aimHoldPeriodMs / 2);

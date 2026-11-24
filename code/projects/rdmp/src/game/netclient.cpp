@@ -342,6 +342,7 @@ void NetFrame(float /*gameTime*/) {
                     const PlayerState& o = rr.samples.back().s;
                     g_local.aimX = o.x, g_local.aimY = o.y + 1.1f, g_local.aimZ = o.z;
                     SetDebugShotTarget(true, g_local.aimX, g_local.aimY, g_local.aimZ);
+                    FaceLocalPlayerAt(pos, Vec3{o.x, o.y, o.z});  // [debug] and really faces them (melee targeting)
                     break;
                 }
             }
