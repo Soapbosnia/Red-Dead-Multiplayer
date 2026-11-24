@@ -48,8 +48,10 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* ep) {
         c->Dr6 = 0;
         c->EFlags |= 0x10000;  // RF
         const int n = ++g_multiHits[idx];
-        if (n <= 8) Log("bp[%s] #%d (%p) hit %d: thread %lu rcx=%p rdx=%p rax=%p", g_label, idx, reinterpret_cast<void*>(c->Rip), n,
-                        GetCurrentThreadId(), reinterpret_cast<void*>(c->Rcx), reinterpret_cast<void*>(c->Rdx), reinterpret_cast<void*>(c->Rax));
+        if (n <= 400)
+            Log("bp[%s] #%d (%p) hit %d: thread %lu rcx=%p rdx=%p r8=%p rax=%p ret=%p playerInfo=%p", g_label, idx, reinterpret_cast<void*>(c->Rip), n,
+                GetCurrentThreadId(), reinterpret_cast<void*>(c->Rcx), reinterpret_cast<void*>(c->Rdx), reinterpret_cast<void*>(c->R8), reinterpret_cast<void*>(c->Rax),
+                *reinterpret_cast<void**>(c->Rsp), *reinterpret_cast<void**>(GameAddr(0x1422DAF30)));
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     if ((c->Dr6 & 1) == 0) return EXCEPTION_CONTINUE_SEARCH;  // not our DR0 hit
@@ -128,9 +130,15 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* ep) {
         }
         return EXCEPTION_CONTINUE_EXECUTION;
     }
-    if (n <= kMaxHits) {
-        const uintptr_t addr = g_watchAddr.load();
-        const uint32_t value = *reinterpret_cast<volatile uint32_t*>(addr);
+    // Only writes that change the value count (a field rewritten every frame with the same value would use them up).
+    static uint32_t lastValue = 0;
+    static bool haveLast = false;
+    static int changes = 0;
+    const uint32_t value = *reinterpret_cast<volatile uint32_t*>(g_watchAddr.load());
+    const bool changed = !haveLast || value != lastValue;
+    haveLast = true;
+    lastValue = value;
+    if (changed && ++changes <= kMaxHits) {
         // Trap fires after the write: Rip is the instruction after the writer.
         Log("watch[%s] hit %d: thread %lu wrote 0x%08x (next rip=%p)", g_label, n, GetCurrentThreadId(), value,
             reinterpret_cast<void*>(c->Rip));
