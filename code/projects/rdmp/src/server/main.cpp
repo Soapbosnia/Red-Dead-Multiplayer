@@ -92,7 +92,7 @@ namespace {
             std::vector<uint64_t> wasted, respawned;
             UpdateDeaths(world, _autoRespawn, wasted, respawned);
             for (const uint64_t id : wasted) {
-                EmitPlayerEvent("playerWasted", id);
+                EmitWasted(id);
             }
             for (const uint64_t id : respawned) { // RDMP_AUTO_RESPAWN=1 only; normally a resource respawns
                 QueueAction(id, ActionKind::Spawn, kSpawnX, kSpawnY, kSpawnZ, kSpawnHeading);

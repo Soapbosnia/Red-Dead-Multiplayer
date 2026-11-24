@@ -181,7 +181,10 @@ void FwStep() {
         case fw::ActionKind::Fade: ScriptFadeCamera(action.a != 0.0f, action.b); break;
         case fw::ActionKind::CameraTarget: ScriptSetCameraTarget(); break;
         case fw::ActionKind::Control: ScriptSetPlayerControl(action.a != 0.0f); break;
-        case fw::ActionKind::Health: ScriptSetPlayerHealth(action.a); break;
+        case fw::ActionKind::Health:
+            ExpectLocalHealth(action.a);
+            ScriptSetPlayerHealth(action.a);
+            break;
         case fw::ActionKind::Kill: GameHost()->kill_local(); break;
         case fw::ActionKind::HudText: GameHost()->show_text(static_cast<int>(action.a), action.text, static_cast<int>(action.b)); break;
         case fw::ActionKind::GiveWeapon: GiveLocalWeapon(static_cast<int>(action.a), static_cast<int>(action.b), action.c != 0.0f); break;
@@ -316,9 +319,34 @@ void NetFrame(float /*gameTime*/) {
         if (AimHoldDebug()) {  // [debug] aim_hold: others see this copy aim at a test point 20 m away (weapons.h)
             g_local.controls[0x19] = 0xff;
             AimHoldPoint(pos, static_cast<double>(nowMs), g_local.aimX, g_local.aimY, g_local.aimZ);
+            if (AimHoldAtRemote()) {
+                for (const auto& [id, rr] : g_remotes) {
+                    if (rr.samples.empty()) continue;
+                    const PlayerState& o = rr.samples.back().s;
+                    g_local.aimX = o.x, g_local.aimY = o.y + 1.1f, g_local.aimZ = o.z;
+                    break;
+                }
+            }
         }
         float health = 0.0f;
-        if (GetLocalPlayerHealth(health)) g_localHealth = health;
+        if (GetLocalPlayerHealth(health)) {
+            g_localHealth = health;
+            // Damage: the local player's own game decided it (a remote's puppet shot them here, a fall, ...). Who did it:
+            // the remote whose puppet is the game's last attacker.
+            LocalHit hit;
+            if (PollLocalHit(health, hit)) {
+                uint64_t attacker = 0;
+                for (const auto& [id, pp] : g_puppetsById)
+                    if (hit.attacker && pp.goh == hit.attacker) attacker = id;
+                Log("damage: %.1f -> %.1f (attacker goh 0x%08x = player %llu, weapon %d, zone %d)", hit.before, hit.health, hit.attacker,
+                    static_cast<unsigned long long>(attacker), hit.weapon, hit.bodyPart);
+                if (g_api.local_damage && !g_api.local_damage(attacker, hit.weapon, hit.bodyPart, hit.loss, hit.health) && hit.health > 0.0f) {
+                    ScriptSetPlayerHealth(hit.before);  // a script cancelled it (clientPlayerDamage)
+                    g_localHealth = hit.before;
+                    PollLocalHit(hit.before, hit);      // re-baseline at the restored health
+                }
+            }
+        }
         g_localValid = true;
         if (g_trace) {
             fprintf(g_trace, "L,%.2f,%.3f,%.3f,%.3f,%.2f,%.3f,%d,", traceT, pos.x, pos.y, pos.z, heading, speed, (g_local.input.gait & 0x0f) ? 1 : 0);

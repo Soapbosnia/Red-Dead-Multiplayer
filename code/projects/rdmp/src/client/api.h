@@ -42,6 +42,9 @@ namespace RDMP::ClientApi {
     void DispatchBinds(const char *key, bool down);
     // The reserved "chatSend" event for a line the player typed (false: a handler blocked it), as the Framework raises it.
     bool EmitChatSend(const std::string &text);
+    // The reserved "clientPlayerDamage" event (attacker element | null, weapon, bodyPart, loss) for damage the local
+    // player took; false: a handler cancelled it.
+    bool EmitClientPlayerDamage(uint64_t attacker, int weapon, int bodyPart, float loss);
 
     void RegisterPlayerApi(const ScriptApi::Publisher &publish);
     void RegisterHudApi(const ScriptApi::Publisher &publish);

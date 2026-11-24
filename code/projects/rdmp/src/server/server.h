@@ -122,6 +122,8 @@ namespace RDMP::Server {
     // Weapons (api_weapons.cpp): what the server gave each player, and weapon switches (tick thread).
     void UpdateWeapons(World &world);
     void ForgetPlayerWeapons(uint64_t playerId);
+    // playerWasted with the killer (the last hit within 5 s, from playerDamage's reports), weapon and body part.
+    void EmitWasted(uint64_t playerId);
 
     void UpdateAttachedBlips(World &world); // tick thread (api_blips.cpp)
     void UpdateVehicles(World &world);      // tick thread (api_vehicles.cpp): who rides what

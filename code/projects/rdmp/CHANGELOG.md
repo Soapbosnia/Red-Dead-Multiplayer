@@ -12,7 +12,14 @@
   Full weapon state sync (fw_api v17): each player's game reports what it is doing with the weapon (aim state,
   weapon-ready countdown, drawn, reloading, clip, shots fired) and the puppet's own weapon state machine plays it:
   draw, weapon ready, aim, fire (shot for shot), reload (round for round), holster when the countdown runs out.
-  Measured with two copies on one PC: 30-60 ms for draw / holster / aim, 100-200 ms for shots and reloads. Damage events are next. devtools:
+  Measured with two copies on one PC: 30-60 ms for draw / holster / aim, 100-200 ms for shots and reloads.
+  **Damage sync** (fw_api v18; netcode: MAJOR, scripting: MINOR): the victim's own game decides, as in MTA. Client
+  event `clientPlayerDamage(attacker, weapon, bodyPart, loss)`, cancellable (return false: the health goes back);
+  server `playerDamage(player, attacker, weapon, bodyPart, loss)`; `playerWasted` now carries killer, weapon and body
+  part (the last hit within 5 s). A script's `setElementHealth` is not damage. The spawner spreads joining players
+  4 m apart (two players on one spot cannot shoot each other); `wasted` names the killer; devtools F4 god mode and a
+  server log of every hit. Known issue: on one PC with two copies, one copy's puppet sometimes fires only part of
+  the remote's shots. devtools:
   `/weapon name [ammo]`, `/weapons`, `/disarm`. fw_api v15. Player entity gains weapon / ammo (netcode: MAJOR).
 * **New chat box and nametags** (drawn by the mod, hud.cpp): chat top-left with outlined text that fades when idle,
   a dark panel with a red edge and a "Say:" line while typing (Up / Down history, Esc cancels; "chatSend" still lets

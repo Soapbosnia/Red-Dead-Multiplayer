@@ -92,7 +92,7 @@ namespace RDMP::Server {
             }
             if (killed) {
                 MarkDead(killed);
-                EmitPlayerEvent("playerWasted", killed);
+                EmitPlayerEventArgs("playerWasted", killed, {EventArg::Element(0), EventArg::Number(-1), EventArg::Number(-1)});
             }
             args.GetReturnValue().Set(true);
         }

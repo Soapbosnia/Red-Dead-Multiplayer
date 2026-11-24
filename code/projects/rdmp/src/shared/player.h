@@ -99,6 +99,14 @@ namespace RDMP::Shared {
         int8_t weapon   = -1;
         uint16_t ammo   = 0;
 
+        // Owner -> server: the last hit the owner's game gave them (the victim's game decides damage, as in MTA): dmgSeq
+        // counts hits (wraps), the rest describe the newest one. Server: playerDamage, and the killer on playerWasted.
+        uint8_t dmgSeq       = 0;
+        uint64_t dmgAttacker = 0;   // the attacking player's network id, 0 = none (fall, fire, NPC)
+        int8_t dmgWeapon     = -1;  // shared/weapons.h, -1 = none
+        int8_t dmgBodyPart   = -1;  // the game's hit zone, -1 = unknown
+        float dmgLoss        = 0.0f;
+
         // Owner -> server: the game's real health (0 = dead). `health` above is a server field the owner never
         // sends up, so without this a real in-game death (fall, drowning, gunfire) never reached the server.
         uint8_t localHealth = 100;
@@ -156,6 +164,11 @@ namespace RDMP::Shared {
             fields.Field(localVehicle);
             fields.Field(weapon);
             fields.Field(ammo);
+            fields.Field(dmgSeq);
+            fields.Field(dmgAttacker);
+            fields.Field(dmgWeapon);
+            fields.Field(dmgBodyPart);
+            fields.Field(dmgLoss);
         }
 
         // The owner only hears a server field through a forced state, so repeat them here.

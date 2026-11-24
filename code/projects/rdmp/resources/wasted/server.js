@@ -1,10 +1,11 @@
-// wasted: when a player dies, announce it, fade to black, respawn them at the spawn point and fade back in.
+// wasted: when a player dies, announce it (and who killed them), fade to black, respawn them at the spawn point and fade back in.
 
 const SPAWN = { x: -2208.91, y: 16.51, z: 2605.41, heading: -100.3 }; // Armadillo Station
 const RESPAWN_DELAY_MS = 4000;
 
-Events.on("playerWasted", (player) => {
-    outputChatBox(getPlayerName(player) + " was wasted", null, 220, 60, 60);
+Events.on("playerWasted", (player, killer, weapon) => {
+    const by = killer && killer !== player ? " by " + getPlayerName(killer) + " (" + getWeaponNameFromID(weapon) + ")" : "";
+    outputChatBox(getPlayerName(player) + " was wasted" + by, null, 220, 60, 60);
 
     setTimeout(() => {
         if (isElement(player)) fadeCamera(player, false, 800);

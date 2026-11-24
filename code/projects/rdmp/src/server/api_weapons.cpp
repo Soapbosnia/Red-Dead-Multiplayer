@@ -9,12 +9,15 @@
  *   getPedWeapons(player)                                          [weapon ids] the server gave and did not take
  *   getWeaponNameFromID(id) / getWeaponIDFromName(name)
  * Events: playerWeaponSwitch(player, previous, current)  (ids, -1 = none; the game holsters after a few seconds)
+ *         playerDamage(player, attacker | null, weapon, bodyPart, loss)   the victim's game decided it (as in MTA)
+ *         playerWasted(player, killer | null, weapon, bodyPart)            killer = the last hit within 5 s
  */
 
 #include "server/server.h"
 
 #include "shared/weapons.h"
 
+#include <chrono>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -26,6 +29,14 @@ namespace RDMP::Server {
 
         std::unordered_map<uint64_t, std::set<int>> g_given; // guarded by StateMutex()
         std::unordered_map<uint64_t, int> g_lastWeapon;      // guarded by StateMutex()
+        struct Hit {
+            uint8_t seq = 0;
+            bool seen = false;
+            uint64_t attacker = 0;
+            int weapon = -1, bodyPart = -1;
+            std::chrono::steady_clock::time_point at {};
+        };
+        std::unordered_map<uint64_t, Hit> g_hits;            // guarded by StateMutex()
 
         // A weapon argument: an id or a name; -2 when it is neither.
         int WeaponArg(const Args &args, int i) {
@@ -161,8 +172,27 @@ namespace RDMP::Server {
 
     void UpdateWeapons(World &world) {
         std::vector<std::tuple<uint64_t, int, int>> switches;
+        struct Damage {
+            uint64_t victim, attacker;
+            int weapon, bodyPart;
+            float loss;
+        };
+        std::vector<Damage> damages;
         world.ForEachRead<Player>([&](const auto &p) {
             std::lock_guard lock(StateMutex()); // entity lock -> mutex, the allowed order
+            Hit &h = g_hits[p.Id()];
+            if (!h.seen) {
+                h.seen = true;
+                h.seq  = p->dmgSeq;
+            }
+            else if (h.seq != p->dmgSeq) {
+                h.seq      = p->dmgSeq;
+                h.attacker = p->dmgAttacker;
+                h.weapon   = p->dmgWeapon;
+                h.bodyPart = p->dmgBodyPart;
+                h.at       = std::chrono::steady_clock::now();
+                damages.push_back({p.Id(), p->dmgAttacker, p->dmgWeapon, p->dmgBodyPart, p->dmgLoss});
+            }
             const auto it = g_lastWeapon.find(p.Id());
             if (it == g_lastWeapon.end()) {
                 g_lastWeapon[p.Id()] = p->weapon;
@@ -175,12 +205,34 @@ namespace RDMP::Server {
         for (const auto &[id, before, now] : switches) {
             EmitPlayerEventArgs("playerWeaponSwitch", id, {EventArg::Number(before), EventArg::Number(now)});
         }
+        for (const Damage &d : damages) {
+            EmitPlayerEventArgs("playerDamage", d.victim,
+                                {EventArg::Element(d.attacker), EventArg::Number(d.weapon), EventArg::Number(d.bodyPart), EventArg::Number(d.loss)});
+        }
+    }
+
+    void EmitWasted(uint64_t playerId) {
+        uint64_t killer = 0;
+        int weapon = -1, bodyPart = -1;
+        {
+            std::lock_guard lock(StateMutex());
+            const auto it = g_hits.find(playerId);
+            if (it != g_hits.end() && it->second.at != std::chrono::steady_clock::time_point {} &&
+                std::chrono::steady_clock::now() - it->second.at < std::chrono::seconds(5)) {
+                killer   = it->second.attacker;
+                weapon   = it->second.weapon;
+                bodyPart = it->second.bodyPart;
+                it->second.at = {};
+            }
+        }
+        EmitPlayerEventArgs("playerWasted", playerId, {EventArg::Element(killer), EventArg::Number(weapon), EventArg::Number(bodyPart)});
     }
 
     void ForgetPlayerWeapons(uint64_t playerId) {
         std::lock_guard lock(StateMutex());
         g_lastWeapon.erase(playerId);
         g_given.erase(playerId);
+        g_hits.erase(playerId);
     }
 
     void RegisterWeaponApi(const ScriptApi::Publisher &publish) {

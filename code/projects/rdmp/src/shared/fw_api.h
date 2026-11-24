@@ -27,7 +27,8 @@ namespace rdmp::fw {
 // v15: weapons: PlayerState weapon / ammo, weapon actions.
 // v16: PlayerState aim point (aimX / aimY / aimZ).
 // v17: PlayerState weapon state (aimState, weaponFlags, readyTicks, shots, clip).
-constexpr uint32_t kApiVersion = 17;
+// v18: Api::local_damage (damage the local player took: client event + report to the server).
+constexpr uint32_t kApiVersion = 18;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -229,6 +230,12 @@ struct Api {
     // server accepts it and used from the next connection).
     void (*get_settings)(Settings* out);
     void (*set_settings)(const Settings* in);
+    // The local player took damage this frame (their own game decided it): attacker = the remote player's network id
+    // (0 = none: a fall, fire, an NPC), weapon (shared/weapons.h, -1 = none), body part (the game's hit zone, -1 =
+    // unknown), loss and the health left. Raises the cancellable client event clientPlayerDamage and, unless a script
+    // cancelled it, reports the hit to the server. Returns 0 when cancelled (the game then gives the health back; a hit
+    // that killed cannot be undone).
+    int (*local_damage)(uint64_t attacker, int32_t weapon, int32_t bodyPart, float loss, float health);
 };
 
 }  // namespace rdmp::fw

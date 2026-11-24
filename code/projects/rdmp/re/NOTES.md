@@ -985,3 +985,30 @@ components on a puppet, which other threads read playerInfo during the swap.
   permanently instead makes the puppet lower its gun (other player paths need the local camera).
 * Debug: [debug] auto_weapon=<id> gives the local player that weapon 3 s after spawning (tests without the UI).
 
+
+### Damage sync (2026-11-24, weapons.cpp PollLocalHit, client.cpp LocalDamage, server api_weapons.cpp)
+* As in MTA the victim's own game decides: a remote's puppet fires real bullets in the victim's game, the victim's
+  health drops there, and that client reports it. Every frame the local health (actor +0x60 -> +0x20) is compared with
+  the last; a drop reads GET_LAST_ATTACKER (the puppet's goh handle -> the remote's player id), GET_LAST_HIT_WEAPON,
+  GET_LAST_HIT_ZONE(actor, int*) and CLEAR_LAST_HIT. A rifle / revolver body hit takes 14.5 at default health 100.
+* fw_api v18 `local_damage` -> client event `clientPlayerDamage` (EmitReservedSync: a handler returning false vetoes;
+  the health is put back, a lethal hit is not cancellable) -> Owner fields dmgSeq / dmgAttacker / dmgWeapon /
+  dmgBodyPart / dmgLoss -> server `playerDamage`, and the last hit within 5 s becomes `playerWasted`'s killer.
+  A script's setElementHealth is not a hit (ExpectLocalHealth). Verified with two copies: hits, cancel (31 cancelled
+  hits, health back each time, no server event), killer and weapon on playerWasted.
+* Puppets stay invulnerable (SET_ACTOR_INVULNERABILITY): that blocks only damage *to* them; their bullets still hurt
+  (measured: 21 hits from an invulnerable puppet). Not the faction either: puppet and local player are both
+  GET_ACTOR_FACTION 2, and hits land without SET_FACTION_STATUS_TO_INDIVIDUAL_ACTOR (args: faction, actor, status
+  0..6, 7 = none).
+* Two players standing ~1 m apart (both spawned on one point) cannot shoot each other: the shot never goes off (no
+  fire event). The spawner now spreads joining players 4 m apart.
+* The bullet: the fire animation's event (dispatcher FUN_1403019b0 over the weapon object's clip events, +0x8f8
+  delegate) calls FUN_140302090 per shot, which fills a bullet record (FUN_140320180). Puppets go through the same
+  path with their own weapon object. FIRE_PROJECTILE (0x1403BECB0 -> FUN_1403ba970, weapon name string) made no
+  damaging bullet from a puppet.
+* OPEN: in a two-copy test one copy's puppet often fires only part of the remote's shots (sometimes none) while the
+  other copy's fires every one; which copy varies by run. Not the puppet's clip (kept +1 for 400 ms after a press now),
+  not frame rate, not local hits on the puppet, not when its player context was copied, not the fire-gate fields
+  (sub410 +0x14/+0x18/+0x1c/+0x20, info +0x1c8/+0x244/+0x3bc..+0x3be identical in both), not a longer press. The
+  press reaches the fire code (FUN_1403489ae: 0x140348d10) and the mode-2 path (0x140349115) runs; the drop is after.
+  [debug] exec_bps=0x..,0x.. arms up to 4 execute breakpoints (logs rcx / rdx / r8 / rax / return / playerInfo).

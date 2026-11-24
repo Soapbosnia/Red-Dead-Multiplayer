@@ -35,9 +35,13 @@ bool g_aimHoldPitchSwing = false;
 bool g_aimHoldPoint = false;  // [debug] aim_hold_point=1: send a test point instead of the real crosshair
 bool g_pitchProbe = false;
 int g_autoWeapon = -1;  // [debug] auto_weapon
+int g_aimHoldFireMs = 0;  // [debug] aim_hold_fire_ms
+bool g_aimHoldTarget = false;  // [debug] aim_hold_target=1: aim at the first remote player
 int g_fireProbe = 0;  // [debug] fire_probe=<input id>: watch who reads that local input record
 uintptr_t g_execWatch = 0;  // [debug] exec_watch=0x14...: execute breakpoint, logs its first calls (distinct rcx)
 bool g_aimTrace = false;  // [debug] aim_trace: log a puppet's wanted / actual heading every 100 ms while it aims
+uintptr_t g_execBps[4] = {};  // [debug] exec_bps
+int g_execBpCount = 0;
 
 uint32_t LocalActor() {
     NativeCall c;
@@ -200,10 +204,21 @@ void InitWeapons(const wchar_t* iniPath) {
     g_stateProbe = GetPrivateProfileIntW(L"debug", L"state_probe", 0, iniPath) != 0;
     g_fireProbe = GetPrivateProfileIntW(L"debug", L"fire_probe", 0, iniPath);
     g_autoWeapon = static_cast<int>(GetPrivateProfileIntW(L"debug", L"auto_weapon", static_cast<UINT>(-1), iniPath));
+    g_aimHoldFireMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_fire_ms", 0, iniPath));
+    g_aimHoldTarget = GetPrivateProfileIntW(L"debug", L"aim_hold_target", 0, iniPath) != 0;
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
     wchar_t hex[32] = {};
     GetPrivateProfileStringW(L"debug", L"exec_watch", L"", hex, 32, iniPath);
     g_execWatch = static_cast<uintptr_t>(wcstoull(hex, nullptr, 16));
+    wchar_t bps[128] = {};
+    GetPrivateProfileStringW(L"debug", L"exec_bps", L"", bps, 128, iniPath);
+    for (wchar_t* q = bps; *q && g_execBpCount < 4;) {
+        wchar_t* end = nullptr;
+        const uintptr_t a = static_cast<uintptr_t>(wcstoull(q, &end, 16));
+        if (end == q) break;
+        if (a) g_execBps[g_execBpCount++] = a;
+        q = *end ? end + 1 : end;
+    }
     g_aimHoldYaw = static_cast<float>(static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_yaw", 0, iniPath)));
     g_aimHoldSweep = static_cast<float>(static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_sweep", 0, iniPath)));
     g_aimHoldPitch = static_cast<float>(static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_pitch", 0, iniPath)));
@@ -281,7 +296,15 @@ void WeaponsFrame() {
         execArmed = true;
         ArmExecWatch(GameAddr(g_execWatch), "exec_watch");
     }
+    static bool bpsArmed = false;  // [debug] exec_bps=0x..,0x..: up to 4 execute breakpoints (first calls logged)
+    if (!bpsArmed && g_execBpCount && !g_puppets.empty()) {
+        bpsArmed = true;
+        uintptr_t addrs[4];
+        for (int i = 0; i < g_execBpCount; ++i) addrs[i] = GameAddr(g_execBps[i]);
+        ArmExecBreakpoints(addrs, g_execBpCount, "exec_bps");
+    }
     SetLocalAimHeld(AimHoldDebug());  // [debug] aim_hold: this copy's own player really aims too
+    SetLocalFirePulse(AimHoldDebug() ? static_cast<uint32_t>(g_aimHoldFireMs) : 0u);
 }
 
 void LocalWeapon(int8_t& weapon, uint16_t& ammo) {
@@ -353,7 +376,9 @@ void SyncPuppetWeapon(uint32_t goh, int weapon) {
     PuppetWeapon& p = g_puppets[goh];
     if (!p.setUp) {
         p.setUp = true;
-        NativeCall inv;  // our shots must not kill a remote player here: their own game decides their damage
+        // Invulnerable: our shots must not hurt a remote player here, their own game decides their damage (as in MTA).
+        // It does not stop the puppet's own bullets from hurting us.
+        NativeCall inv;
         inv.Uint(goh).Bool(true);
         inv.Call(NativeHash("SET_ACTOR_INVULNERABILITY"));
     }
@@ -416,7 +441,58 @@ void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
     z = pos.z - std::cos(yaw) * 20.0f;
     y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
 }
+bool AimHoldAtRemote() { return g_aimHoldTarget; }
 bool AimHoldDebug() { return g_aimHold != 0 && (g_aimHold == InstanceId() || g_aimHold < 0); }  // -1 = every copy
+
+namespace {
+float g_expectHealth = -1.0f;  // a health a script set (ExpectLocalHealth): reaching it is no hit
+ULONGLONG g_expectUntil = 0;   // ... within a second
+}  // namespace
+
+void ExpectLocalHealth(float health) {
+    g_expectHealth = health;
+    g_expectUntil = GetTickCount64() + 1000;
+}
+
+bool PollLocalHit(float health, LocalHit& out) {
+    static float last = -1.0f;
+    static uint32_t lastActor = 0;
+    if (g_expectHealth >= 0.0f && GetTickCount64() > g_expectUntil) g_expectHealth = -1.0f;
+    if (g_expectHealth >= 0.0f && std::fabs(health - g_expectHealth) < 0.01f) {
+        g_expectHealth = -1.0f;
+        last = health;
+        return false;
+    }
+    const uint32_t actor = LocalActor();
+    if (!actor) {
+        last = -1.0f;
+        return false;
+    }
+    if (actor != lastActor || last < 0.0f || health > last) {  // new actor (spawn), first frame, healing / setHealth
+        lastActor = actor;
+        last = health;
+        return false;
+    }
+    if (health >= last) return false;
+    out = LocalHit{};
+    out.before = last;
+    out.health = health;
+    out.loss = last - health;
+    last = health;
+    NativeCall a, w, z;
+    a.Uint(actor);
+    if (a.Call(NativeHash("GET_LAST_ATTACKER"))) out.attacker = a.ResultUint();
+    w.Uint(actor);
+    if (w.Call(NativeHash("GET_LAST_HIT_WEAPON"))) out.weapon = w.ResultInt();
+    int zone = -1;
+    z.Uint(actor).Ptr(&zone);
+    if (z.Call(NativeHash("GET_LAST_HIT_ZONE")) && z.ResultBool()) out.bodyPart = zone;
+    if (!weapons::Valid(out.weapon)) out.weapon = -1;
+    NativeCall clear;
+    clear.Uint(actor);
+    clear.Call(NativeHash("CLEAR_LAST_HIT"));
+    return true;
+}
 
 void LocalWeaponState(WeaponState& out) {
     out = WeaponState{};

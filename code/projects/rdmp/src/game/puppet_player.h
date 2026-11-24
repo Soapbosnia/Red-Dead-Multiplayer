@@ -61,6 +61,8 @@ void SetPlayerWeaponState(uint32_t goh, const WeaponState& state);
 int PendingPuppetShots(uint32_t goh);
 // [debug] the local player's aim input held (a test copy aims without a mouse button).
 void SetLocalAimHeld(bool held);
+// [debug] the local player fires every `ms` (0 = off), with aim held.
+void SetLocalFirePulse(uint32_t ms);
 // Main thread, once per frame: runs every attached puppet's control update.
 void PuppetPlayerFrame();
 

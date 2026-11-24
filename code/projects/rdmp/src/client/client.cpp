@@ -11,6 +11,7 @@
 #include <integrations/client/networking/engine.h>
 #include <networking/network_client.h>
 
+#include "client/api.h"
 #include "client/client_natives.h"
 #include "client/fw_client.h"
 #include "client/frontend.h"
@@ -33,6 +34,13 @@ namespace {
     net::PlayerState g_local {};
     float g_localHealth = 100.0f;
     bool g_haveLocal    = false;
+    // The newest hit the local player took (fw::Api::local_damage), put on our avatar for the server.
+    struct LocalHit {
+        uint8_t seq = 0;
+        uint64_t attacker = 0;
+        int8_t weapon = -1, bodyPart = -1;
+        float loss = 0.0f;
+    } g_hit;
 
     // A server teleport (forced state with a server-authored pose, Player::poseForcedPending), reported once.
     bool g_forcedPending = false;
@@ -168,6 +176,8 @@ namespace {
                     me->weapon       = g_local.weapon;
                     me->ammo         = g_local.ammo;
                     me->aimX = g_local.aimX, me->aimY = g_local.aimY, me->aimZ = g_local.aimZ;
+                    me->dmgSeq = g_hit.seq, me->dmgAttacker = g_hit.attacker, me->dmgWeapon = g_hit.weapon;
+                    me->dmgBodyPart = g_hit.bodyPart, me->dmgLoss = g_hit.loss;
                     me->aimState = g_local.aimState, me->weaponFlags = g_local.weaponFlags, me->readyTicks = g_local.readyTicks;
                     me->shots = g_local.shots, me->clip = g_local.clip;
                 }
@@ -207,6 +217,18 @@ namespace {
         g_local       = *state;
         g_localHealth = health;
         g_haveLocal   = true;
+    }
+
+    int LocalDamage(uint64_t attacker, int32_t weapon, int32_t bodyPart, float loss, float health) {
+        if (!RDMP::ClientApi::EmitClientPlayerDamage(attacker, weapon, bodyPart, loss) && health > 0.0f) {
+            return 0;  // cancelled by a script (a hit that killed is reported anyway: it cannot be undone)
+        }
+        ++g_hit.seq;
+        g_hit.attacker = attacker;
+        g_hit.weapon   = static_cast<int8_t>(weapon < -1 ? -1 : weapon > 127 ? 127 : weapon);
+        g_hit.bodyPart = static_cast<int8_t>(bodyPart < -1 ? -1 : bodyPart > 127 ? 127 : bodyPart);
+        g_hit.loss     = loss;
+        return 1;
     }
 
     int GetRemotes(fw::Remote *out, int max) {
@@ -405,6 +427,7 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
     out->browser_favorite = [](const char *host, int port, const char *name, int add) { RDMP::Frontend::BrowserFavorite(host, port, name, add != 0); };
     out->browser_connect  = [](const char *host, int port, const char *pw) { return RDMP::Frontend::BrowserConnect(host, port, pw) ? 1 : 0; };
     out->disconnect       = &Disconnect;
+    out->local_damage     = &LocalDamage;
     out->get_settings     = [](rdmp::fw::Settings *o) { RDMP::Frontend::GetSettings(o); };
     out->set_settings     = [](const rdmp::fw::Settings *in) {
         if (in) {

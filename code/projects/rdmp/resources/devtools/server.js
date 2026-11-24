@@ -52,6 +52,10 @@ const commands = {
 Events.on("playerWeaponSwitch", (player, previous, current) =>
     console.log(getPlayerName(player) + " weapon " + previous + " -> " + current));
 
+Events.on("playerDamage", (player, attacker, weapon, bodyPart, loss) =>
+    console.log(getPlayerName(player) + " lost " + loss.toFixed(1) + " health to " +
+        (attacker ? getPlayerName(attacker) : "the world") + " (weapon " + weapon + ", body part " + bodyPart + ")"));
+
 Events.on("playerVehicleEnter", (player, vehicle) => outputChatBox(getPlayerName(player) + " mounted a horse"));
 Events.on("playerVehicleExit", (player, vehicle) => outputChatBox(getPlayerName(player) + " got off a horse"));
 

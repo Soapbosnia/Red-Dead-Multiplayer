@@ -145,7 +145,7 @@ WM_KEYDOWN / WM_KEYUP VK_ESCAPE to the game window instead (PowerShell PostMessa
 Claude app window may sit over part of the screen and swallow clicks there (check with WindowFromPoint).
 Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop the game before building).
 
-## Weapons and damage (in progress, 2026-11-23; owner's plan: weapons + damage, then element functions)
+## Weapons and damage (2026-11-23..24; owner's plan: weapons + damage, then element functions)
 * Done: script API (docs/SCRIPTING.md "Weapons"), weapon in hand + ammo synced (Player::weapon / ammo, owner
   fields), puppets armed and invulnerable locally; aim (input 0x19) and fire (0x09 / 0x0d) are among the 30 synced
   controls. Sidearms and long guns give / draw (long guns needed their equip slots enabled). re/NOTES.md "Weapons".
@@ -153,15 +153,16 @@ Start RDMPServer.exe for the Local tab / Direct Connect 127.0.0.1:27015 (stop th
   holster: the puppet runs the game's own weapon state machine from the remote's real state); facing and aim point too;
   puppets have private input mappers (no crosstalk from the local weapon wheel); the arm's pitch follows the remote
   (re/NOTES.md "Arm pitch, solved": the aim task gets the remote's aim point the local player's way)
-  (MTA-style: the remote's camera in the puppet's context, their body heading while aiming). OPEN: the arm's pitch (the
-  puppet aims level whatever the remote's pitch; the aim matrices are right now, so the pitch comes from somewhere else,
-  probably the aim parameters the camera writes for the local player only, FUN_14037da20); fire at a remote's target; (3) damage: local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON /
-  GET_LAST_HIT_ZONE (now resolvable, scriptnatives.cpp) -> client `clientPlayerDamage` (cancellable: restore health;
-  lethal hits need a hook on the damage function to cancel before death) and server `playerDamage`, killer on
-  `playerWasted`; (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
+  (MTA-style: the remote's camera in the puppet's context, their body heading while aiming); (3) damage: done
+  (re/NOTES.md "Damage sync"): local health drops -> GET_LAST_ATTACKER / GET_LAST_HIT_WEAPON / GET_LAST_HIT_ZONE ->
+  client `clientPlayerDamage` (cancellable; a lethal hit is not) -> server `playerDamage`, killer on `playerWasted`.
+  OPEN: one copy's puppet sometimes fires only part of the remote's shots (which copy varies per run; what was ruled
+  out is in NOTES); (4) the weapon wheel's slow motion (not the timestep at 0x142273750, not playerInfo+0x3d4; a
   flag at playerInfo+0x104 bit 0x20000 is set while the wheel is open); (5) Tab is both the weapon wheel and the
   scoreboard's default bind.
-* Test aids: [debug] aim_hold=2 makes game copy 2 hold its aim input (its player really aims; aim_hold_point=1 sends a
+* Test aids: [debug] aim_hold=2 makes game copy 2 hold its aim input (-1 = every copy; aim_hold_target=1 aims at the
+  first remote player's chest, aim_hold_fire_ms=1500 fires every 1.5 s, auto_weapon=4 gives a Cattleman 3 s after
+  spawning: a fully automatic two-copy damage test; exec_bps=0x..,0x.. up to 4 execute breakpoints; its player really aims; aim_hold_point=1 sends a
   test point instead: aim_hold_yaw / aim_hold_sweep / aim_hold_pitch / aim_hold_pitch_swing); aim_trace=1 logs the puppet's
   heading against the remote's every 100 ms; state_probe=1 logs the local player's and every puppet's weapon state on
   each change (the two copies' logs line up); weapon_probe=1 also binds aim to K and fire to L; fire_probe=<input id>

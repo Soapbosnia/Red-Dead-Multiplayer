@@ -46,7 +46,8 @@ Names follow MTA where an MTA function does the same thing. Below, each function
 | `playerConnected` | player | joined; they wait in limbo (black screen) until a script spawns them |
 | `playerDisconnected` | player | left |
 | `playerSpawned` | player | `spawnPlayer` was called |
-| `playerWasted` | player | died (any cause) |
+| `playerWasted` | player, killer \| null, weapon, bodyPart | died (any cause); killer, weapon and body part of the last hit if it came within 5 s (else `null`, -1, -1) |
+| `playerDamage` | player, attacker \| null, weapon, bodyPart, loss | lost health; `attacker` is the player who hit them (`null`: a fall, fire, the world). The victim's own game decided the hit, as in MTA, and their client could have cancelled it (`clientPlayerDamage`); weapon ids as in Weapons, -1 = none |
 | `playerChat` | player, message | a chat line; return `false` from a handler to keep it from being broadcast |
 | `playerCommand` | player, command, ...args | a chat line starting with `/` (`/tp 1 2 3` → `"tp", "1", "2", "3"`) |
 | `playerVehicleEnter` | player, vehicle | got on a vehicle (the game's own mount, E held, or `warpPedIntoVehicle`) |
@@ -129,6 +130,7 @@ Client scripts run on the game's main thread every frame.
 | `clientRender` | ms since the last frame; draw with `dx*` here (drawing lasts one frame) |
 | `clientKey` | key name, down (bool); only while the game has focus and the chat input is closed |
 | `clientClick` | button (`"left"` \| `"right"` \| `"middle"`), state (`"down"` \| `"up"`), x, y; while the cursor is shown |
+| `clientPlayerDamage` | attacker \| null, weapon, bodyPart, loss: the local player was hurt. Return `false` to cancel: the health goes back and the server hears nothing (a hit that kills cannot be cancelled) |
 
 ### Local player
 | Function | Notes |
@@ -173,8 +175,8 @@ joaat (lower-case); `re/natives_0x673783F3.csv` lists the natives this build has
 ## Bundled resources
 | Resource | Side | What |
 |---|---|---|
-| `spawner` | server | on join: spawn at Armadillo station, fade in, join / leave lines in chat |
-| `wasted` | server | on death: announce, fade out, respawn after 4 s, fade in |
+| `spawner` | server | on join: spawn at Armadillo station (side by side, 4 m apart, when several join), fade in, join / leave lines in chat |
+| `wasted` | server | on death: announce (and who killed them, with what), fade out, respawn after 4 s, fade in |
 | `playerblips` | server | a random-colour blip on every player (`SHOW_OWN_BLIP = true` while testing alone) |
 | `scoreboard` | client | hold Tab: the players (a `dx*` drawing example) |
-| `devtools` | both | F7 position, F8 die, F9 players; `/pos`, `/tp x y z`, `/kill`, `/heal`, `/big text`, `/horse [model]`, `/mount`, `/dismount` (testing only) |
+| `devtools` | both | F4 god mode (cancels your damage), F7 position, F8 die, F9 players; logs `playerDamage` on the server console; `/pos`, `/tp x y z`, `/kill`, `/heal`, `/big text`, `/horse [model]`, `/mount`, `/dismount` (testing only) |

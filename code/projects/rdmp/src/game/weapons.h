@@ -28,10 +28,25 @@ void LocalWeaponState(WeaponState& out);
 // A remote's weapon state onto their puppet, every frame (main thread): the state itself (puppet_player.cpp) and the
 // puppet's clip (the remote's rounds plus the shots it still has to fire, so it fires and reloads when they do).
 void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state);
+// Damage the local player took since the last call (health drop): who hit them (the attacker's actor, a goh handle; 0 =
+// none), with what (shared/weapons.h, -1 = none), where (the game's hit zone, -1 = unknown) and how much. The game's own
+// record of the hit (GET_LAST_ATTACKER and co.) is cleared after reading.
+struct LocalHit {
+    uint32_t attacker = 0;
+    int weapon = -1;
+    int bodyPart = -1;
+    float loss = 0.0f;
+    float health = 0.0f;  // left after the hit
+    float before = 0.0f;  // before it
+};
+bool PollLocalHit(float health, LocalHit& out);
+// A script sets the local player's health: the drop to it is not damage (no clientPlayerDamage / playerDamage).
+void ExpectLocalHealth(float health);
 // The local player's aim point (the reticle target point: where the camera's crosshair is in the world).
 void LocalAim(float& x, float& y, float& z);
 // [debug] aim_hold=N: game copy N holds its aim input (its player aims, no mouse button needed). Two-copy tests.
 bool AimHoldDebug();
+bool AimHoldAtRemote();  // [debug] aim_hold_target=1: the held aim point is the first remote player's chest
 // [debug] aim_hold_point=1: the point that copy sends instead of its crosshair: 20 m away at a world yaw (aim_hold_yaw,
 // degrees) turning at aim_hold_sweep deg/s, up / down by aim_hold_pitch degrees (swinging when aim_hold_pitch_swing=1).
 void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z);

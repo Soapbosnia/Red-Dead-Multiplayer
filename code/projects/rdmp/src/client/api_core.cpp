@@ -98,6 +98,26 @@ namespace RDMP::ClientApi {
     }
 } // namespace RDMP::ClientApi
 
+namespace RDMP::ClientApi {
+    bool EmitClientPlayerDamage(uint64_t attacker, int weapon, int bodyPart, float loss) {
+        auto *client = Client();
+        auto *module = client ? client->GetScriptingModule() : nullptr;
+        auto *engine = module ? module->GetScriptingEngine() : nullptr;
+        if (!engine || !module->GetResourceManager()) {
+            return true;
+        }
+        Framework::Scripting::EngineScope scope(engine);
+        if (!scope.Valid()) {
+            return true;
+        }
+        auto *isolate = scope.Isolate();
+        std::vector<v8::Local<v8::Value>> args {attacker ? Wrap(isolate, attacker) : v8::Null(isolate).As<v8::Value>(),
+                                                v8::Integer::New(isolate, weapon), v8::Integer::New(isolate, bodyPart),
+                                                v8::Number::New(isolate, loss)};
+        return module->GetResourceManager()->GetEvents().EmitReservedSync(isolate, scope.Context(), "clientPlayerDamage", args);
+    }
+} // namespace RDMP::ClientApi
+
 namespace ClientNatives {
     void Attach(RDMP::FwClient *client, const rdmp::fw::Host *host) {
         RDMP::ClientApi::g_client = client;

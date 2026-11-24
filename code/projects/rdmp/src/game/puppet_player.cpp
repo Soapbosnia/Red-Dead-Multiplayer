@@ -83,6 +83,7 @@ struct Context {
     bool haveWeapon = false;
     uint8_t shotsDone = 0;                 // remote shots the puppet has fired
     int firePhase = 0;                     // frames left of the current fire press (+) / release (-)
+    ULONGLONG lastFireMs = 0;              // when the puppet last pressed fire
     int reloadFrames = 0;                  // frames left of a reload press
     bool wasReloading = false;
     bool camAiming = false;                // this frame: the remote aims; their camera = camEye -> camFwd
@@ -97,9 +98,11 @@ using ControlUpdateFn = void (*)(uintptr_t ctrl);
 ControlUpdateFn g_controlUpdateOrig = nullptr;  // FUN_1403726f0 through the trampoline
 bool g_localOverride = false;
 bool g_localAimHeld = false;  // [debug] aim_hold: the local player's aim input (0x19) held
+uint32_t g_localFirePulseMs = 0;  // [debug] aim_hold_fire_ms: the local player fires every that many ms
 PlayerControls g_localControls;
 PlayerControlFn g_playerControlOrig = nullptr;
 std::atomic<int> g_switched{0};
+constexpr ULONGLONG kShotInFlightMs = 400;  // a fire press to its bullet (the fire animation's event), at most
 constexpr uintptr_t kCameraManager = 0x142C45738;  // *(+8) = the gameplay camera: +0x1d0 right, +0x1e0 up, +0x1f0 back, +0x200 position
 constexpr uintptr_t kReticleUpdate = 0x140348600;  // FUN_140348600(info): the reticle target point from the camera, and more
 constexpr uintptr_t kAimTaskVt = 0x141D47C18;      // the aim task (FUN_140d169a0 its update): *(*(motion+0xaa8)+8)
@@ -172,6 +175,7 @@ void StepWeaponInputs(Context& c) {
         ++c.firePhase;
     } else if (static_cast<uint8_t>(c.weapon.shots - c.shotsDone) != 0) {
         ++c.shotsDone;
+        c.lastFireMs = GetTickCount64();
         c.firePhase = 2;
     }
     const bool reloading = (c.weapon.flags & 2) != 0;
@@ -328,10 +332,23 @@ void ControlUpdateHook(uintptr_t ctrl) {
     const uintptr_t info = Ptr(GameAddr(kPlayerInfoPtr));
     if (g_localAimHeld && info && Ptr(info + 0x118) == ctrl) {
         const uintptr_t set = Ptr(ctrl + 0x20), recs = set ? Ptr(set) : 0;
-        if (recs && IsReadable(recs + 0x19 * 16, 16)) {
+        if (recs && IsReadable(recs + 0x1e * 16, 16)) {
             uint8_t* r = reinterpret_cast<uint8_t*>(recs + 0x19 * 16);
             r[3] = r[2];
             r[2] = static_cast<uint8_t>(0xff ^ r[0]);
+            if (g_localFirePulseMs) {  // fire for ~3 frames every g_localFirePulseMs
+                static ULONGLONG next = 0;
+                static int frames = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!next) next = now + g_localFirePulseMs;
+                if (now >= next) frames = 3, next = now + g_localFirePulseMs;
+                for (const int id : {0x09, 0x0d}) {
+                    uint8_t* f = reinterpret_cast<uint8_t*>(recs + id * 16);
+                    f[3] = f[2];
+                    f[2] = static_cast<uint8_t>((frames > 0 ? 0xff : 0x00) ^ f[0]);
+                }
+                if (frames > 0) --frames;
+            }
         }
     }
     const bool local = g_localOverride && info && Ptr(info + 0x118) == ctrl;
@@ -406,6 +423,7 @@ void DetachPlayerControl(uint32_t goh) {
 bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 
 void SetLocalAimHeld(bool held) { g_localAimHeld = held; }
+void SetLocalFirePulse(uint32_t ms) { g_localFirePulseMs = ms; }
 
 void SetPlayerWeaponState(uint32_t goh, const WeaponState& state) {
     const auto it = g_byGoh.find(goh);
@@ -419,7 +437,11 @@ void SetPlayerWeaponState(uint32_t goh, const WeaponState& state) {
 int PendingPuppetShots(uint32_t goh) {
     const auto it = g_byGoh.find(goh);
     if (it == g_byGoh.end() || !it->second->haveWeapon) return 0;
-    return static_cast<uint8_t>(it->second->weapon.shots - it->second->shotsDone) + (it->second->firePhase > 0 ? 1 : 0);
+    const Context& c = *it->second;
+    // A press fires the bullet (and takes it from the clip) only when the fire animation gets there, a few frames
+    // later: until then the shot still counts as to come.
+    const bool inFlight = c.firePhase != 0 || GetTickCount64() - c.lastFireMs < kShotInFlightMs;
+    return static_cast<uint8_t>(c.weapon.shots - c.shotsDone) + (inFlight ? 1 : 0);
 }
 
 void SetPlayerArmed(uint32_t goh, bool armed) {
