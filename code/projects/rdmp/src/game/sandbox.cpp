@@ -1065,8 +1065,18 @@ bool NudgePuppet(uint32_t goh, const Vec3& pos, float heading) {
     }();
     msg[0x58] = nudgeFlags;
     msg[0x59] = 1;
+    // The message resets the character controller's ground state (probe block +0x6f0..+0x714, on-ground byte +0x716):
+    // the puppet would count as in the air until its next probe, and nudged every frame it never lands. A few
+    // centimetres do not change the ground under it, so its ground state is put back as it was ([debug] nudge_keep_ground).
+    static const bool keepGround = GetPrivateProfileIntW(L"debug", L"nudge_keep_ground", 1, g_iniPath) != 0;
+    const uintptr_t actor = ReadPtr(slot);
+    const uintptr_t cc = keepGround && actor && IsReadable(actor + 0x88, 8) ? ReadPtr(actor + 0x88) : 0;
+    alignas(16) uint8_t ground[0x28];
+    const bool saved = cc && IsReadable(cc + 0x6f0, sizeof(ground));
+    if (saved) std::memcpy(ground, reinterpret_cast<void*>(cc + 0x6f0), sizeof(ground));
     using SendFn = void (*)(uintptr_t entity, void* msg);
     reinterpret_cast<SendFn>(GameAddr(0x140AE0100))(entity, msg);
+    if (saved) std::memcpy(reinterpret_cast<void*>(cc + 0x6f0), ground, sizeof(ground));
     return true;
 }
 

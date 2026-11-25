@@ -299,7 +299,7 @@ void SyncProbeFrame() {
     for (const auto& [goh, pw] : g_puppets) SyncProbeLine("P", goh, goh, tick);
 }
 
-// [debug] move_test=<copy>: that copy's player runs a fixed input pattern (12 s loop): walk 3 s, sprint 3 s (tapped),
+// [debug] move_test=<copy>: that copy's player runs a fixed input pattern (12 s loop, turning): walk 3 s, sprint 3 s (tapped),
 // stop, a jump press (0x18 held), crouch (0x10 tap), walk while turning. Its real inputs, so the game moves it the way a
 // player would and the other copy's puppet can be compared with it (sync_probe).
 void MoveTestFrame() {
@@ -312,7 +312,9 @@ void MoveTestFrame() {
     if (t >= 6.8 && t < 7.0) c.value[0x18] = 0xff;                          // a press standing: jump
     if ((t >= 8.0 && t < 8.15) || (t >= 9.2 && t < 9.35)) c.value[0x10] = 0xff;  // crouch on, off
     if (t >= 9.5) c.value[0x11] = 0xff;                                     // and turning right
-    c.heading = 0.0f;
+    // The heading turns all the time (a full turn per 12 s loop), so the player walks circles of a few metres
+    // instead of into the nearest wall.
+    c.heading = static_cast<float>(t / 12.0 * 6.283185307179586 - 3.141592653589793);
     c.valid = true;
     SetLocalControlsOverride(&c);
 }

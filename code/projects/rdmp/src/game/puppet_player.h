@@ -70,6 +70,9 @@ void SetLocalFirePulse(uint32_t ms);
 // Whether the puppet's remote is aiming right now (their aim state, with a weapon).
 bool IsPuppetAiming(uint32_t goh);
 void SetProbePlayerBit(bool on);
+// A moving puppet's position error (remote minus puppet, metres, x / z): its desired heading is bent toward it.
+void SetPuppetSteer(uint32_t goh, float ex, float ez, bool on);
+void SetPuppetSteerTuning(float gain, float maxBendDeg);
 void SetCoverAttachMode(int mode);
 // In cover = the character controller's stance (actor+0x88 -> +0xb40, (word & 0xf00) == 0x100).
 bool ActorInCover(uintptr_t actor);  // [net] puppet_full_update: full update + ground probe like the player

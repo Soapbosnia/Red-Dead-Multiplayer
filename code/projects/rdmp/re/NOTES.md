@@ -1163,3 +1163,15 @@ MTA does not trust buttons with toggles; neither do we now.
   puppet's control object +0x10c after its input step and before vfunc +0x28 builds the move vector, whenever both are
   moving. The sprint tap rhythm replayed over the network no longer decides the gait.
 - **Hit reactions**: none on a puppet whose remote aims (MTA's rule); its health is not touched either.
+
+### Smooth moving puppets: corrections that keep the ground (2026-11-25, sandbox.cpp NudgePuppet)
+* The old move_test walked one world direction and spent most of the run against a wall (position errors flat over
+  every lag = standing). It now turns all the time (a circle per 12 s loop).
+* Measured moving: position 0.06 m median and no delay beyond the network (100 ms), but **on ground only 56%**: every
+  MTA-style per-frame nudge is a transform message, and that resets the character controller's ground state.
+* Tried: deadband 0.25 m (0.11 m, ground 61%: the facing check still nudged while turning); steering, the desired
+  heading bent toward the remote ([net] puppet_steer=1, gain / max bend / max gap configurable): ground 80-89% but
+  0.31 m and 7-10 deg behind, as the puppet's own turn rate lags a turning remote.
+* Fix: NudgePuppet saves the controller's probe block and on-ground byte (cc+0x6f0..+0x717) before the message and
+  puts them back after ([debug] nudge_keep_ground=1). Moving puppet: **on ground 100%** (261 of 262 ticks), position
+  0.05 m median, heading 1.8 deg, lag = network. Steering stays off by default.

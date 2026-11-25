@@ -49,7 +49,7 @@ never the death animation. *Ours:* the same: lock (clamp + restore) and the hit 
 
 ## Redesign, in order
 
-1. **Position like MTA** (done, 0.05 m median moving): correct toward the newest state continuously (error spread over ~100 ms), velocity on the
+1. **Position like MTA** (done: 0.05 m median moving, on the ground 100%, no delay beyond the network): correct toward the newest state continuously (error spread over ~100 ms), velocity on the
    puppet, height forced when the remote is not moving vertically (under-floor fix), warp past a speed-scaled
    threshold. Drop the dead zones.
 2. **Puppets on the ground**: find why their ground probe never hits (first suspect: the player bit, actor +0x118, as

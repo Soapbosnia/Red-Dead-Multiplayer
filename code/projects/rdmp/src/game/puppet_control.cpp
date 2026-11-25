@@ -13,6 +13,7 @@
 
 #include "locomotion.h"
 #include "log.h"
+#include "puppet_player.h"
 #include "sandbox.h"
 
 namespace rdmp {
@@ -34,6 +35,8 @@ constexpr double kSettleMs = 800.0;           // standing this long (the stop an
 constexpr float kTeleport = 4.0f;      // larger gaps are teleported
 bool g_mtaCorrection = true;  // [net] puppet_correction=mta (default) | classic
 float g_mtaMin = 0.05f;        // [net] puppet_correct_min_m: smaller gaps are not corrected (mta)
+bool g_steer = false;          // [net] puppet_steer: a moving puppet closes gaps with its own legs (mta)
+float g_steerMax = 0.5f;       // [net] puppet_steer_max_m: past this a moving puppet is nudged after all
 float g_level = 0.5f;  // a height difference above this = the remote is on another level (crate, step); [net] puppet_level_m
 
 float WrapPi(float a) {
@@ -134,6 +137,13 @@ void LoadPuppetControlConfig(const wchar_t* ini) {
         g_mtaCorrection = _wcsicmp(mode, L"classic") != 0;
         GetPrivateProfileStringW(L"net", L"puppet_correct_min_m", L"0.05", mode, 32, ini);
         g_mtaMin = std::clamp(static_cast<float>(_wtof(mode)), 0.0f, 2.0f);
+        g_steer = GetPrivateProfileIntW(L"net", L"puppet_steer", 0, ini) != 0;
+        GetPrivateProfileStringW(L"net", L"puppet_steer_max_m", L"0.5", mode, 32, ini);
+        g_steerMax = std::clamp(static_cast<float>(_wtof(mode)), 0.1f, 3.0f);
+        wchar_t gain[32], bend[32];
+        GetPrivateProfileStringW(L"net", L"puppet_steer_gain", L"0.8", gain, 32, ini);
+        GetPrivateProfileStringW(L"net", L"puppet_steer_bend_deg", L"25", bend, 32, ini);
+        SetPuppetSteerTuning(std::clamp(static_cast<float>(_wtof(gain)), 0.0f, 5.0f), std::clamp(static_cast<float>(_wtof(bend)), 0.0f, 90.0f));
     }
     {
         wchar_t lv[32];
@@ -177,6 +187,11 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
             return r;
         }
         if (!g_corrections) return r;
+        // Moving, the gap is closed by steering: the puppet's desired heading bends toward the remote's position and its
+        // own legs and turn animation take it there (puppet_player.cpp). No transform message, so its ground state and
+        // locomotion stay as the game has them; only a gap past g_steerMax is nudged.
+        SetPuppetSteer(goh, ex, ez, g_steer && r.moving);
+        if (g_steer && r.moving && std::sqrt(ex * ex + ey * ey + ez * ez) < g_steerMax) return r;
         // Below g_mtaMin the puppet's own movement is left alone: every transform message resets the character
         // controller's ground state (the game then treats the puppet as in the air for that frame).
         if (std::sqrt(ex * ex + ey * ey + ez * ez) < g_mtaMin && std::fabs(WrapPi((t.newestHeading - r.curHeading) * kDeg)) < 5.0f * kDeg)

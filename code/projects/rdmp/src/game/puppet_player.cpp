@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -98,6 +99,8 @@ struct Context {
     ULONGLONG coverPressUntil = 0;         // the puppet's cover input is held until then
     ULONGLONG lastCoverMs = 0;             // when the puppet last pressed it
     bool loggedCover = false, loggedWant = false;
+    float steerX = 0.0f, steerZ = 0.0f;    // position error to steer out (SetPuppetSteer)
+    bool steer = false;
     bool coverAttach = false;              // take cover in this frame's player update (ATTACH_PLAYER_TO_COVER)
     bool coverWant = false;                // the remote's in-cover state, once it held 300 ms
     bool coverRaw = false;
@@ -106,7 +109,9 @@ struct Context {
 
 std::map<uint32_t, Context*> g_byGoh;
 int g_coverAttachMode = 1;  // ATTACH_PLAYER_TO_COVER's 2nd argument: 1 = search the controller's cover first ([debug] cover_attach_mode)
-constexpr int kCoverInput = 0x05;  // take / leave cover: a tap enters (when there is cover to take), a ~1 s hold leaves
+constexpr int kCoverInput = 0x05;
+float g_steerGain = 0.8f;                    // [net] puppet_steer_gain: per metre of error, against the unit walking direction
+float g_steerMaxBend = 25.0f * 0.01745329f;  // [net] puppet_steer_bend_deg  // take / leave cover: a tap enters (when there is cover to take), a ~1 s hold leaves
 std::map<uint32_t, Context*> g_byActorHandle;
 using PlayerControlFn = void (*)(uintptr_t component, void* update);
 using ControlUpdateFn = void (*)(uintptr_t ctrl);
@@ -562,6 +567,17 @@ bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 void SetLocalAimHeld(bool held) { g_localAimHeld = held; }
 void SetLocalFirePulse(uint32_t ms) { g_localFirePulseMs = ms; }
 void SetProbePlayerBit(bool on) { g_probePlayerBit = on; }
+
+void SetPuppetSteerTuning(float gain, float maxBendDeg) {
+    g_steerGain = gain;
+    g_steerMaxBend = maxBendDeg * 0.01745329f;
+}
+
+void SetPuppetSteer(uint32_t goh, float ex, float ez, bool on) {
+    const auto it = g_byGoh.find(goh);
+    if (it == g_byGoh.end()) return;
+    it->second->steerX = ex, it->second->steerZ = ez, it->second->steer = on;
+}
 void SetCoverAttachMode(int mode) { g_coverAttachMode = mode; }
 
 bool IsPuppetAiming(uint32_t goh) {
@@ -696,8 +712,25 @@ void PuppetPlayerFrame() {
                 if (c->controls.valid && c->controls.gait > 0 && At<uint32_t>(ctrl, 0x10c) != 0)
                     At<uint32_t>(ctrl, 0x10c) = static_cast<uint32_t>(c->controls.gait);
                 if (c->controls.valid && !aiming) {
-                    At<float>(ctrl, 0x104) = c->controls.heading;
-                    At<float>(ctrl, 0x100) = c->controls.heading;
+                    float h = c->controls.heading;
+                    // Steering (MTA closes the gap over the next interval; here the puppet's own legs do): the remote's
+                    // walking direction plus the position error, so the puppet walks back onto their path. A heading h
+                    // points along (-sin h, -cos h) (the game's own atan2(-x, -z)).
+                    if (c->steer) {
+                        const float dx = -std::sin(h) + c->steerX * g_steerGain, dz = -std::cos(h) + c->steerZ * g_steerGain;
+                        if (dx * dx + dz * dz > 1e-4f) {
+                            // bent by at most g_steerMaxBend: the body follows the desired heading, and a sharp bend
+                            // shows as the puppet facing off its path
+                            float bend = std::atan2(-dx, -dz) - h;
+                            while (bend > 3.14159265f) bend -= 6.2831853f;
+                            while (bend < -3.14159265f) bend += 6.2831853f;
+                            h += std::clamp(bend, -g_steerMaxBend, g_steerMaxBend);
+                            if (h < 0.0f) h += 6.2831853f;
+                            if (h >= 6.2831853f) h -= 6.2831853f;
+                        }
+                    }
+                    At<float>(ctrl, 0x104) = h;
+                    At<float>(ctrl, 0x100) = h;
                 } else if (aiming && At<float>(ctrl, 0x104) == 0.0f) {
                     At<float>(ctrl, 0x104) = At<float>(ctrl, 0x100);  // aiming, standing: the body follows the camera
                 }
