@@ -306,6 +306,8 @@ void NetFrame(float /*gameTime*/) {
         Vec3 aim;          // the world point their crosshair is on (interpolated like the position)
         WeaponState weaponState;  // their weapon state (newest)
         Vec3 shotFrom, shotTo;    // their shot line (newest): camera position -> crosshair point
+        Vec3 newestPos;           // their newest position / heading
+        float newestHeading;
         Vec3 vel;
         float transit;  // newest sample: arrival - sender capture time (ms; the real delay when both clocks are one PC's)
         float offset;   // sender clock -> local clock mapping in use (ms)
@@ -427,6 +429,16 @@ void NetFrame(float /*gameTime*/) {
                     const PlayerState& n = r.samples.back().s;
                     v.weaponState = WeaponState{n.aimState, n.weaponFlags, n.readyTicks, n.shots, n.clip};
                     v.shotFrom = Vec3{n.camX, n.camY, n.camZ};
+                    v.newestPos = Vec3{n.x, n.y, n.z};
+                    v.newestHeading = n.heading;
+                    if (SyncProbeOn()) {  // [debug] sync_probe: the newest received state, same clock ticks as SP L / SP P
+                        static std::map<uint16_t, ULONGLONG> lastTick;
+                        const ULONGLONG tick = GetTickCount64() / 100;
+                        if (lastTick[it->first] != tick) {
+                            lastTick[it->first] = tick;
+                            Log("SP N %llu pos %.3f %.3f %.3f h %.1f age %.0f", tick, n.x, n.y, n.z, n.heading, nowMs - r.samples.back().arrival);
+                        }
+                    }
                     v.shotTo = Vec3{n.aimX, n.aimY, n.aimZ};
                 }
                 ++nViews;
@@ -567,6 +579,9 @@ void NetFrame(float /*gameTime*/) {
         target.heading = v.heading;
         target.leadMs = v.leadMs;
         target.input = v.input;
+        target.newestPos = v.newestPos;
+        target.newestHeading = v.newestHeading;
+        target.haveNewest = true;
         if (g_puppetPlayerMode) {
             // MTA-style: the game's own player code moves the puppet from the remote's controller state
             if (!HasPlayerControl(p.goh) && !p.playerFailed) {

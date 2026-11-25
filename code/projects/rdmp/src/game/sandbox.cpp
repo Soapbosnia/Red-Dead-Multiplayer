@@ -1058,7 +1058,12 @@ bool NudgePuppet(uint32_t goh, const Vec3& pos, float heading) {
     for (int row = 0; row < 4; ++row)
         for (int col = 0; col < 3; ++col) reinterpret_cast<float*>(msg + 0x10 + row * 0x10)[col] = old[row * 4 + col];
     *reinterpret_cast<float**>(msg + 0x50) = m;
-    msg[0x58] = 0x6e;
+    static const uint8_t nudgeFlags = [] {  // [debug] nudge_flags (hex, default 6e)
+        wchar_t b[16] = L"6e";
+        GetPrivateProfileStringW(L"debug", L"nudge_flags", L"6e", b, 16, g_iniPath);
+        return static_cast<uint8_t>(wcstoul(b, nullptr, 16));
+    }();
+    msg[0x58] = nudgeFlags;
     msg[0x59] = 1;
     using SendFn = void (*)(uintptr_t entity, void* msg);
     reinterpret_cast<SendFn>(GameAddr(0x140AE0100))(entity, msg);

@@ -32,6 +32,8 @@ constexpr float kCorrectTau = 0.12f;          // moving pull time constant (s): 
 constexpr float kCorrectTauStanding = 0.6f;   // standing: a slow drift into place (no animation to fight, nothing snaps)
 constexpr double kSettleMs = 800.0;           // standing this long (the stop animation is over) before any correction
 constexpr float kTeleport = 4.0f;      // larger gaps are teleported
+bool g_mtaCorrection = true;  // [net] puppet_correction=mta (default) | classic
+float g_mtaMin = 0.05f;        // [net] puppet_correct_min_m: smaller gaps are not corrected (mta)
 float g_level = 0.5f;  // a height difference above this = the remote is on another level (crate, step); [net] puppet_level_m
 
 float WrapPi(float a) {
@@ -127,6 +129,13 @@ MoveInput MoveInputFromDesire(const uint8_t* desire) {
 void LoadPuppetControlConfig(const wchar_t* ini) {
     g_corrections = GetPrivateProfileIntW(L"net", L"puppet_nudge", 1, ini) != 0;
     {
+        wchar_t mode[32];
+        GetPrivateProfileStringW(L"net", L"puppet_correction", L"mta", mode, 32, ini);
+        g_mtaCorrection = _wcsicmp(mode, L"classic") != 0;
+        GetPrivateProfileStringW(L"net", L"puppet_correct_min_m", L"0.05", mode, 32, ini);
+        g_mtaMin = std::clamp(static_cast<float>(_wtof(mode)), 0.0f, 2.0f);
+    }
+    {
         wchar_t lv[32];
         GetPrivateProfileStringW(L"net", L"puppet_level_m", L"0.5", lv, 32, ini);
         g_level = std::clamp(static_cast<float>(_wtof(lv)), 0.02f, 4.0f);
@@ -146,6 +155,37 @@ PuppetDriveResult DrivePuppet(uint32_t goh, PuppetDrive& st, const PuppetTarget&
     if (!actor || !havePose) {
         SetPuppetTransform(goh, t.pos, t.heading);
         r.teleported = true;
+        return r;
+    }
+
+    // MTA's correction (CClientPed::SetTargetPosition / UpdateTargetPosition, docs/MTA_COMPARISON.md): the target is the
+    // newest received state, not an interpolated past one; every frame closes a share of the remaining error (all three
+    // axes) on top of the puppet's own movement from the remote's controls, so it always converges (about 63% in
+    // kMtaTau); the facing is the remote's; a gap past a speed-scaled threshold is warped.
+    if (g_mtaCorrection && t.playerDriven && t.haveNewest) {
+        constexpr float kMtaTau = 0.1f;
+        const Vec3& tgt = t.newestPos;
+        const float ex = tgt.x - r.cur.x, ey = tgt.y - r.cur.y, ez = tgt.z - r.cur.z;
+        r.err = std::sqrt(ex * ex + ez * ez);
+        r.dy = ey;
+        const float speed = std::sqrt(t.vel.x * t.vel.x + t.vel.z * t.vel.z);
+        r.moving = speed > 0.3f;
+        const float warp = 3.0f + 0.5f * speed;
+        if (std::sqrt(ex * ex + ey * ey + ez * ez) > warp) {
+            SetPuppetTransform(goh, tgt, t.newestHeading);
+            r.teleported = true;
+            return r;
+        }
+        if (!g_corrections) return r;
+        // Below g_mtaMin the puppet's own movement is left alone: every transform message resets the character
+        // controller's ground state (the game then treats the puppet as in the air for that frame).
+        if (std::sqrt(ex * ex + ey * ey + ez * ez) < g_mtaMin && std::fabs(WrapPi((t.newestHeading - r.curHeading) * kDeg)) < 5.0f * kDeg)
+            return r;
+        const float k = 1.0f - std::exp(-dt / kMtaTau);
+        // plus this frame's motion along the remote's velocity: a nudge replaces the movement the puppet's own
+        // animation would have made this frame
+        const Vec3 np{r.cur.x + t.vel.x * dt + ex * k, r.cur.y + ey * k, r.cur.z + t.vel.z * dt + ez * k};
+        r.corrected = NudgePuppet(goh, np, t.newestHeading);
         return r;
     }
 

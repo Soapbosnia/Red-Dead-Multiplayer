@@ -239,7 +239,17 @@ bool BuildContext(Context& c) {
 }
 
 // The player-control components the game creates for the player actor (FUN_140ae3ff0, asPlayer): +0xb8 and +0xd8.
+// It also marks the character controller of every actor created as a player (with or without a player-info: the
+// latter is how a remote player is made) with flag 0x1000 in *(controller +0x28) +0x20.
 bool AddPlayerComponents(uintptr_t actor) {
+    if (const uintptr_t cc = Ptr(actor + 0x88)) {
+        if (const uintptr_t cfg = Ptr(cc + 0x28)) {
+            if (IsReadable(cfg + 0x20, 4)) {
+                Log("puppet player: actor %p controller settings %08x -> as a player's (| 0x1000)", reinterpret_cast<void*>(actor), At<uint32_t>(cfg, 0x20));
+                At<uint32_t>(cfg, 0x20) |= 0x1000;
+            }
+        }
+    }
     const uintptr_t tmpl = Ptr(Ptr(Ptr(GameAddr(kPlayerTemplate)) + 0x18) + 0x10);
     if (!tmpl) return false;
     using Factory = uintptr_t* (*)(uintptr_t pool, uintptr_t descriptor);

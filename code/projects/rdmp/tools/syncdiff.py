@@ -82,10 +82,36 @@ def compare(name, real, puppet):
         print(f"   {f:10s} differs {100.0 * diff / len(vals):3.0f}%  (real on {real_on}, puppet on {pup_on} of {len(vals)}){mark}")
 
 
+NLINE = re.compile(r"SP N (\d+) pos (\S+) (\S+) (\S+)")
+
+
+def load_net(path):
+    out = {}
+    for line in open(path, encoding="utf-8", errors="replace"):
+        m = NLINE.search(line)
+        if m:
+            out[int(m.group(1))] = tuple(float(m.group(i)) for i in (2, 3, 4))
+    return out
+
+
+def lag_of(real, other, name):
+    best = None
+    for lag in range(0, 8):
+        errs = sorted(dist(real[t]["pos"], other[t + lag]) for t in real if t + lag in other)
+        if len(errs) >= 10 and (best is None or errs[len(errs) // 2] < best[0]):
+            best = (errs[len(errs) // 2], lag)
+    if best:
+        print(f"   {name}: best lag {best[1] * 100} ms (median {best[0]:.2f} m)")
+
+
 def main():
     l1, p1 = load(sys.argv[1])
     l2, p2 = load(sys.argv[2])
     compare("copy 1's player -> its puppet in copy 2", l1, p2)
+    n2 = load_net(sys.argv[2])
+    if n2:
+        lag_of(l1, n2, "network (copy 1's player -> newest state received by copy 2)")
+        lag_of(l1, {t: v["pos"] for t, v in p2.items()}, "puppet (copy 1's player -> its puppet)")
     compare("copy 2's player -> its puppet in copy 1", l2, p1)
 
 

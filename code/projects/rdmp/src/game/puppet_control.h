@@ -22,6 +22,10 @@ struct PuppetTarget {
     // The game's player code moves the puppet from the remote's controls (puppet_player.h): no movement request of
     // ours, no AI brain; only the position corrections below.
     bool playerDriven = false;
+    // The newest received state (MTA corrects toward it, not toward an interpolated past position).
+    Vec3 newestPos{};
+    float newestHeading = 0.0f;
+    bool haveNewest = false;
 };
 
 // Per-puppet controller state.

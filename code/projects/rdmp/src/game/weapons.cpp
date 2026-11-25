@@ -563,6 +563,7 @@ void AimHoldPoint(const Vec3& pos, double nowMs, float& x, float& y, float& z) {
     y = pos.y + 1.5f + std::tan(pitch) * 20.0f;
 }
 bool AimHoldAtRemote() { return g_aimHoldTarget; }
+bool SyncProbeOn() { return g_syncProbe; }
 
 void FaceLocalPlayerAt(const Vec3& from, const Vec3& to) {  // [debug] aim_hold_target: the player faces the target
     const float dx = to.x - from.x, dz = to.z - from.z;

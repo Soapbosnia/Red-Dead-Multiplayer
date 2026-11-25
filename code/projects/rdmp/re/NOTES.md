@@ -1119,3 +1119,16 @@ components on a puppet, which other threads read playerInfo during the swap.
   height). [net] puppet_full_update=0 turns both off.
 * Moving puppet (move_test): position error median 1.15 -> 0.19 m, height -0.47 -> -0.01 m, on ground 5% -> 58%. A
   standing puppet next to the crates at the spawn still sits 0.66 m high (pushed on top of them?), on ground 2%: open.
+
+### MTA-style position correction (2026-11-25, puppet_control.cpp, [net] puppet_correction=mta)
+* As CClientPed::UpdateTargetPosition: the target is the newest received state (not the interpolated past); each
+  frame closes 1 - exp(-dt / 0.1 s) of the remaining error in all three axes, plus the remote's velocity x dt (a nudge
+  replaces the frame's own animation motion), facing = the remote's; warp past 3 m + 0.5 s x speed. Gaps under
+  0.05 m ([net] puppet_correct_min_m) are left alone: every transform message (NudgePuppet, any flags) resets the
+  character controller's ground state, so nudging every frame kept the puppet "in the air".
+* Measured (move_test, sync_probe; the probe now also logs the newest received state, "SP N", so syncdiff splits the
+  delay): moving puppet position median 1.15 -> 0.05 m, height -0.47 -> 0.00 m, on ground 5% -> 75%, and no delay of
+  its own (network 100 ms, puppet 100 ms: probe ticks are 100 ms). Standing puppet at a clean spot: 0.00 m, on
+  ground as the player. The earlier +0.5 / +0.66 m standing offsets were the spawner putting the second player on the
+  crates at -z of the spawn (it now spreads players along +z).
+* Not explained yet: copy 2 receives ~25 states / s while ~40 / s are sent; gait still differs ~30% of the time.

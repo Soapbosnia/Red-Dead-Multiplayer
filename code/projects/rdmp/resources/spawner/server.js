@@ -20,8 +20,8 @@ Events.on("playerConnected", (player) => {
         const heading = (Math.atan2(-dx, -dz) * 180) / Math.PI; // the game's heading faces (-sin h, -cos h)
         spawnPlayer(player, SPAWN.x + slot * 1.5, SPAWN.y, SPAWN.z + slot * DUEL_DISTANCE, heading);
     } else {
-        // the n-th player here: 0, +4 m, -4 m, +8 m, ... sideways along the platform
-        const side = (n % 2 ? 1 : -1) * Math.ceil(n / 2) * SPACING;
+        // the n-th player here: 0, +4 m, +8 m, ... along the platform (-z of the spawn is a stack of crates)
+        const side = n * SPACING;
         spawnPlayer(player, SPAWN.x, SPAWN.y, SPAWN.z + side, SPAWN.heading);
     }
     fadeCamera(player, true, 1000);
