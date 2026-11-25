@@ -40,6 +40,7 @@ int g_aimHoldFireMs = 0;  // [debug] aim_hold_fire_ms
 int g_aimHoldPeriodMs = 0;  // [debug] aim_hold_period_ms
 bool g_syncProbe = false;  // [debug] sync_probe
 int g_moveTest = 0;        // [debug] move_test
+int g_inputProbe = 0;      // [debug] input_probe
 int g_groundWatch = 0;  // [debug] ground_watch
 int g_puppetFactionStatus = 0;  // [debug] puppet_faction_status: the player faction's status toward a puppet
 bool g_aimHoldTarget = false;  // [debug] aim_hold_target=1: aim at the first remote player
@@ -216,8 +217,10 @@ void InitWeapons(const wchar_t* iniPath) {
     g_aimHoldPeriodMs = static_cast<int>(GetPrivateProfileIntW(L"debug", L"aim_hold_period_ms", 0, iniPath));
     g_syncProbe = GetPrivateProfileIntW(L"debug", L"sync_probe", 0, iniPath) != 0;
     g_moveTest = static_cast<int>(GetPrivateProfileIntW(L"debug", L"move_test", 0, iniPath));
+    g_inputProbe = static_cast<int>(GetPrivateProfileIntW(L"debug", L"input_probe", 0, iniPath));
     g_groundWatch = static_cast<int>(GetPrivateProfileIntW(L"debug", L"ground_watch", 0, iniPath));  // 1 local, 2 a puppet
     SetProbePlayerBit(GetPrivateProfileIntW(L"net", L"puppet_full_update", 1, iniPath) != 0);
+    SetCoverAttachMode(static_cast<int>(GetPrivateProfileIntW(L"debug", L"cover_attach_mode", 1, iniPath)));
     g_puppetFactionStatus = static_cast<int>(GetPrivateProfileIntW(L"debug", L"puppet_faction_status", 0, iniPath));
     g_aimHoldTarget = GetPrivateProfileIntW(L"debug", L"aim_hold_target", 0, iniPath) != 0;
     g_pitchProbe = GetPrivateProfileIntW(L"debug", L"pitch_probe", 0, iniPath) != 0;
@@ -314,7 +317,32 @@ void MoveTestFrame() {
     SetLocalControlsOverride(&c);
 }
 
+// [debug] input_probe=<copy>: how cover is entered and left. An 8 s loop on that copy's player: tap the cover input
+// (0x05) at 0 s, tap it again at 2 s, hold it at 4 s; the character controller's stance
+// word (actor+0x88 -> +0xb40: 0xf00 nibble 1 = in cover, 0xf0 nibble 1 = crouched) is logged every 500 ms.
+void InputProbeFrame() {
+    static PlayerControls c;
+    static int lastHalf = -1;
+    const ULONGLONG ms = GetTickCount64();
+    const int t = static_cast<int>(ms % 8000);
+    const uintptr_t a = ActorFromGohHandle(LocalActor());
+    const uintptr_t cc = a && IsReadable(a + 0x88, 8) ? *reinterpret_cast<uintptr_t*>(a + 0x88) : 0;
+    const uint32_t word = cc && IsReadable(cc + 0xb40, 4) ? *reinterpret_cast<uint32_t*>(cc + 0xb40) : 0;
+    const int half = static_cast<int>(ms / 500);
+    if (half != lastHalf) {
+        lastHalf = half;
+        Log("input probe: t %.1f stance %08x", t / 1000.0, word);
+    }
+    std::memset(c.value, 0, sizeof(c.value));
+    c.value[0x11] = c.value[0x12] = 0x7f;
+    if (t < 200 || (t >= 2000 && t < 2200) || (t >= 4000 && t < 5000)) c.value[0x05] = 0xff;
+    c.heading = 0.0f;
+    c.valid = true;
+    SetLocalControlsOverride(&c);
+}
+
 void WeaponsFrame() {
+    if (g_inputProbe && g_inputProbe == InstanceId()) InputProbeFrame();
     if (g_syncProbe) SyncProbeFrame();
     static bool groundWatched = false;  // [debug] ground_watch=1: who writes the local player's on-ground flag
     if (g_groundWatch && !groundWatched && (g_groundWatch == 1 || !g_puppets.empty())) {
@@ -648,6 +676,7 @@ void LocalWeaponState(WeaponState& out) {
     const bool reloading = (NativeInt("IS_ACTOR_RELOADING", actor) & 0xff) != 0;
     if ((NativeInt("IS_WEAPON_DRAWN", actor) & 0xff) != 0) out.flags |= 1;
     if (reloading) out.flags |= 2;
+    if (ActorInCover(ActorFromGohHandle(actor))) out.flags |= WeaponState::kInCover;
     static int lastWeapon = -1, lastClip = -1;
     static uint8_t shots = 0;
     int clip = -1;

@@ -51,11 +51,14 @@ struct PlayerState {
     // The weapon state, read from the player's own game every frame (game/weapons.cpp LocalWeaponState) and put on their
     // puppet as it is (game/puppet_player.cpp): what the player is doing with the weapon, not which buttons they press.
     uint8_t aimState = 0;     // *(playerInfo + 0x410) + 0x14: 0 = not aiming, 2 = aiming (GET_PLAYER_ZOOM_STATE)
-    uint8_t weaponFlags = 0;  // kWeaponDrawn, kWeaponReloading
+    uint8_t weaponFlags = 0;  // kWeaponDrawn, kWeaponReloading, kInCover
     uint8_t readyTicks = 0;   // playerInfo + 0x3e0: weapon-ready time left, 1/20 s (at 0 the game holsters)
     uint8_t shots = 0;        // shots fired so far (wraps): the receiver fires the new ones
     uint8_t clip = 0;         // rounds in the clip
     static constexpr uint8_t kWeaponDrawn = 1, kWeaponReloading = 2;
+    // Not a weapon state, but one the buttons cannot be trusted with (cover is entered with a tap and left with a hold;
+    // RDR's crouch is the low cover stance): rides along here.
+    static constexpr uint8_t kInCover = 4;
 };
 
 }  // namespace rdmp::net

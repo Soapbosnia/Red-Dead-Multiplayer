@@ -143,7 +143,7 @@ namespace RDMP::Shared {
             fields.FloatBits(camY, kWorldMin, kWorldMax, kPosBits);
             fields.FloatBits(camZ, kWorldMin, kWorldMax, kPosBits);
             fields.BitsRange<uint8_t>(aimState, 0, 7);
-            fields.BitsRange<uint8_t>(weaponFlags, 0, 3);
+            fields.BitsRange<uint8_t>(weaponFlags, 0, 7);
             fields.BitsRange<uint8_t>(readyTicks, 0, 255);
             fields.BitsRange<uint8_t>(shots, 0, 255);
             fields.BitsRange<uint8_t>(clip, 0, 255);

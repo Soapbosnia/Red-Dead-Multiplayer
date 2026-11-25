@@ -12,8 +12,12 @@
 #include "memcheck.h"
 #include "patch.h"
 #include "sandbox.h"
+#include "scriptnatives.h"
 
 namespace rdmp {
+
+bool ActorInCover(uintptr_t actor);
+
 namespace {
 
 constexpr uintptr_t kPlayerInfoPtr = 0x1422DAF30;
@@ -91,9 +95,18 @@ struct Context {
     bool camAiming = false;                // this frame: the remote aims; their camera = camEye -> camFwd
     float camEye[3] = {}, camFwd[3] = {};
     bool haveAim = false;
+    ULONGLONG coverPressUntil = 0;         // the puppet's cover input is held until then
+    ULONGLONG lastCoverMs = 0;             // when the puppet last pressed it
+    bool loggedCover = false, loggedWant = false;
+    bool coverAttach = false;              // take cover in this frame's player update (ATTACH_PLAYER_TO_COVER)
+    bool coverWant = false;                // the remote's in-cover state, once it held 300 ms
+    bool coverRaw = false;
+    ULONGLONG coverRawSince = 0;
 };
 
 std::map<uint32_t, Context*> g_byGoh;
+int g_coverAttachMode = 1;  // ATTACH_PLAYER_TO_COVER's 2nd argument: 1 = search the controller's cover first ([debug] cover_attach_mode)
+constexpr int kCoverInput = 0x05;  // take / leave cover: a tap enters (when there is cover to take), a ~1 s hold leaves
 std::map<uint32_t, Context*> g_byActorHandle;
 using PlayerControlFn = void (*)(uintptr_t component, void* update);
 using ControlUpdateFn = void (*)(uintptr_t ctrl);
@@ -159,6 +172,9 @@ void FillRecords(Context& c, ULONGLONG now) {
         // (With fists, a knife or a thrown weapon there are no shots: their buttons are the punches, stabs and throws.)
         if (c.haveWeapon && c.gun && (id == 0x09 || id == 0x0d)) v = c.firePhase > 0 ? 0xff : 0;
         if (c.haveWeapon && c.gun && (id == 0x0a || id == 0x0e || id == 0x17)) v = c.reloadFrames > 0 ? 0xff : 0;
+        // Cover: one lost, early or ignored press and the puppet would stay the other way. As MTA does with its toggles,
+        // the puppet follows the remote's in-cover state (StepStance presses it when the two differ), not their button.
+        if (id == kCoverInput && c.haveWeapon) v = now < c.coverPressUntil ? 0xff : 0;
         if (id == 0x09 && v) ++c.fireFrames;
         if (id == 0x19 && v) ++c.aimFrames;
         r[0] = 0;  // no invert: the value already is the effective one
@@ -187,6 +203,35 @@ void StepWeaponInputs(Context& c) {
     if (reloading && !c.wasReloading) c.reloadFrames = 3;
     else if (c.reloadFrames > 0) --c.reloadFrames;
     c.wasReloading = reloading;
+}
+
+// The remote's in-cover state onto the puppet, tried again at most every 1.5 s (the cover move takes a moment to show in
+// the stance). Leaving is the player's own way, a cover tap. Taking cover by a tap does not work for a puppet (the
+// cover search the press needs runs in the local player's part of the frame), so the puppet takes it through
+// ATTACH_PLAYER_TO_COVER, called inside its context switch: the native acts on whoever playerInfo names, and does what
+// the press does once cover is found. Its 2nd argument picks how: 0 = start the cover behaviour (FUN_140d29720(behaviour, 1)),
+// which needs a cover point already found; non-zero = run the controller's cover search first (FUN_14055abb0(cc, 1),
+// which finds the point, FUN_14056e530) and attach.
+void StepStance(Context& c, ULONGLONG now) {
+    if (c.haveWeapon) {
+        const bool w = (c.weapon.flags & WeaponState::kInCover) != 0, i = ActorInCover(c.actor);
+        if (w != c.loggedWant || i != c.loggedCover) Log("puppet player: goh 0x%08x cover now: remote %d, puppet %d", c.goh, w, i);
+        c.loggedWant = w, c.loggedCover = i;
+    }
+    if (!c.haveWeapon) return;
+    // (The stance word leaves the cover value for a frame or two inside cover moves: a state counts once it held.)
+    const bool raw = (c.weapon.flags & WeaponState::kInCover) != 0;
+    if (raw != c.coverRaw) c.coverRaw = raw, c.coverRawSince = now;
+    if (now - c.coverRawSince >= 300) c.coverWant = raw;
+    if (now < c.coverPressUntil || now - c.lastCoverMs < 1500) return;
+    const bool want = c.coverWant;
+    const bool in = ActorInCover(c.actor);
+    if (want == in) return;
+    c.lastCoverMs = now;
+    if (want) c.coverAttach = true;
+    else c.coverPressUntil = now + 200;
+    Log("puppet player: goh 0x%08x cover: remote %s, puppet %s -> %s", c.goh, want ? "in" : "out", in ? "in" : "out",
+        want ? "attach" : "tap");
 }
 
 // Copies the local player's player-info / control object into the context and points them at the puppet.
@@ -451,6 +496,12 @@ void ControlUpdateHook(uintptr_t ctrl) {
 
 }  // namespace
 
+bool ActorInCover(uintptr_t actor) {
+    const uintptr_t cc = actor && IsReadable(actor + 0x88, 8) ? Ptr(actor + 0x88) : 0;
+    return cc && IsReadable(cc + 0xb40, 4) && (At<uint32_t>(cc, 0xb40) & 0xf00) == 0x100;
+}
+
+
 void SetLocalControlsOverride(const PlayerControls* controls) {
     g_localOverride = controls != nullptr;
     if (controls) g_localControls = *controls;
@@ -511,6 +562,12 @@ bool HasPlayerControl(uint32_t goh) { return g_byGoh.count(goh) != 0; }
 void SetLocalAimHeld(bool held) { g_localAimHeld = held; }
 void SetLocalFirePulse(uint32_t ms) { g_localFirePulseMs = ms; }
 void SetProbePlayerBit(bool on) { g_probePlayerBit = on; }
+void SetCoverAttachMode(int mode) { g_coverAttachMode = mode; }
+
+bool IsPuppetAiming(uint32_t goh) {
+    const auto it = g_byGoh.find(goh);
+    return it != g_byGoh.end() && it->second->camAiming;
+}
 
 void SetPlayerWeaponState(uint32_t goh, const WeaponState& state) {
     const auto it = g_byGoh.find(goh);
@@ -578,6 +635,7 @@ void PuppetPlayerFrame() {
         if (ActorFromGohHandle(goh) != c->actor) continue;
         ActivateMarstonBehave(c->actor);
         StepWeaponInputs(*c);
+        StepStance(*c, now);
         FillRecords(*c, now);
         const uintptr_t ctrl = reinterpret_cast<uintptr_t>(c->control);
         // The local player's frame (FUN_14034c830 -> FUN_14034f700), for the puppet's control object: the per-frame
@@ -622,10 +680,21 @@ void PuppetPlayerFrame() {
         auto update = [&] {
             InContext(*c, [&] {
                 using Fn = void (*)(uintptr_t);
+                if (c->coverAttach) {
+                    c->coverAttach = false;
+                    NativeCall attach;
+                    attach.Int(0).Int(g_coverAttachMode).Int(0);
+                    attach.Call(NativeHash("ATTACH_PLAYER_TO_COVER"));
+                }
                 if (g_controlUpdateOrig) g_controlUpdateOrig(ctrl);
                 else reinterpret_cast<Fn>(GameAddr(kControlUpdate))(ctrl);
                 // Not aiming the puppet has no camera of the remote's, and the stick is camera-relative: its desired
                 // heading is the remote's own (captured after the remote's camera turned it into a world heading).
+                // Sprinting is a rhythm of taps on the remote's side: replayed 1:1 over the network the rhythm drifts and
+                // the puppet walks where they sprint. As MTA does with toggles, the puppet takes the gait the remote's
+                // game decided (control +0x10c, which the move vector below is built from), whenever both are moving.
+                if (c->controls.valid && c->controls.gait > 0 && At<uint32_t>(ctrl, 0x10c) != 0)
+                    At<uint32_t>(ctrl, 0x10c) = static_cast<uint32_t>(c->controls.gait);
                 if (c->controls.valid && !aiming) {
                     At<float>(ctrl, 0x104) = c->controls.heading;
                     At<float>(ctrl, 0x100) = c->controls.heading;

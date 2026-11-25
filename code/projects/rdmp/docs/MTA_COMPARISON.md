@@ -45,7 +45,7 @@ shots ride the 16.7 ms transform as a counter instead of a per-shot event.
 
 **Damage.** The victim's game decides. A remote player's health is **locked**: a local hit on them is undone. MTA
 lets the hit animation play on a remote player, **except when they are aiming a gun** (it would break their aim) and
-never the death animation. *Ours:* lock (clamp + restore) and the hit reaction, but also while they aim.
+never the death animation. *Ours:* the same: lock (clamp + restore) and the hit reaction, none while they aim.
 
 ## Redesign, in order
 
@@ -57,6 +57,8 @@ never the death animation. *Ours:* lock (clamp + restore) and the hit reaction, 
 3. **Shots as events**: done (shared/shot.h): one reliable message per shot, sent when fired, with start and end,
    relayed by the server; 17-48 ms on one PC. (The shooter's own hit report, MTA's backup damage, is not sent yet.)
 4. **Explicit states** instead of buttons for toggles: crouch, cover, climbing / hanging, swimming, on fire; the death
-   with the victim's death animation.
-5. **No hit reaction while the remote aims.**
+   with the victim's death animation. *In progress:* sprint (the remote's gait onto the puppet's control object) and
+   the cover state are synced; RDR's crouch is the low cover stance. The puppet leaves cover from the state, but does
+   not take it yet (re/NOTES.md "Cover, crouch and sprint as states"). Climbing, swimming, fire, death animation: to do.
+5. **No hit reaction while the remote aims**: done.
 6. Then re-measure every part with `tools/syncdiff.py` and the duel test.

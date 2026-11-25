@@ -57,12 +57,12 @@ using ApplyDamageFn = void (*)(uintptr_t health, float damage, uint32_t attacker
                                uint32_t a8, void* hit);
 ApplyDamageFn g_applyDamageOrig = nullptr;
 
-bool IsPuppetHealth(uintptr_t health) {
+uint32_t PuppetOfHealth(uintptr_t health) {  // the goh whose actor has this health component, 0 = not a puppet
     for (const auto& [handle, goh] : g_puppetByActorHandle) {
         const uintptr_t actor = ActorFromGohHandle(goh);
-        if (actor && Ptr(actor + 0x60) == health) return true;
+        if (actor && Ptr(actor + 0x60) == health) return goh;
     }
-    return false;
+    return 0;
 }
 
 LocalDamageFn g_localDamage = nullptr;
@@ -86,8 +86,14 @@ void ApplyDamageHook(uintptr_t health, float damage, uint32_t attacker, uintptr_
         g_applyDamageOrig(health, damage, attacker, a4, a5, a6, a7, a8, hit);
         return;
     }
-    if (!IsPuppetHealth(health) || !IsReadable(health + 0x20, 4)) {
+    const uint32_t puppet = PuppetOfHealth(health);
+    if (!puppet || !IsReadable(health + 0x20, 4)) {
         g_applyDamageOrig(health, damage, attacker, a4, a5, a6, a7, a8, hit);
+        return;
+    }
+    // As MTA: no hit reaction on a remote who is aiming (it would throw their aim off what they really do).
+    if (IsPuppetAiming(puppet)) {
+        if (g_probe) Log("shots: our hit on puppet 0x%08x while it aims: no reaction", puppet);
         return;
     }
     float& hp = *reinterpret_cast<float*>(health + 0x20);

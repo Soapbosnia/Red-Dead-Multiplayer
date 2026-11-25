@@ -1141,3 +1141,25 @@ components on a puppet, which other threads read playerInfo during the swap.
   counter in the transform only plays the puppet's fire animation now.
 * Duel, real aim: a shot reaches the other game in 17-48 ms (was the next transform, 100 ms or more); the shooter's
   hits at 14.69 / 16.22 / 17.79 / 22.32 s were the victim's damage at 14.75 / 16.25 / 17.81 / 22.35 s.
+
+### Cover, crouch and sprint as states (2026-11-25, puppet_player.cpp StepStance, [debug] input_probe)
+MTA does not trust buttons with toggles; neither do we now.
+- **Stance word**: character controller (actor+0x88) +0xb40. Nibble 0xf0 == 0x10 is IS_ACTOR_CROUCHING (0x140281B40);
+  nibble 0xf00 == 0x100 is in cover (the on-foot code FUN_140372e50 tests it); seen 0x111 in low cover, 0x1111 after
+  input 0x06 in cover. Setter FUN_14027caf0(cc, stance, immediate), used only by the behaviour node FUN_140d7e2c0.
+- **Inputs, measured** (input_probe drove the local player's records and logged the word): 0x05 = take / leave cover
+  (a tap enters when cover is near, a second tap leaves). Nothing else changes the crouch nibble, tapped or held for
+  1.5 s: on PC 0x10 / 0x1a (Ctrl) do not crouch. RDR's crouch is the low cover stance, so syncing cover covers crouch.
+- **Sent**: WeaponState flag 4 (kInCover) in weaponFlags (now 3 bits). The receiver acts only on a state that held
+  300 ms (the word leaves the cover value for a frame or two inside cover moves), at most every 1.5 s. The remote's raw
+  0x05 is not replayed. Leaving = a 200 ms tap of 0x05 on the puppet.
+- **Open: a puppet does not take cover.** A tap of 0x05 on its records does nothing. ATTACH_PLAYER_TO_COVER (0x140AD8730,
+  args [1] mode / [2]), called inside the puppet's context switch so it acts on the puppet, does not work either. Mode 0
+  sets cc+0xadc |= 2 and starts the cover behaviour FUN_140d29720(*(*(motion+0xaa8)+0x18), 1). Non-zero mode runs the
+  controller's cover search FUN_14055abb0(cc, 1) -> FUN_14056e530 first. FUN_14056e530 writes the cover point
+  cc+0x990/+0x9a0, the candidate count cc+0xad9 and the stance, and needs *(*(cc+0x10)+0x38)+0xad4 > 0 (cover candidates,
+  filled elsewhere: next suspect, the local-player-only part of the frame).
+- **Sprint**: the remote's gait (desire gait 0 stand, 1 walk, 4 sprint, already in the transform) is written into the
+  puppet's control object +0x10c after its input step and before vfunc +0x28 builds the move vector, whenever both are
+  moving. The sprint tap rhythm replayed over the network no longer decides the gait.
+- **Hit reactions**: none on a puppet whose remote aims (MTA's rule); its health is not touched either.

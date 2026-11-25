@@ -605,6 +605,7 @@ void NetFrame(float /*gameTime*/) {
                 PlayerControls c;
                 std::memcpy(c.value, v.controls, sizeof(c.value));
                 c.heading = v.input.heading;
+                c.gait = v.input.gait & 0x0f;
                 c.valid = true;
                 SetPlayerControls(p.goh, c);
                 target.playerDriven = true;

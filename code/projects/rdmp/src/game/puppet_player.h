@@ -23,16 +23,18 @@ constexpr int kInputCount = 30;  // on-foot input ids 0x00..0x1d
 struct PlayerControls {
     uint8_t value[kInputCount] = {};
     float heading = 0.0f;
+    int gait = -1;  // the remote's gait as their game decided it (desire gait: 0 stand, 1 walk, 4 sprint), -1 = unknown
     bool valid = false;
 };
 
 // A player's weapon state as their own game has it (shared/types.h PlayerState::aimState and on).
 struct WeaponState {
     uint8_t aimState = 0;    // *(playerInfo + 0x410) + 0x14: 0 = not aiming, 2 = aiming
-    uint8_t flags = 0;       // 1 drawn, 2 reloading
+    uint8_t flags = 0;       // 1 drawn, 2 reloading, 4 in cover (kInCover)
     uint8_t readyTicks = 0;  // playerInfo + 0x3e0 (weapon-ready time left), 1/20 s
     uint8_t shots = 0;       // shots fired so far (wraps)
     uint8_t clip = 0;        // rounds in the clip
+    static constexpr uint8_t kInCover = 4;
 };
 
 void InstallPuppetPlayerHooks();
@@ -65,7 +67,12 @@ int PendingPuppetShots(uint32_t goh);
 void SetLocalAimHeld(bool held);
 // [debug] the local player fires every `ms` (0 = off), with aim held.
 void SetLocalFirePulse(uint32_t ms);
-void SetProbePlayerBit(bool on);  // [net] puppet_full_update: full update + ground probe like the player
+// Whether the puppet's remote is aiming right now (their aim state, with a weapon).
+bool IsPuppetAiming(uint32_t goh);
+void SetProbePlayerBit(bool on);
+void SetCoverAttachMode(int mode);
+// In cover = the character controller's stance (actor+0x88 -> +0xb40, (word & 0xf00) == 0x100).
+bool ActorInCover(uintptr_t actor);  // [net] puppet_full_update: full update + ground probe like the player
 // Main thread, once per frame: runs every attached puppet's control update.
 void PuppetPlayerFrame();
 
