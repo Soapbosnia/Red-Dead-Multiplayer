@@ -1153,7 +1153,7 @@ MTA does not trust buttons with toggles; neither do we now.
 - **Sent**: WeaponState flag 4 (kInCover) in weaponFlags (now 3 bits). The receiver acts only on a state that held
   300 ms (the word leaves the cover value for a frame or two inside cover moves), at most every 1.5 s. The remote's raw
   0x05 is not replayed. Leaving = a 200 ms tap of 0x05 on the puppet.
-- **Open: a puppet does not take cover.** A tap of 0x05 on its records does nothing. ATTACH_PLAYER_TO_COVER (0x140AD8730,
+- **(Solved below, "Puppets take cover".) A puppet did not take cover.** A tap of 0x05 on its records does nothing. ATTACH_PLAYER_TO_COVER (0x140AD8730,
   args [1] mode / [2]), called inside the puppet's context switch so it acts on the puppet, does not work either. Mode 0
   sets cc+0xadc |= 2 and starts the cover behaviour FUN_140d29720(*(*(motion+0xaa8)+0x18), 1). Non-zero mode runs the
   controller's cover search FUN_14055abb0(cc, 1) -> FUN_14056e530 first. FUN_14056e530 writes the cover point
@@ -1175,3 +1175,156 @@ MTA does not trust buttons with toggles; neither do we now.
 * Fix: NudgePuppet saves the controller's probe block and on-ground byte (cc+0x6f0..+0x717) before the message and
   puts them back after ([debug] nudge_keep_ground=1). Moving puppet: **on ground 100%** (261 of 262 ticks), position
   0.05 m median, heading 1.8 deg, lag = network. Steering stays off by default.
+
+## Leftover network-player code (clone actors) (2026-11-25, read-only RE)
+How the console MP applied a remote player's state to its actor (RDR's counterpart of MTA's remote `CPlayerPed`).
+Everything below hangs off a **NetGOHActor** (0x7f0 bytes, one per networked actor); nothing runs without one.
+
+**The net object**
+* Clone creation: the NetGOHActor type object (vt 0x141CBA5C0: GetName FUN_1404adf00 "NetGOHActor", type id
+  DAT_142278ec8), slot +0x10 = **FUN_1404917b0(type, createMsg)**. It spawns the actor with FUN_140221c20(..., actor
+  type msg+0x72, flags msg+0x60 **| 8**, ...) and names it "remote_plyr" / "rem_%s" (the gamer name) when flags & 4.
+  Then it calls FUN_140219410(info, actor, 1) (pool DAT_142c82670; ctor **FUN_14048d250**; main vt **0x141CB97A0**;
+  target interface vt 0x141CB9720 at +0x80) and runs the owner gather once.
+* Spawn flags -> goh +0xca (FUN_1402646f0): bit0 = flag 4 (player, -> asPlayer), bit1 = flag 2, bit2 = flag 1,
+  **bit3 = flag 8 = network clone**, which becomes the factory FUN_140ae3ff0's noPlayerInfo. So `noPlayerInfo` is the
+  clone flag. A remote player is an as-player actor (player model and components) **without** a playerInfo, so it has
+  no MarstonBehave input. Only FUN_1404917b0 sets flag 8.
+* netobj +0x5a bit0 = IsLocal (owner). FUN_14048ede0 / FUN_1404b5ab0 copy it to actor +0x118 bit1 and set the actor
+  attributes "IsLocal" / "WasLocal" (FUN_1402e82c0 on DAT_142ac44c0+0x19a0). Other fields: +0x1b0 = actor handle,
+  +0x1f0 = kind (1 / 2 / 3). A net object is looked up from its actor through the map DAT_142b586f8 / DAT_142b58700.
+* The sync schema (built by FUN_14049a080 into DAT_142b586f0). The field numbers are **byte offsets into the
+  NetGOHActor**:
+  - NetGOHMovable base: FUN_1404b7fd0 -> FUN_1404f2ee0 -> FUN_1404e2320 (matrix + velocity node at +0x90, attach
+    +0x190..+0x1dd).
+  - FastChange (vehicle, +0x410..) and TrainData.
+  - SyncData, FUN_140497f40: Health, Hogtie, BlipInfo, SlowChangeData, Visibility, ...
+  - PlayerActorData (+0x5a0..+0x5a8), SlowChange and HitchData.
+
+**Owner side (gather actor -> netobj)**: vfunc +0x18 FUN_140491070 -> **FUN_140490940(netobj, actor)**.
+* Sub-gatherers: FUN_140491dc0 (+0x410 vehicle), FUN_1404924d0 (+0x3e0 driving), FUN_140494130 (+0x374),
+  FUN_140492b80 (+0x428 mount), FUN_140494450 (+0x200 weapon / lasso / mount ids), **FUN_140493b60 (+0x3bc
+  locomotion)**, FUN_140494320 (+0x3a0), FUN_1404f0110 (+0x460 behaviour goal / ledge), FUN_1404b9870 (+0x310).
+* Inline in FUN_140490940:
+  - **aim** +0x2d0..+0x300, read from the aim component motion(actor+0x38)+0xaa8 -> +8: +0x370, +0x388,
+    +0x404/+0x400, +0x5b8, +0x5bc, +0x5c4, +0x5dc target, +0x5ea bit2 aiming, +0x5d6 bit6. Also motion +0xc8c.
+  - **action list**: +0x451 = count, +0x454 = up to 8 indices of the non-zero ints in the behaviour inputs
+    (actor+0x40)->+0x3b8 int[0x31]. It skips indices 12, 13, 22, 23 and 38, and adds 0x15 (jump) when motion +0xc6f
+    is set.
+  - +0x452 = motion+0xaa8->+0x80 +0x555 bit0.
+  - PlayerActorData from playerInfo: +0x440, +0x441, +0x3bc bit5, +0x410->+0x14, weapon +0x110 -> FUN_14036b9c0.
+
+**Clone side (apply netobj -> actor)**, in three places:
+1. **vfunc +0x20 FUN_140496980**, every frame. Mostly vehicles, mounts and weapons:
+   - sub-appliers: FUN_140495e20 (+0x200), FUN_140493320 (+0x428 mount), FUN_140494c20 (+0x374), FUN_140494ff0
+     (+0x3a0), FUN_140495820 (+0x410 vehicle), FUN_140495330 (+0x3e0 driving), FUN_1404eeef0 (+0x520), FUN_1404ef6a0
+     (+0x550), FUN_1404ed1b0 (+0x460), FUN_1404b93b0 (+0x310);
+   - PlayerActorData -> FUN_140b1ddc0 (horse brain +0x120);
+   - vfunc +0x1f0 FUN_1404f3550, and attach FUN_1404b6f10.
+2. **Position is a blender, not a task.**
+   - vfunc +0x138 **FUN_1404f1440** predicts pos + vel x dt and measures the error to the actor. Past threshold +
+     speed (DAT_141d70d98 / +0x14c, 2.5 m by default) it snaps. Otherwise it stores a blend target (+0x130..+0x13c)
+     and a correction rate (+0x140).
+   - vfunc +0x140 FUN_1404f1c70 does the same for orientation: snap through target +0x10, else angular velocity
+     +0x120.
+   - The target interface (netobj+0x80, vt 0x141CB9720) moves the actor through the entity's own vfuncs: +0x8 get
+     matrix FUN_1404b5e00; +0x10 set matrix FUN_140495c20 (character controller (actor+0x88)+0x20 matrix, or entity
+     vfunc +0xb8 + FUN_1402eaa00); +0x40 / +0x48 get / set velocity FUN_1404b69a0 / FUN_1404b6ac0 (entity vfunc +0xd8 /
+     +0xe0); +0x58 / +0x60 angular velocity (+0xe8 / +0xf0).
+   - Same idea as MTA, and as our puppet_correction=mta.
+3. **Behaviour inputs (the desire), written after the brain.** The behaviour holder update **FUN_140b0c920(holder,
+   ...)** runs the active behaviour (holder+0x388, FUN_140af8bd0). Then, for **every actor every frame**, it calls
+   **FUN_1404971d0(actor, holder+0x3b8 inputs, ctx)**, which returns at once unless the actor has a NetGOHActor.
+   holder+0x3b8 = a 0x4f0-byte inputs block (ctor FUN_140b0a570, allocated in FUN_140b09bd0). For a clone (actor
+   +0x118 bit1 clear) it writes:
+   * action requests: inputs int[idx] = 1 for each synced index (the +0x454 list). Idx 2 / 0x2a ->
+     **FUN_140d02120(motion+0xaa8->+0x80, on)**, the player's crouch toggle. The foot input step FUN_1403726f0 calls
+     it too. It writes +0x555 bit0 and (actor+0x88)+0xb96 bit5.
+   * **locomotion, FUN_140493e80 (block +0x3bc)**:
+     - gait byte -> inputs +0x33c (mode 1) and motion +0xac4, with motion +0xc6e = 1;
+     - speed float -> inputs +0x32c, with inputs +0x340 bit2 (mode 2) or bit1 (mode 3);
+     - **crouch -> inputs +0x33e bit4**; bit5 = "move set". The owner reads crouch as (actor+0x88)+0xb40 & 0xf0 ==
+       0x10;
+     - +0x314 with +0x33e bit6, and +0x320;
+     - heading -> motion +0xacc (+0xc6d = 1), or FUN_140cf8230(motion+0xaa8->+0x58, h);
+     - locomotion component motion+0xaa8->+0x58: +0x1748 / +0x1754 / +0x17d4 / +0x240b.
+   * **aim, FUN_140494a50 (block +0x2c0)**, on the aim component motion+0xaa8->+8:
+     - +0x5dc target handle (+0x5e0 = 4);
+     - +0x5b8 / +0x5c0 / +0x5c4 blend, +0x5ea bit2 aiming;
+     - FUN_140d14930(aim, &dir +0x2d0, &+0x2d8), +0x404 / +0x400;
+     - also motion +0xc8c and inputs +0x4e0 bit2.
+   * mount: FUN_140493870 (+0x428).
+   * behaviour goal: FUN_1404f0670 (+0x460). It writes the move-to goal into behaviour set holder+0x370
+     +0xbd0..+0xc10, then runs the behaviour at set+0xab0 (vt 0x141D21F68, FUN_140af8b50). Also inputs +0x33f bits 6/7
+     and the names "UNDRFIRE" / "GNA_TNT" at inputs +400.
+* Cover: I found no separate cover block, and I did not trace one.
+  - The +0x460 block carries ledge / climb data: character controller +0x970, +0x990, +0x9c0, +0xad8..+0xada,
+    +0xa78, +0xac0.
+  - The behaviour graph has remote-only conditions: IsRemoteLedgeAcquired / Climbing / Detaching,
+    IsRemoteLadderDetaching, ConditionIsNetGame, "RemoteActor", "RemotePlayerOnly".
+  - Cover state on clones most likely rode the behaviour goal or the action list.
+
+**Verdict: the clone path cannot be driven as it is, but its recipe can be copied.**
+* Every entry point needs a registered NetGOHActor: map DAT_142b586f8, pool DAT_142c82670, net object manager
+  DAT_142c456b8, the IsLocal / ownership bits and the +0x1f0 kind. Only the net object manager creates them, on a
+  create message from a session. Making them for puppets means running NetObjectManager without its transport. That
+  is not worth it, and it would fight our puppet playerInfo switch, because a clone has no playerInfo and no
+  MarstonBehave.
+* What is usable: **hook FUN_1404971d0**. It is called for every actor right after its brain, with args (actor,
+  inputs, ctx), and returns at once for non-net actors. For a puppet, write the remote's synced values there, the way
+  the clone feeder does:
+  - crouch: inputs +0x33e bit4 | bit5;
+  - gait: +0x33c, motion +0xac4, +0xc6e = 1;
+  - speed: +0x32c plus the +0x340 bits;
+  - action requests: inputs int[idx] = 1;
+  - aim: the aim component fields above;
+  - heading: motion +0xacc, +0xc6d.
+  These are the exact fields the game used for remote players. States the context switch reproduces poorly (crouch,
+  gait mismatch) could then be forced from the network instead of re-derived from inputs. Not tested in game.
+* Sync ids worth adding to our state: the locomotion block's 0x24 bytes (+0x3bc), the aim block (+0x2c0) and the
+  action-request list. FUN_140493b60 / FUN_140490940 gather all three on the owner.
+
+### Spawning as the remote-player kind, and the puppet cover gate (2026-11-25, read-only RE)
+* goh +0xca comes from the spawn flags f in FUN_1402646f0: bit0 = f&4, bit1 = f&2, bit2 = f&1, bit3 = f&8, bit5
+  always set, bit6 cleared. The build step FUN_140264b80 calls FUN_140ae3ff0(out, def, list, &id, ?, asPlayer =
+  **+0xca bit0**, noPlayerInfo = **+0xca bit3**) (stack args at 0x140264be7 / 0x140264beb). Afterwards it writes:
+  - actor +0x118 bit0 = +0xca bit0 ("player");
+  - actor +0x118 bit1 = NOT +0xca bit3 (clear = remote clone);
+  - brain events: player && !clone -> 0x2f; otherwise, only if +0xca bit1 is set (NPC, f&2) -> 0x4b; a remote
+    clone gets neither.
+* FUN_1402209e0 passes f = asPlayer + 3 (`LEA R9D,[RBX+3]` at 0x140220d9c). asPlayer=0 -> f=3 -> +0xca 0x26 (NPC,
+  +0x118 & 3 = 2). asPlayer=1 -> f=4 -> 0x21: a real player, which **overwrites the global playerInfo**.
+  The remote-player kind is f = 0xC -> +0xca = **0x29**. Three ways to get it:
+  - FUN_1402209e0 with asPlayer = 9: f = 0xC. FUN_140235cd0 then gets asPlayer ^ 1 = 8, i.e. the same nonzero
+    "NPC" branch as asPlayer=0. But the spawn struct +0x24 = 9 is passed to the goh vfunc 0. Not checked.
+  - The game's own clone spawner, **FUN_140221c20**(out*, owner handle, unused, actorTypeIndex, variation,
+    Matrix34* (3 axis rows + position row at +0x30), flags = 0xC, u64 id). It has no name argument and no net
+    dependency. Remote players were spawned this way, with owner = *(DAT_142ac2ad0+0x2b8).
+  - Hook FUN_1402646f0 and patch +0xca after it returns.
+* What asPlayer adds in FUN_140ae3ff0, with or without noPlayerInfo: **(*(cc+0x28))+0x20 |= 0x1000** (cc =
+  actor+0x88). Only with !noPlayerInfo does it also write playerInfo (+0x5e9, +0x4f8, +0x5ec, +0x1c8, +0x1c0) and
+  create the +0xb8 / +0xd8 player components. Nothing else differs from an NPC (no cover, aim or melee setup there).
+  On top of that come the actor +0x118 bits above.
+* **The remote kind does not help cover.** Cover search FUN_14055abb0(cc, ?) has two gates:
+  1. it returns unless `(cc+0xb96 & 6) != 0 || (actor+0x118 & 3) == 3`, i.e. a **local** player (player bit AND
+     not-clone bit);
+  2. it then resets the cover state and returns unless `(cc+0xb96 & 0x46) != 0 || cc+0xada != 0`. cc+0xb96 bit 0x40
+     comes from the foot control vfunc +0x28 FUN_140372e50 (cover input, at 0x140373460) or from
+     ATTACH_PLAYER_TO_COVER FUN_140ad8730 (on the actor at playerInfo+0x5ec).
+  A puppet (NPC spawn) has +0x118 & 3 = 2 and fails gate 1. A remote clone has +0x118 & 3 = 1 and fails too: clones
+  got cover from the network. **Fix to try: set actor +0x118 bit0** (and the 0x1000 flag) on puppets, permanently
+  or around their character-controller update, so that +0x118 & 3 == 3.
+* `*(*(cc+0x10)+0x38)+0xad4` is **motion +0xad4 = the actor's effective gait**, not a count of cover candidates.
+  The motion update FUN_140ce95f0 sets it from motion +0xac4 (gait override, used when motion +0xc6e is set,
+  actor +0x118 bit1 is clear and no weapon/mount, inv +0x894 / +0x904 == 0), else from +0xac8. FUN_14056e530's
+  `> 0` test is a "moving" test next to a speed check.
+
+### Puppets take cover (2026-11-25, puppet_player.cpp CoverSearchHook)
+* The cover search FUN_14055abb0(cc, mode) returns unless (cc+0xb96 & 6) or (actor+0x118 & 3) == 3 (player bit and
+  not-a-clone bit; "Spawning as the remote-player kind" above). Puppets have 2. A detour (15-byte prologue) gives a
+  puppet the player bit around the search, as GroundProbeHook does around the ground probe; ATTACH_PLAYER_TO_COVER
+  mode 1 in the puppet's context switch (sets cc+0xb96 |= 0x40, then searches) then takes the cover.
+* Two copies, copy 1 in and out of cover every few seconds (input_probe): the puppet takes cover 0.2-0.4 s after the
+  attach and leaves 50 ms after the cover tap, every cycle; seen on screen crouched behind the crate. Total delay
+  behind the remote: network + the 300 ms the state has to hold + the cover move.
+* Spawning puppets as the game's remote-player kind (+0xca 0x29) would not have helped: clones have +0x118 & 3 = 1.

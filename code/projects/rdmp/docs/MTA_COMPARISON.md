@@ -58,7 +58,6 @@ never the death animation. *Ours:* the same: lock (clamp + restore) and the hit 
    relayed by the server; 17-48 ms on one PC. (The shooter's own hit report, MTA's backup damage, is not sent yet.)
 4. **Explicit states** instead of buttons for toggles: crouch, cover, climbing / hanging, swimming, on fire; the death
    with the victim's death animation. *In progress:* sprint (the remote's gait onto the puppet's control object) and
-   the cover state are synced; RDR's crouch is the low cover stance. The puppet leaves cover from the state, but does
-   not take it yet (re/NOTES.md "Cover, crouch and sprint as states"). Climbing, swimming, fire, death animation: to do.
+   the cover state are synced, both ways (re/NOTES.md "Puppets take cover"); RDR's crouch is the low cover stance. Climbing, swimming, fire, death animation: to do.
 5. **No hit reaction while the remote aims**: done.
 6. Then re-measure every part with `tools/syncdiff.py` and the duel test.

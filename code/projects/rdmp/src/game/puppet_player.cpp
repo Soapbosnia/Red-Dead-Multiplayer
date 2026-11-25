@@ -432,6 +432,32 @@ void GroundProbeHook(uintptr_t probe, uintptr_t a2, uintptr_t a3, uintptr_t a4, 
     g_groundProbeOrig(probe, a2, a3, a4, a5, a6);
 }
 
+// The character controller's cover search FUN_14055abb0(cc, mode) runs only for the local player: it returns unless
+// (cc+0xb96 & 6) or (actor+0x118 & 3) == 3 (player bit, and not a network clone). A puppet has 2 there (a clone of
+// the console game's net code had 1: clones got cover from the network). Around it a puppet gets the player bit, as
+// for the ground probe, so the cover press and ATTACH_PLAYER_TO_COVER find cover for it (re/NOTES.md).
+using CoverSearchFn = uint64_t (*)(uintptr_t cc, uint8_t mode);
+CoverSearchFn g_coverSearchOrig = nullptr;
+// mov [rsp+8],rcx; push rbp; push rbx; lea rbp,[rsp-678h]  (15 bytes, position independent)
+constexpr uint8_t kCoverSearchPrologue[15] = {0x48, 0x89, 0x4C, 0x24, 0x08, 0x55, 0x53, 0x48, 0x8D, 0xAC, 0x24, 0x88, 0xF9, 0xFF, 0xFF};
+constexpr uintptr_t kCoverSearch = 0x14055ABB0;
+
+uint64_t CoverSearchHook(uintptr_t cc, uint8_t mode) {
+    if (g_probePlayerBit && IsReadable(cc + 0x10, 8)) {
+        const uintptr_t actor = Ptr(cc + 0x10);
+        for (auto& [goh, c] : g_byGoh) {
+            if (c->actor != actor) continue;
+            uint8_t& flags = At<uint8_t>(actor, 0x118);
+            const uint8_t saved = flags;
+            flags |= 1;
+            const uint64_t r = g_coverSearchOrig(cc, mode);
+            flags = static_cast<uint8_t>((flags & ~1) | (saved & 1));
+            return r;
+        }
+    }
+    return g_coverSearchOrig(cc, mode);
+}
+
 // FUN_140ac1350(?, actor, ...): the per-frame decision whether an actor runs at full update (its result becomes actor
 // +0x112 bit 6; a change switches the character controller's mode, FUN_140ac8280, and coming back resets its ground
 // state). A puppet standing still got the reduced update, in which its controller never probes for ground (the game
@@ -525,6 +551,9 @@ void InstallPuppetPlayerHooks() {
     g_groundProbeOrig = reinterpret_cast<GroundProbeFn>(
         DetourPic(GameAddr(kGroundProbe), kGroundProbePrologue, sizeof(kGroundProbePrologue), reinterpret_cast<void*>(&GroundProbeHook)));
     Log("puppet player: ground-probe hook %s", g_groundProbeOrig ? "installed" : "FAILED (prologue differs)");
+    g_coverSearchOrig = reinterpret_cast<CoverSearchFn>(
+        DetourPic(GameAddr(kCoverSearch), kCoverSearchPrologue, sizeof(kCoverSearchPrologue), reinterpret_cast<void*>(&CoverSearchHook)));
+    Log("puppet player: cover-search hook %s", g_coverSearchOrig ? "installed" : "FAILED (prologue differs)");
     g_updateLevelOrig = reinterpret_cast<UpdateLevelFn>(
         DetourPic(GameAddr(kUpdateLevel), kUpdateLevelPrologue, sizeof(kUpdateLevelPrologue), reinterpret_cast<void*>(&UpdateLevelHook)));
     Log("puppet player: update-level hook %s", g_updateLevelOrig ? "installed" : "FAILED (prologue differs)");
