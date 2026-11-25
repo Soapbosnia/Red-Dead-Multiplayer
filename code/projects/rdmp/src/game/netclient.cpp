@@ -122,6 +122,19 @@ bool LocalDamageFromHook(uint32_t attackerHandle, int weapon, int zone, float da
     g_hookHitUntil = GetTickCount64() + 250;
     return true;
 }
+
+// The local player fired (shots.cpp): the shot's line (their camera -> their crosshair point) goes to the others now.
+void LocalShotFromHook() {
+    if (!g_api.send_shot) return;
+    float start[3] = {}, end[3] = {};
+    LocalCamera(start[0], start[1], start[2]);
+    if (AimHoldAtRemote() && AimHoldDebug()) end[0] = g_local.aimX, end[1] = g_local.aimY, end[2] = g_local.aimZ;  // [debug] steered
+    else LocalAim(end[0], end[1], end[2]);
+    int8_t weapon = -1;
+    uint16_t ammo = 0;
+    LocalWeapon(weapon, ammo);
+    g_api.send_shot(weapon, start, end);
+}
 bool g_fwUp = false;
 fw::Conn g_conn = fw::Conn::Connecting;
 // We joined a server from the native menus and have not left it (the menus show the in-game entries).
@@ -605,6 +618,15 @@ void NetFrame(float /*gameTime*/) {
                     v.pos.y, v.pos.z, v.heading, d.cur.x, d.cur.y, d.cur.z, d.curHeading, d.err, d.moving ? 1 : 0,
                     d.teleported ? 1 : 0, d.corrected ? 1 : 0, v.transit, v.offset, v.leadMs);
     }
+    // Shots the others fired, each from its shooter's puppet along their line, as they arrive (MTA's bullet sync).
+    if (g_api.poll_shot) {
+        fw::Shot shot;
+        while (g_api.poll_shot(&shot)) {
+            const auto pit = g_puppetsById.find(static_cast<uint16_t>(shot.shooter));
+            if (pit == g_puppetsById.end() || !pit->second.goh) continue;
+            FirePuppetShot(pit->second.goh, Vec3{shot.start[0], shot.start[1], shot.start[2]}, Vec3{shot.end[0], shot.end[1], shot.end[2]});
+        }
+    }
     PuppetPlayerFrame();
     WeaponsFrame();
     if (g_trace) fflush(g_trace);  // test runs end by killing the game
@@ -647,6 +669,7 @@ void StartNetClient(const wchar_t* ini) {
     g_puppetPlayerTest = GetPrivateProfileIntW(L"debug", L"puppet_player_test", 0, ini) != 0;
     InitWeapons(ini);
     SetLocalDamageHandler(&LocalDamageFromHook);
+    SetLocalShotHandler(&LocalShotFromHook);
     GetPrivateProfileStringW(L"net", L"puppet_mode", L"player", w, 64, ini);
     g_puppetPlayerMode = _wcsicmp(w, L"desire") != 0;
     GetPrivateProfileStringW(L"net", L"lead_ms", L"auto", w, 64, ini);

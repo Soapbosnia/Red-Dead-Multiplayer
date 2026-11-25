@@ -29,7 +29,8 @@ namespace rdmp::fw {
 // v17: PlayerState weapon state (aimState, weaponFlags, readyTicks, shots, clip).
 // v18: Api::local_damage (damage the local player took: client event + report to the server).
 // v19: PlayerState camera position (camX / camY / camZ): where the player's shots start (bullet sync).
-constexpr uint32_t kApiVersion = 19;
+// v20: shots as events: Api::send_shot / poll_shot (shared/shot.h).
+constexpr uint32_t kApiVersion = 20;
 constexpr int kResultSlots = 4;
 
 enum class Conn : int32_t { Disconnected = 0, Connecting = 1, Connected = 2 };
@@ -156,6 +157,14 @@ struct Settings {
     int32_t chat = 1;              // 1 = chat box shown
 };
 
+// A shot another player fired (shared/shot.h): who, with what, along which line.
+struct Shot {
+    uint64_t shooter = 0;
+    int32_t weapon = -1;
+    float start[3] = {};
+    float end[3] = {};
+};
+
 using LogFn = void (*)(const char* line);
 
 // What rdmp.dll offers the client DLL. Every function runs synchronously on the caller's thread, which is the game's
@@ -237,6 +246,9 @@ struct Api {
     // cancelled it, reports the hit to the server. Returns 0 when cancelled (the game then gives the health back; a hit
     // that killed cannot be undone).
     int (*local_damage)(uint64_t attacker, int32_t weapon, int32_t bodyPart, float loss, float health);
+    // The local player fired a shot (their game's shot function): sent to the others at once, reliably.
+    void (*send_shot)(int32_t weapon, const float start[3], const float end[3]);
+    int (*poll_shot)(Shot* out);  // 1 per shot another player fired, in order
 };
 
 }  // namespace rdmp::fw

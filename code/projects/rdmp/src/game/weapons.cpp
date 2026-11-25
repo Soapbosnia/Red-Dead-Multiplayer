@@ -674,17 +674,9 @@ void LocalCamera(float& x, float& y, float& z) {
 void SyncPuppetWeaponState(uint32_t goh, int weapon, const WeaponState& state, const Vec3& shotFrom, const Vec3& shotTo) {
     SetPlayerWeaponState(goh, state);
     if (!HasPlayerControl(goh) || !weapons::IsGun(weapon) || InHand(goh) != weapon) return;
-    // Bullet sync: one bullet from the puppet per shot the remote's game fired (shots.cpp), with a round in the clip
-    // for it.
-    PuppetWeapon& pw = g_puppets[goh];
-    // A jump of more than a few shots is a counter that started over (or a long gap), not shots to replay.
-    if (!pw.haveShots || static_cast<uint8_t>(state.shots - pw.shots) > 8) pw.haveShots = true, pw.shots = state.shots;
-    while (pw.shots != state.shots) {
-        ++pw.shots;
-        const uintptr_t wobj = WeaponObject(ActorFromGohHandle(goh));
-        if (wobj && *reinterpret_cast<float*>(wobj + 0x12c) < 1.0f) *reinterpret_cast<float*>(wobj + 0x12c) = 1.0f;
-        FirePuppetShot(goh, shotFrom, shotTo);
-    }
+    // (The bullets themselves come from the shot events, netclient.cpp FireRemoteShots; the shot counter only plays the
+    // puppet's fire animation, puppet_player.cpp.)
+    (void)shotFrom, (void)shotTo;
     const int want = state.clip + PendingPuppetShots(goh);
     NativeCall a;
     a.Uint(goh).Int(weapon);

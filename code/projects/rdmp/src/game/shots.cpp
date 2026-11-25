@@ -146,14 +146,22 @@ struct ShotLine {
     }
 };
 
+LocalShotFn g_localShot = nullptr;
+
 void ShootHook(uintptr_t weapon, uintptr_t event) {
     const uint32_t owner = WeaponOwner(weapon);
     const uintptr_t info = Ptr(GameAddr(0x1422DAF30));
-    if (g_dbgTarget && info && IsReadable(info + 0x5ec, 4) && *reinterpret_cast<uint32_t*>(info + 0x5ec) == owner) {
-        // [debug] a test copy's player really shoots at the other player (its camera does not turn there): its reticle
-        // point is the target for the shot
-        ShotLine line(ActorOfHandle(owner), nullptr, g_dbgPoint);
-        g_shootOrig(weapon, event);
+    const bool local = info && IsReadable(info + 0x5ec, 4) && *reinterpret_cast<uint32_t*>(info + 0x5ec) == owner && !g_firing;
+    if (local) {
+        if (g_dbgTarget) {
+            // [debug] a test copy's player really shoots at the other player (its camera does not turn there): its
+            // reticle point is the target for the shot
+            ShotLine line(ActorOfHandle(owner), nullptr, g_dbgPoint);
+            g_shootOrig(weapon, event);
+        } else {
+            g_shootOrig(weapon, event);
+        }
+        if (g_localShot) g_localShot();  // the others get this shot now (bullet sync)
         return;
     }
     const auto it = g_puppetByActorHandle.find(owner);
@@ -208,6 +216,7 @@ void SetDebugShotTarget(bool on, float x, float y, float z) {
 }
 
 void SetLocalDamageHandler(LocalDamageFn fn) { g_localDamage = fn; }
+void SetLocalShotHandler(LocalShotFn fn) { g_localShot = fn; }
 
 void SetBulletSync(uint32_t goh, uint32_t actorHandle, bool on) {
     if (on) g_puppetByActorHandle[actorHandle] = goh;
@@ -223,6 +232,7 @@ bool FirePuppetShot(uint32_t goh, const Vec3& from, const Vec3& to) {
         if (g_probe) Log("shots: puppet 0x%08x: no weapon object / fire event (%p)", goh, reinterpret_cast<void*>(weapon));
         return false;
     }
+    if (*reinterpret_cast<float*>(weapon + 0x12c) < 1.0f) *reinterpret_cast<float*>(weapon + 0x12c) = 1.0f;  // a round for it
     if (g_probe) Log("shots: puppet 0x%08x fires a synced shot (clip %.0f)", goh, *reinterpret_cast<float*>(weapon + 0x12c));
     // the remote's own shot line (their camera -> their crosshair point), as their game fired it (MTA's bullet sync)
     const float f[3] = {from.x, from.y, from.z}, t[3] = {to.x, to.y, to.z};

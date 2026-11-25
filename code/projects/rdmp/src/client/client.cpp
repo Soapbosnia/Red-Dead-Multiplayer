@@ -11,6 +11,7 @@
 #include <integrations/client/networking/engine.h>
 #include <networking/network_client.h>
 
+#include "shared/shot.h"
 #include "client/api.h"
 #include "client/client_natives.h"
 #include "client/fw_client.h"
@@ -45,6 +46,12 @@ namespace {
     // A server teleport (forced state with a server-authored pose, Player::poseForcedPending), reported once.
     bool g_forcedPending = false;
     fw::Forced g_forced {};
+
+    // Shots other players fired (shared/shot.h), queued for rdmp.dll (the RPC handler runs in Update, on this thread).
+    constexpr int kShotQueue = 64;
+    fw::Shot g_shots[kShotQueue];
+    int g_shotHead  = 0;
+    int g_shotCount = 0;
 
     // Server-requested actions (script natives), queued for rdmp.dll to apply.
     constexpr int kActionQueue = 32;
@@ -103,6 +110,17 @@ namespace {
             if (!g_client->InitInGame(cacheFolder ? cacheFolder : "")) {
                 g_client.reset();
                 return 0;
+            }
+            if (auto *peer = g_client->GetNetworkingEngine() ? g_client->GetNetworkingEngine()->GetNetworkClient() : nullptr) {
+                peer->RegisterRPC<RDMP::Shared::ShotFired>([](const RDMP::Shared::ShotFired &shot, MafiaNet::Packet *) {
+                    if (g_shotCount >= kShotQueue) {  // full: drop the oldest
+                        g_shotHead = (g_shotHead + 1) % kShotQueue;
+                        --g_shotCount;
+                    }
+                    fw::Shot &s = g_shots[(g_shotHead + g_shotCount) % kShotQueue];
+                    s = fw::Shot {shot.shooter, shot.weapon, {shot.startX, shot.startY, shot.startZ}, {shot.endX, shot.endY, shot.endZ}};
+                    ++g_shotCount;
+                });
             }
             RDMP::Hud::Attach(g_client.get(), host);
             RDMP::Overlay::Install(g_client.get(), host);
@@ -283,6 +301,29 @@ namespace {
         return 1;
     }
 
+    void SendShot(int32_t weapon, const float start[3], const float end[3]) {
+        auto *net  = g_client ? g_client->GetNetworkingEngine() : nullptr;
+        auto *peer = net ? net->GetNetworkClient() : nullptr;
+        if (!peer || !start || !end) {
+            return;
+        }
+        RDMP::Shared::ShotFired shot;
+        shot.weapon = static_cast<int8_t>(weapon < -1 ? -1 : weapon > 127 ? 127 : weapon);
+        shot.startX = start[0], shot.startY = start[1], shot.startZ = start[2];
+        shot.endX = end[0], shot.endY = end[1], shot.endZ = end[2];
+        peer->BroadcastRPC(shot);  // a client's only peer is the server
+    }
+
+    int PollShot(fw::Shot *out) {
+        if (g_shotCount <= 0 || !out) {
+            return 0;
+        }
+        *out       = g_shots[g_shotHead];
+        g_shotHead = (g_shotHead + 1) % kShotQueue;
+        --g_shotCount;
+        return 1;
+    }
+
     int PollAction(fw::Action *out) {
         if (g_actionCount <= 0 || !out) {
             return 0;
@@ -430,6 +471,8 @@ extern "C" __declspec(dllexport) int rdmp_client_get_api(rdmp::fw::Api *out) {
     out->browser_connect  = [](const char *host, int port, const char *pw) { return RDMP::Frontend::BrowserConnect(host, port, pw) ? 1 : 0; };
     out->disconnect       = &Disconnect;
     out->local_damage     = &LocalDamage;
+    out->send_shot        = &SendShot;
+    out->poll_shot        = &PollShot;
     out->get_settings     = [](rdmp::fw::Settings *o) { RDMP::Frontend::GetSettings(o); };
     out->set_settings     = [](const rdmp::fw::Settings *in) {
         if (in) {

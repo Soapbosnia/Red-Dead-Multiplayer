@@ -7,6 +7,7 @@
  */
 
 #include "server/server.h"
+#include "shared/shot.h"
 
 #include <networking/replication/entity_registry.h>
 #include <scripting/engine_scope.h>
@@ -35,6 +36,18 @@ namespace {
             EntityRegistry::Get().Register<RDMP::Shared::Vehicle>(RDMP::Shared::Vehicle::kTypeName);
             if (const char *v = std::getenv("RDMP_AUTO_RESPAWN")) {
                 _autoRespawn = std::atoi(v) != 0;
+            }
+            // Shots (shared/shot.h): stamped with the shooter, passed to everyone else at once (MTA's bullet sync relay).
+            if (auto *server = GetNetworkingEngine() ? GetNetworkingEngine()->GetNetworkServer() : nullptr) {
+                server->RegisterRPC<RDMP::Shared::ShotFired>(
+                    [server](const RDMP::Shared::ShotFired &in, Framework::Networking::Sender sender, Framework::Networking::Replication::World &) {
+                        RDMP::Shared::ShotFired out = in;
+                        out.shooter                 = sender.Avatar();
+                        if (!out.shooter) {
+                            return;
+                        }
+                        server->BroadcastRPC(out, MafiaNet::Priority::High, MafiaNet::Reliability::ReliableOrdered, sender.Connection());
+                    });
             }
             LoadServerName();
             if (auto *web = GetWebserver()) {

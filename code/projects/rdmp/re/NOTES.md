@@ -1132,3 +1132,12 @@ components on a puppet, which other threads read playerInfo during the swap.
   ground as the player. The earlier +0.5 / +0.66 m standing offsets were the spawner putting the second player on the
   crates at -z of the spawn (it now spreads players along +z).
 * Not explained yet: copy 2 receives ~25 states / s while ~40 / s are sent; gait still differs ~30% of the time.
+
+### Shots as events (2026-11-25, shared/shot.h, fw_api v20)
+* MTA's bullet sync: when the local player's shot function runs (shots.cpp ShootHook, their weapon), the shot's line
+  (camera position -> crosshair point) goes to the server at once as the reliable RPC RDMP::ShotFired; the server
+  stamps the shooter (Sender::Avatar) and relays it to everyone else; their games fire it from the shooter's puppet
+  when it arrives (netclient FireRemoteShots -> FirePuppetShot along the line, a round put in the clip). The shot
+  counter in the transform only plays the puppet's fire animation now.
+* Duel, real aim: a shot reaches the other game in 17-48 ms (was the next transform, 100 ms or more); the shooter's
+  hits at 14.69 / 16.22 / 17.79 / 22.32 s were the victim's damage at 14.75 / 16.25 / 17.81 / 22.35 s.

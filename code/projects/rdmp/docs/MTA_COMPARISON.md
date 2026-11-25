@@ -49,13 +49,13 @@ never the death animation. *Ours:* lock (clamp + restore) and the hit reaction, 
 
 ## Redesign, in order
 
-1. **Position like MTA**: correct toward the newest state continuously (error spread over ~100 ms), velocity on the
+1. **Position like MTA** (done, 0.05 m median moving): correct toward the newest state continuously (error spread over ~100 ms), velocity on the
    puppet, height forced when the remote is not moving vertically (under-floor fix), warp past a speed-scaled
    threshold. Drop the dead zones.
 2. **Puppets on the ground**: find why their ground probe never hits (first suspect: the player bit, actor +0x118, as
    for the aim reset), so their own player code stops thinking they are in the air.
-3. **Shots as events**: one reliable message per shot, sent when fired, with start, end and the hit the shooter's game
-   saw; the shot counter goes.
+3. **Shots as events**: done (shared/shot.h): one reliable message per shot, sent when fired, with start and end,
+   relayed by the server; 17-48 ms on one PC. (The shooter's own hit report, MTA's backup damage, is not sent yet.)
 4. **Explicit states** instead of buttons for toggles: crouch, cover, climbing / hanging, swimming, on fire; the death
    with the victim's death animation.
 5. **No hit reaction while the remote aims.**

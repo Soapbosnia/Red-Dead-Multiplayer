@@ -23,5 +23,8 @@ void SetDebugShotTarget(bool on, float x, float y, float z);
 // before it. False = cancel the hit (nothing applied, lethal hits too).
 using LocalDamageFn = bool (*)(uint32_t attacker, int weapon, int zone, float damage, float health);
 void SetLocalDamageHandler(LocalDamageFn fn);
+// The local player just fired a shot (the game's shot function ran for their weapon): the handler sends it.
+using LocalShotFn = void (*)();
+void SetLocalShotHandler(LocalShotFn fn);
 
 }  // namespace rdmp
